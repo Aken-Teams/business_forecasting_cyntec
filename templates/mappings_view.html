@@ -147,6 +147,82 @@
             color: #9b59b6;
         }
 
+        /* 分頁樣式 */
+        .pagination-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background: #f8f9fa;
+            border-top: 1px solid #eee;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .pagination-info {
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .pagination-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .pagination-controls button {
+            padding: 8px 14px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+            color: #333;
+        }
+
+        .pagination-controls button:hover:not(:disabled) {
+            background: #9b59b6;
+            border-color: #9b59b6;
+            color: white;
+        }
+
+        .pagination-controls button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .pagination-controls .page-number {
+            padding: 8px 12px;
+            min-width: 40px;
+            text-align: center;
+        }
+
+        .pagination-controls .page-number.active {
+            background: #9b59b6;
+            border-color: #9b59b6;
+            color: white;
+        }
+
+        .page-size-selector {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .page-size-selector label {
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .page-size-selector select {
+            padding: 6px 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            cursor: pointer;
+        }
+
         .content-card {
             background: white;
             border-radius: 12px;
@@ -737,7 +813,8 @@
                         <tr>
                             <th>公司</th>
                             <th>客戶簡稱</th>
-                            <th>客戶需求地區</th>
+                            <th>送貨地點</th>
+                            <th>客戶廠區</th>
                             <th>排程出貨日期斷點</th>
                             <th>ETD</th>
                             <th>ETA</th>
@@ -747,13 +824,31 @@
                     </thead>
                     <tbody id="mappings-tbody">
                         <tr>
-                            <td colspan="8" class="loading">
+                            <td colspan="9" class="loading">
                                 <i class="fas fa-spinner"></i>
                                 <p>載入中...</p>
                             </td>
                         </tr>
                     </tbody>
                 </table>
+            </div>
+            <!-- 分頁控制區 -->
+            <div class="pagination-container">
+                <div class="pagination-info">
+                    <span>顯示第 <strong id="showing-start">0</strong> - <strong id="showing-end">0</strong> 筆，共 <strong id="total-records">0</strong> 筆</span>
+                </div>
+                <div class="page-size-selector">
+                    <label>每頁顯示：</label>
+                    <select id="page-size" onchange="changePageSize()">
+                        <option value="10">10 筆</option>
+                        <option value="20" selected>20 筆</option>
+                        <option value="50">50 筆</option>
+                        <option value="100">100 筆</option>
+                    </select>
+                </div>
+                <div class="pagination-controls" id="pagination-controls">
+                    <!-- 分頁按鈕由 JavaScript 動態生成 -->
+                </div>
             </div>
         </div>
 
@@ -786,9 +881,15 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label>客戶需求地區</label>
-                        <input type="text" id="mapping-region" placeholder="例如：QCI">
+                        <label>送貨地點</label>
+                        <input type="text" id="mapping-delivery-location" placeholder="例如：MAINTEK-新寧">
                     </div>
+                    <div class="form-group">
+                        <label>客戶廠區<span class="required">*</span></label>
+                        <input type="text" id="mapping-region" placeholder="例如：3A32、QCI" required>
+                    </div>
+                </div>
+                <div class="form-row">
                     <div class="form-group">
                         <label>排程出貨日期斷點</label>
                         <select id="mapping-schedule-breakpoint">
@@ -900,7 +1001,12 @@
 
     <script>
         let allMappings = [];
+        let filteredMappings = [];
         let allUsers = [];
+
+        // 分頁相關變數
+        let currentPage = 1;
+        let pageSize = 20;
 
         // 初始化
         document.addEventListener('DOMContentLoaded', function() {
@@ -940,8 +1046,10 @@
 
                 if (result.success) {
                     allMappings = result.mappings;
+                    filteredMappings = [...allMappings];
                     populateCompanyFilter();
-                    renderMappings(allMappings);
+                    currentPage = 1;
+                    renderMappings();
                     updateStats();
                 } else {
                     showError('載入失敗：' + result.message);
@@ -966,70 +1074,137 @@
         // 根據公司篩選
         function filterByCompany() {
             const selectedCompany = document.getElementById('company-filter').value;
-            const filtered = selectedCompany
+            filteredMappings = selectedCompany
                 ? allMappings.filter(m => m.company === selectedCompany)
-                : allMappings;
-            renderMappings(filtered);
+                : [...allMappings];
+            currentPage = 1;
+            renderMappings();
+        }
+
+        // 變更每頁顯示數量
+        function changePageSize() {
+            pageSize = parseInt(document.getElementById('page-size').value);
+            currentPage = 1;
+            renderMappings();
+        }
+
+        // 跳轉到指定頁面
+        function goToPage(page) {
+            const totalPages = Math.ceil(filteredMappings.length / pageSize);
+            if (page < 1 || page > totalPages) return;
+            currentPage = page;
+            renderMappings();
+        }
+
+        // 更新分頁資訊
+        function updatePagination() {
+            const totalRecords = filteredMappings.length;
+            const totalPages = Math.ceil(totalRecords / pageSize);
+            const start = totalRecords === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+            const end = Math.min(currentPage * pageSize, totalRecords);
+
+            // 更新顯示資訊
+            document.getElementById('showing-start').textContent = start;
+            document.getElementById('showing-end').textContent = end;
+            document.getElementById('total-records').textContent = totalRecords;
+
+            // 生成分頁按鈕
+            const container = document.getElementById('pagination-controls');
+            let html = '';
+
+            // 上一頁按鈕
+            html += `<button onclick="goToPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>
+                <i class="fas fa-chevron-left"></i> 上一頁
+            </button>`;
+
+            // 頁碼按鈕
+            const maxVisiblePages = 5;
+            let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+            let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+
+            if (endPage - startPage < maxVisiblePages - 1) {
+                startPage = Math.max(1, endPage - maxVisiblePages + 1);
+            }
+
+            if (startPage > 1) {
+                html += `<button class="page-number" onclick="goToPage(1)">1</button>`;
+                if (startPage > 2) {
+                    html += `<span style="padding: 0 5px;">...</span>`;
+                }
+            }
+
+            for (let i = startPage; i <= endPage; i++) {
+                html += `<button class="page-number ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
+            }
+
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) {
+                    html += `<span style="padding: 0 5px;">...</span>`;
+                }
+                html += `<button class="page-number" onclick="goToPage(${totalPages})">${totalPages}</button>`;
+            }
+
+            // 下一頁按鈕
+            html += `<button onclick="goToPage(${currentPage + 1})" ${currentPage === totalPages || totalPages === 0 ? 'disabled' : ''}>
+                下一頁 <i class="fas fa-chevron-right"></i>
+            </button>`;
+
+            container.innerHTML = html;
         }
 
         // 渲染映射表格
-        function renderMappings(mappings) {
+        function renderMappings() {
             const tbody = document.getElementById('mappings-tbody');
 
-            if (!mappings || mappings.length === 0) {
+            if (!filteredMappings || filteredMappings.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="8" class="no-data">
+                        <td colspan="9" class="no-data">
                             <i class="fas fa-inbox"></i>
                             <p>沒有映射資料</p>
                         </td>
                     </tr>
                 `;
+                updatePagination();
                 return;
             }
 
-            // 按公司分組
-            const groupedByCompany = {};
-            mappings.forEach(m => {
-                const company = m.company || '未知公司';
-                if (!groupedByCompany[company]) {
-                    groupedByCompany[company] = [];
-                }
-                groupedByCompany[company].push(m);
-            });
+            // 計算當前頁的資料範圍
+            const startIndex = (currentPage - 1) * pageSize;
+            const endIndex = Math.min(startIndex + pageSize, filteredMappings.length);
+            const currentPageData = filteredMappings.slice(startIndex, endIndex);
 
             let html = '';
-            Object.keys(groupedByCompany).sort().forEach(company => {
-                const companyMappings = groupedByCompany[company];
-
-                companyMappings.forEach((mapping, index) => {
-                    html += `
-                        <tr>
-                            <td>
-                                <span class="company-badge">${company}</span>
-                            </td>
-                            <td class="customer-name">${mapping.customer_name || '-'}</td>
-                            <td>${mapping.region ? `<span class="mapping-value">${mapping.region}</span>` : '<span class="empty-value">未設定</span>'}</td>
-                            <td>${mapping.schedule_breakpoint ? `<span class="mapping-value">${mapping.schedule_breakpoint}</span>` : '<span class="empty-value">未設定</span>'}</td>
-                            <td>${mapping.etd ? `<span class="mapping-value">${mapping.etd}</span>` : '<span class="empty-value">未設定</span>'}</td>
-                            <td>${mapping.eta ? `<span class="mapping-value">${mapping.eta}</span>` : '<span class="empty-value">未設定</span>'}</td>
-                            <td style="font-size: 0.85rem; color: #7f8c8d;">${mapping.updated_at || '-'}</td>
-                            <td>
-                                <div class="action-buttons">
-                                    <button class="btn-icon edit" onclick="editMapping(${mapping.id})" title="編輯">
-                                        <i class="fas fa-edit"></i>
-                                    </button>
-                                    <button class="btn-icon delete" onclick="showDeleteModal(${mapping.id}, '${company}', '${mapping.customer_name}')" title="刪除">
-                                        <i class="fas fa-trash"></i>
-                                    </button>
-                                </div>
-                            </td>
-                        </tr>
-                    `;
-                });
+            currentPageData.forEach((mapping) => {
+                const company = mapping.company || '未知公司';
+                html += `
+                    <tr>
+                        <td>
+                            <span class="company-badge">${company}</span>
+                        </td>
+                        <td class="customer-name">${mapping.customer_name || '-'}</td>
+                        <td>${mapping.delivery_location ? `<span class="mapping-value">${mapping.delivery_location}</span>` : '<span class="empty-value">未設定</span>'}</td>
+                        <td>${mapping.region ? `<span class="mapping-value">${mapping.region}</span>` : '<span class="empty-value">未設定</span>'}</td>
+                        <td>${mapping.schedule_breakpoint ? `<span class="mapping-value">${mapping.schedule_breakpoint}</span>` : '<span class="empty-value">未設定</span>'}</td>
+                        <td>${mapping.etd ? `<span class="mapping-value">${mapping.etd}</span>` : '<span class="empty-value">未設定</span>'}</td>
+                        <td>${mapping.eta ? `<span class="mapping-value">${mapping.eta}</span>` : '<span class="empty-value">未設定</span>'}</td>
+                        <td style="font-size: 0.85rem; color: #7f8c8d;">${mapping.updated_at || '-'}</td>
+                        <td>
+                            <div class="action-buttons">
+                                <button class="btn-icon edit" onclick="editMapping(${mapping.id})" title="編輯">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <button class="btn-icon delete" onclick="showDeleteModal(${mapping.id}, '${company}', '${mapping.customer_name}')" title="刪除">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
             });
 
             tbody.innerHTML = html;
+            updatePagination();
         }
 
         // 更新統計
@@ -1065,6 +1240,7 @@
             document.getElementById('mapping-user-id').value = '';
             document.getElementById('mapping-user-id').disabled = false;
             document.getElementById('mapping-customer-name').value = '';
+            document.getElementById('mapping-delivery-location').value = '';
             document.getElementById('mapping-region').value = '';
             document.getElementById('mapping-schedule-breakpoint').value = '';
             document.getElementById('mapping-etd-week').value = '';
@@ -1088,6 +1264,7 @@
                     document.getElementById('mapping-user-id').value = mapping.user_id;
                     document.getElementById('mapping-user-id').disabled = true; // 編輯時不能更改用戶
                     document.getElementById('mapping-customer-name').value = mapping.customer_name || '';
+                    document.getElementById('mapping-delivery-location').value = mapping.delivery_location || '';
                     document.getElementById('mapping-region').value = mapping.region || '';
                     document.getElementById('mapping-schedule-breakpoint').value = mapping.schedule_breakpoint || '';
 
@@ -1118,6 +1295,7 @@
             const id = document.getElementById('mapping-id').value;
             const userId = document.getElementById('mapping-user-id').value;
             const customerName = document.getElementById('mapping-customer-name').value.trim();
+            const deliveryLocation = document.getElementById('mapping-delivery-location').value.trim();
             const region = document.getElementById('mapping-region').value.trim();
             const scheduleBreakpoint = document.getElementById('mapping-schedule-breakpoint').value;
 
@@ -1139,10 +1317,16 @@
                 return;
             }
 
+            if (!region) {
+                showToast('請輸入客戶廠區', 'error');
+                return;
+            }
+
             const data = {
                 user_id: parseInt(userId),
                 customer_name: customerName,
-                region: region || null,
+                delivery_location: deliveryLocation || null,
+                region: region,
                 schedule_breakpoint: scheduleBreakpoint || null,
                 etd: etd || null,
                 eta: eta || null

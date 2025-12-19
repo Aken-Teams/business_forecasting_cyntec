@@ -2204,16 +2204,20 @@ def api_create_mapping():
         data = request.get_json()
         user_id = data.get('user_id')
         customer_name = data.get('customer_name')
+        delivery_location = data.get('delivery_location')
         region = data.get('region')
         schedule_breakpoint = data.get('schedule_breakpoint')
         etd = data.get('etd')
         eta = data.get('eta')
 
         if not user_id or not customer_name:
-            return jsonify({'success': False, 'message': '用戶ID和客戶名稱為必填'})
+            return jsonify({'success': False, 'message': '用戶ID和客戶簡稱為必填'})
+
+        if not region:
+            return jsonify({'success': False, 'message': '客戶廠區為必填'})
 
         success, message, mapping_id = admin_create_customer_mapping(
-            user_id, customer_name, region, schedule_breakpoint, etd, eta
+            user_id, customer_name, delivery_location, region, schedule_breakpoint, etd, eta
         )
 
         if success:
@@ -2238,7 +2242,7 @@ def api_update_mapping(mapping_id):
 
         # 只傳遞有值的欄位
         update_data = {}
-        for field in ['customer_name', 'region', 'schedule_breakpoint', 'etd', 'eta']:
+        for field in ['customer_name', 'delivery_location', 'region', 'schedule_breakpoint', 'etd', 'eta']:
             if field in data:
                 update_data[field] = data[field]
 

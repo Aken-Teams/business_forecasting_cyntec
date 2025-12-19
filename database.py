@@ -115,20 +115,21 @@ def init_database():
             """)
 
             # 建立客戶映射表（每個帳號有獨立的 mapping 資料）
+            # 唯一值：user_id + customer_name + region（客戶簡稱 + 客戶廠區）
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS customer_mappings (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     user_id INT NOT NULL,
                     customer_name VARCHAR(100) NOT NULL,
                     delivery_location VARCHAR(100),
-                    region VARCHAR(50),
+                    region VARCHAR(50) NOT NULL,
                     schedule_breakpoint VARCHAR(50),
                     etd VARCHAR(50),
                     eta VARCHAR(50),
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-                    UNIQUE KEY unique_user_customer (user_id, customer_name)
+                    UNIQUE KEY unique_user_customer_region (user_id, customer_name, region)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """)
 
@@ -143,6 +144,25 @@ def init_database():
                 # 欄位已存在則忽略
                 if "Duplicate column" not in str(alter_error):
                     print(f"ℹ️ delivery_location 欄位檢查: {alter_error}")
+
+            # 更新唯一索引（從 user_id + customer_name 改為 user_id + customer_name + region）
+            try:
+                # 先刪除舊的唯一索引
+                cursor.execute("ALTER TABLE customer_mappings DROP INDEX unique_user_customer")
+                print("✅ 已刪除舊的唯一索引 unique_user_customer")
+            except Exception as drop_error:
+                pass  # 索引可能不存在
+
+            try:
+                # 建立新的唯一索引
+                cursor.execute("""
+                    ALTER TABLE customer_mappings
+                    ADD UNIQUE KEY unique_user_customer_region (user_id, customer_name, region)
+                """)
+                print("✅ 已建立新的唯一索引 unique_user_customer_region")
+            except Exception as add_error:
+                if "Duplicate key name" not in str(add_error):
+                    print(f"ℹ️ 唯一索引檢查: {add_error}")
 
             connection.commit()
             print("✅ 資料庫表格初始化完成")
@@ -473,7 +493,8 @@ def save_customer_mappings(user_id, mapping_data):
 
     mapping_data 格式：
     {
-        'regions': {'客戶名稱': '地區', ...},
+        'delivery_locations': {'客戶名稱': '送貨地點', ...},
+        'regions': {'客戶名稱': '客戶廠區', ...},
         'schedule_breakpoints': {'客戶名稱': '斷點', ...},
         'etd': {'客戶名稱': 'ETD', ...},
         'eta': {'客戶名稱': 'ETA', ...}
@@ -493,6 +514,7 @@ def save_customer_mappings(user_id, mapping_data):
 
             # 收集所有客戶名稱
             all_customers = set()
+            all_customers.update(mapping_data.get('delivery_locations', {}).keys())
             all_customers.update(mapping_data.get('regions', {}).keys())
             all_customers.update(mapping_data.get('schedule_breakpoints', {}).keys())
             all_customers.update(mapping_data.get('etd', {}).keys())
@@ -500,6 +522,7 @@ def save_customer_mappings(user_id, mapping_data):
 
             # 插入新的映射資料
             for customer in all_customers:
+                delivery_location = mapping_data.get('delivery_locations', {}).get(customer, '')
                 region = mapping_data.get('regions', {}).get(customer, '')
                 schedule_breakpoint = mapping_data.get('schedule_breakpoints', {}).get(customer, '')
                 etd = mapping_data.get('etd', {}).get(customer, '')
@@ -507,9 +530,9 @@ def save_customer_mappings(user_id, mapping_data):
 
                 cursor.execute("""
                     INSERT INTO customer_mappings
-                    (user_id, customer_name, region, schedule_breakpoint, etd, eta)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                """, (user_id, customer, region, schedule_breakpoint, etd, eta))
+                    (user_id, customer_name, delivery_location, region, schedule_breakpoint, etd, eta)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """, (user_id, customer, delivery_location, region, schedule_breakpoint, etd, eta))
 
             connection.commit()
             print(f"✅ 已儲存 {len(all_customers)} 個客戶的映射資料 (user_id: {user_id})")
@@ -568,7 +591,7 @@ def delete_all_customer_mappings(user_id):
 def get_customer_mapping_list(user_id):
     """
     取得用戶的客戶映射列表（用於前端顯示）
-    返回格式：[{'customer_name': '...', 'region': '...', ...}, ...]
+    返回格式：[{'customer_name': '...', 'delivery_location': '...', 'region': '...', ...}, ...]
     """
     connection = get_db_connection()
     if not connection:
@@ -577,7 +600,7 @@ def get_customer_mapping_list(user_id):
     try:
         with connection.cursor() as cursor:
             cursor.execute("""
-                SELECT customer_name, region, schedule_breakpoint, etd, eta, updated_at
+                SELECT customer_name, delivery_location, region, schedule_breakpoint, etd, eta, updated_at
                 FROM customer_mappings
                 WHERE user_id = %s
                 ORDER BY customer_name
@@ -883,41 +906,48 @@ def get_users_with_company():
 
 # ==================== 管理者客戶映射 CRUD ====================
 
-def admin_create_customer_mapping(user_id, customer_name, region=None, schedule_breakpoint=None, etd=None, eta=None):
+def admin_create_customer_mapping(user_id, customer_name, delivery_location=None, region=None, schedule_breakpoint=None, etd=None, eta=None):
     """
     管理者新增客戶映射
 
     參數:
         user_id: 用戶ID
-        customer_name: 客戶簡稱
-        region: 客戶需求地區
+        customer_name: 客戶簡稱（必填）
+        delivery_location: 送貨地點
+        region: 客戶廠區（必填）
         schedule_breakpoint: 排程出貨日期斷點
         etd: ETD
         eta: ETA
 
     返回: (success, message, mapping_id)
+
+    唯一值：user_id + customer_name + region
     """
+    # 驗證必填欄位
+    if not region:
+        return False, "客戶廠區為必填欄位", None
+
     connection = get_db_connection()
     if not connection:
         return False, "資料庫連線失敗", None
 
     try:
         with connection.cursor() as cursor:
-            # 檢查是否已存在相同的 user_id + customer_name
+            # 檢查是否已存在相同的 user_id + customer_name + region
             cursor.execute("""
                 SELECT id FROM customer_mappings
-                WHERE user_id = %s AND customer_name = %s
-            """, (user_id, customer_name))
+                WHERE user_id = %s AND customer_name = %s AND region = %s
+            """, (user_id, customer_name, region))
 
             if cursor.fetchone():
-                return False, "該用戶已存在相同客戶名稱的映射", None
+                return False, f"該用戶已存在相同客戶簡稱+客戶廠區的映射（{customer_name} + {region}）", None
 
             # 新增映射
             cursor.execute("""
                 INSERT INTO customer_mappings
-                (user_id, customer_name, region, schedule_breakpoint, etd, eta)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (user_id, customer_name, region, schedule_breakpoint, etd, eta))
+                (user_id, customer_name, delivery_location, region, schedule_breakpoint, etd, eta)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (user_id, customer_name, delivery_location, region, schedule_breakpoint, etd, eta))
 
             connection.commit()
             mapping_id = cursor.lastrowid
@@ -936,15 +966,21 @@ def admin_update_customer_mapping(mapping_id, **kwargs):
 
     參數:
         mapping_id: 映射ID
-        **kwargs: 可更新的欄位 (customer_name, region, schedule_breakpoint, etd, eta)
+        **kwargs: 可更新的欄位 (customer_name, delivery_location, region, schedule_breakpoint, etd, eta)
 
     返回: (success, message)
+
+    唯一值：user_id + customer_name + region
     """
+    # 驗證 region 不能為空（如果有提供的話）
+    if 'region' in kwargs and not kwargs['region']:
+        return False, "客戶廠區為必填欄位，不能設為空值"
+
     connection = get_db_connection()
     if not connection:
         return False, "資料庫連線失敗"
 
-    allowed_fields = ['customer_name', 'region', 'schedule_breakpoint', 'etd', 'eta']
+    allowed_fields = ['customer_name', 'delivery_location', 'region', 'schedule_breakpoint', 'etd', 'eta']
     update_fields = []
     values = []
 
@@ -960,20 +996,23 @@ def admin_update_customer_mapping(mapping_id, **kwargs):
 
     try:
         with connection.cursor() as cursor:
-            # 檢查映射是否存在
-            cursor.execute("SELECT id, user_id FROM customer_mappings WHERE id = %s", (mapping_id,))
+            # 檢查映射是否存在，並取得完整資料
+            cursor.execute("SELECT id, user_id, customer_name, region FROM customer_mappings WHERE id = %s", (mapping_id,))
             existing = cursor.fetchone()
             if not existing:
                 return False, "映射不存在"
 
-            # 如果要更新 customer_name，檢查是否會重複
-            if 'customer_name' in kwargs:
+            # 如果要更新 customer_name 或 region，檢查是否會與其他記錄重複
+            new_customer_name = kwargs.get('customer_name', existing['customer_name'])
+            new_region = kwargs.get('region', existing['region'])
+
+            if 'customer_name' in kwargs or 'region' in kwargs:
                 cursor.execute("""
                     SELECT id FROM customer_mappings
-                    WHERE user_id = %s AND customer_name = %s AND id != %s
-                """, (existing['user_id'], kwargs['customer_name'], mapping_id))
+                    WHERE user_id = %s AND customer_name = %s AND region = %s AND id != %s
+                """, (existing['user_id'], new_customer_name, new_region, mapping_id))
                 if cursor.fetchone():
-                    return False, "該用戶已存在相同客戶名稱的映射"
+                    return False, f"該用戶已存在相同客戶簡稱+客戶廠區的映射（{new_customer_name} + {new_region}）"
 
             # 執行更新
             sql = f"UPDATE customer_mappings SET {', '.join(update_fields)} WHERE id = %s"
