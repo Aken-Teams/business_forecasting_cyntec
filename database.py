@@ -164,6 +164,26 @@ def init_database():
                 if "Duplicate key name" not in str(add_error):
                     print(f"ℹ️ 唯一索引檢查: {add_error}")
 
+            # 建立處理規則表（儲存預測處理的計算規則）
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS processing_rules (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    rule_name VARCHAR(100) NOT NULL,
+                    rule_category ENUM('erp', 'transit', 'forecast', 'mapping', 'cleanup') NOT NULL,
+                    rule_description TEXT,
+                    rule_config JSON,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    display_order INT DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """)
+
+            # 檢查是否需要初始化預設規則
+            cursor.execute("SELECT COUNT(*) as count FROM processing_rules")
+            if cursor.fetchone()['count'] == 0:
+                init_default_processing_rules(cursor)
+
             connection.commit()
             print("✅ 資料庫表格初始化完成")
             return True
@@ -173,6 +193,212 @@ def init_database():
         return False
     finally:
         connection.close()
+
+
+def init_default_processing_rules(cursor):
+    """初始化預設的處理規則"""
+    import json
+
+    default_rules = [
+        # ERP 處理規則
+        {
+            'rule_name': 'ERP 資料匹配規則',
+            'rule_category': 'erp',
+            'rule_description': 'ERP 淨需求文件與 Forecast 的匹配方式',
+            'rule_config': json.dumps({
+                'match_keys': ['客戶料號', '客戶需求地區'],
+                'source_columns': {
+                    '客戶簡稱': 'A欄位',
+                    '客戶料號': 'B欄位',
+                    '排程出貨日期': 'C欄位',
+                    '淨需求': 'D欄位'
+                },
+                'description': '使用 客戶料號 + 客戶需求地區 作為匹配鍵，在 Forecast 中找到對應的資料區塊'
+            }, ensure_ascii=False),
+            'display_order': 1
+        },
+        {
+            'rule_name': 'ERP 日期計算規則',
+            'rule_category': 'erp',
+            'rule_description': '從排程出貨日期計算目標週期',
+            'rule_config': json.dumps({
+                'date_field': '排程出貨日期',
+                'breakpoint_field': '排程出貨日期斷點',
+                'default_breakpoint': '禮拜四',
+                'eta_field': 'ETA',
+                'default_eta': '下下週二',
+                'week_calculation': {
+                    'step1': '取得排程出貨日期',
+                    'step2': '根據排程出貨日期斷點（預設禮拜四）計算該週的起迄日',
+                    'step3': '根據 ETA（如：下下週二）計算目標日期',
+                    'step4': '在 Forecast 的 L~AW 欄位中找到符合日期範圍的欄位'
+                },
+                'eta_formats': {
+                    '本週X': '當前計算週 + 星期X',
+                    '下週X': '下一週 + 星期X',
+                    '下下週X': '兩週後 + 星期X'
+                }
+            }, ensure_ascii=False),
+            'display_order': 2
+        },
+        {
+            'rule_name': 'ERP 數值轉換規則',
+            'rule_category': 'erp',
+            'rule_description': '淨需求數值的轉換計算',
+            'rule_config': json.dumps({
+                'source_field': '淨需求',
+                'multiplier': 1000,
+                'description': '淨需求值 × 1000 = 實際填入值',
+                'example': '淨需求 = 5，填入 Forecast = 5000'
+            }, ensure_ascii=False),
+            'display_order': 3
+        },
+        # Transit 處理規則
+        {
+            'rule_name': 'Transit 資料匹配規則',
+            'rule_category': 'transit',
+            'rule_description': '在途文件與 Forecast 的匹配方式',
+            'rule_config': json.dumps({
+                'match_keys': ['客戶需求地區(M欄)', 'Ordered Item(F欄)'],
+                'source_columns': {
+                    '客戶簡稱': 'E欄位',
+                    'Ordered Item': 'F欄位（對應客戶料號）',
+                    'Qty': 'H欄位（數量）',
+                    'ETA': 'I欄位（預計到達日期）'
+                },
+                'description': '使用 客戶需求地區 + Ordered Item 作為匹配鍵'
+            }, ensure_ascii=False),
+            'display_order': 4
+        },
+        {
+            'rule_name': 'Transit 日期處理規則',
+            'rule_category': 'transit',
+            'rule_description': '在途文件的 ETA 日期處理',
+            'rule_config': json.dumps({
+                'date_field': 'ETA (I欄位)',
+                'date_formats': ['YYYY/MM/DD', 'YYYY-MM-DD', 'YYYYMMDD'],
+                'description': '直接使用 I 欄位的 ETA 日期作為目標日期，找到 Forecast 對應的週期欄位'
+            }, ensure_ascii=False),
+            'display_order': 5
+        },
+        {
+            'rule_name': 'Transit 數值轉換規則',
+            'rule_category': 'transit',
+            'rule_description': '在途數量的轉換計算',
+            'rule_config': json.dumps({
+                'source_field': 'Qty (H欄位)',
+                'multiplier': 1000,
+                'description': 'Qty 值 × 1000 = 實際填入值',
+                'example': 'Qty = 3，填入 Forecast = 3000'
+            }, ensure_ascii=False),
+            'display_order': 6
+        },
+        # Forecast 處理規則
+        {
+            'rule_name': 'Forecast 資料區塊識別規則',
+            'rule_category': 'forecast',
+            'rule_description': '如何在 Forecast 中識別資料區塊',
+            'rule_config': json.dumps({
+                'block_identification': {
+                    'primary_key': 'A欄位（客戶料號）',
+                    'secondary_key': 'D欄位（客戶需求地區）',
+                    'method': '掃描 A 欄和 D 欄，相同的 (料號, 地區) 組合視為同一資料區塊'
+                },
+                'data_range': {
+                    'date_columns': 'L~AW 欄位（第12~49欄）',
+                    'start_date_row': '資料區塊起始行 + 1',
+                    'end_date_row': '資料區塊起始行 + 2',
+                    'target_row_marker': '供應數量'
+                }
+            }, ensure_ascii=False),
+            'display_order': 7
+        },
+        {
+            'rule_name': 'Forecast 目標欄位定位規則',
+            'rule_category': 'forecast',
+            'rule_description': '如何找到要填入數值的位置',
+            'rule_config': json.dumps({
+                'column_finding': {
+                    'scan_range': 'L~AW 欄位',
+                    'date_range_check': '起始日期 ≤ 目標日期 ≤ 結束日期',
+                    'description': '在日期範圍內找到符合目標日期的欄位'
+                },
+                'row_finding': {
+                    'marker': 'K欄位 = "供應數量"',
+                    'scan_range': '資料區塊起始行 ~ 起始行+18',
+                    'description': '找到標記為「供應數量」的行作為填入位置'
+                }
+            }, ensure_ascii=False),
+            'display_order': 8
+        },
+        {
+            'rule_name': 'Forecast 數值累加規則',
+            'rule_category': 'forecast',
+            'rule_description': 'ERP 和 Transit 數值的累加邏輯',
+            'rule_config': json.dumps({
+                'accumulation_logic': {
+                    'rule': '相同位置的數值會累加，不會覆蓋',
+                    'example': {
+                        'ERP填入': 5000,
+                        'Transit填入': 3000,
+                        '最終結果': 8000
+                    },
+                    'description': '如果 ERP 和 Transit 都有數值要填入同一個格子，會將兩者相加'
+                }
+            }, ensure_ascii=False),
+            'display_order': 9
+        },
+        # Mapping 規則
+        {
+            'rule_name': '客戶映射規則',
+            'rule_category': 'mapping',
+            'rule_description': '客戶資料的映射對應',
+            'rule_config': json.dumps({
+                'mapping_fields': {
+                    '客戶簡稱': '匹配原始資料中的客戶名稱',
+                    '客戶廠區': '對應到 Forecast 的 D 欄（客戶需求地區）',
+                    '送貨地點': '送貨目的地資訊',
+                    '排程出貨日期斷點': '決定週期計算的基準日（預設禮拜四）',
+                    'ETD': '預計出發日期',
+                    'ETA': '預計到達日期（用於計算目標週期）'
+                },
+                'unique_key': '用戶ID + 客戶簡稱 + 客戶廠區'
+            }, ensure_ascii=False),
+            'display_order': 10
+        },
+        # Cleanup 規則
+        {
+            'rule_name': 'Forecast 清理規則',
+            'rule_category': 'cleanup',
+            'rule_description': '處理前清理 Forecast 的舊資料',
+            'rule_config': json.dumps({
+                'cleanup_rules': [
+                    {
+                        'name': '供應數量清理',
+                        'condition': 'K欄位 = "供應數量"',
+                        'action': '清空 L~AW 欄位（第12~49欄）的數值',
+                        'purpose': '移除舊的預測資料'
+                    },
+                    {
+                        'name': '庫存數量清理',
+                        'condition': 'I欄位 包含 "庫存數量"',
+                        'action': '清空下一行的 I 欄位',
+                        'purpose': '移除庫存標記'
+                    }
+                ]
+            }, ensure_ascii=False),
+            'display_order': 11
+        }
+    ]
+
+    for rule in default_rules:
+        cursor.execute("""
+            INSERT INTO processing_rules (rule_name, rule_category, rule_description, rule_config, display_order)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (rule['rule_name'], rule['rule_category'], rule['rule_description'],
+              rule['rule_config'], rule['display_order']))
+
+    print("✅ 已初始化預設處理規則")
 
 
 def update_activity_logs_enum():
@@ -1220,6 +1446,275 @@ def delete_user(user_id):
             return True, "用戶刪除成功", user['username']
     except Exception as e:
         print(f"❌ 刪除用戶失敗: {e}")
+        return False, str(e), None
+    finally:
+        connection.close()
+
+
+# ==================== 規則管理 CRUD ====================
+
+def get_all_processing_rules():
+    """
+    取得所有處理規則
+    返回: 規則列表
+    """
+    connection = get_db_connection()
+    if not connection:
+        return []
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, rule_name, rule_category, rule_description,
+                       rule_config, is_active, display_order, created_at, updated_at
+                FROM processing_rules
+                ORDER BY rule_category, display_order
+            """)
+            rules = cursor.fetchall()
+
+            # 處理 JSON 欄位
+            import json
+            for rule in rules:
+                if rule['rule_config']:
+                    try:
+                        rule['rule_config'] = json.loads(rule['rule_config'])
+                    except:
+                        pass
+
+            return rules
+    except Exception as e:
+        print(f"❌ 取得處理規則失敗: {e}")
+        return []
+    finally:
+        connection.close()
+
+
+def get_processing_rules_by_category(category):
+    """
+    根據類別取得處理規則
+
+    參數:
+        category: 規則類別 ('erp', 'transit', 'forecast', 'mapping', 'cleanup')
+
+    返回: 規則列表
+    """
+    connection = get_db_connection()
+    if not connection:
+        return []
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, rule_name, rule_category, rule_description,
+                       rule_config, is_active, display_order, created_at, updated_at
+                FROM processing_rules
+                WHERE rule_category = %s
+                ORDER BY display_order
+            """, (category,))
+            rules = cursor.fetchall()
+
+            import json
+            for rule in rules:
+                if rule['rule_config']:
+                    try:
+                        rule['rule_config'] = json.loads(rule['rule_config'])
+                    except:
+                        pass
+
+            return rules
+    except Exception as e:
+        print(f"❌ 取得處理規則失敗: {e}")
+        return []
+    finally:
+        connection.close()
+
+
+def get_processing_rule_by_id(rule_id):
+    """
+    根據 ID 取得單一規則
+
+    參數:
+        rule_id: 規則 ID
+
+    返回: 規則資料或 None
+    """
+    connection = get_db_connection()
+    if not connection:
+        return None
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, rule_name, rule_category, rule_description,
+                       rule_config, is_active, display_order, created_at, updated_at
+                FROM processing_rules
+                WHERE id = %s
+            """, (rule_id,))
+            rule = cursor.fetchone()
+
+            if rule and rule['rule_config']:
+                import json
+                try:
+                    rule['rule_config'] = json.loads(rule['rule_config'])
+                except:
+                    pass
+
+            return rule
+    except Exception as e:
+        print(f"❌ 取得處理規則失敗: {e}")
+        return None
+    finally:
+        connection.close()
+
+
+def update_processing_rule(rule_id, **kwargs):
+    """
+    更新處理規則
+
+    參數:
+        rule_id: 規則 ID
+        **kwargs: 可更新的欄位 (rule_name, rule_description, rule_config, is_active, display_order)
+
+    返回: (success, message)
+    """
+    connection = get_db_connection()
+    if not connection:
+        return False, "資料庫連線失敗"
+
+    allowed_fields = ['rule_name', 'rule_description', 'rule_config', 'is_active', 'display_order']
+    update_fields = []
+    values = []
+
+    import json
+    for field in allowed_fields:
+        if field in kwargs:
+            update_fields.append(f"{field} = %s")
+            value = kwargs[field]
+            # 如果是 rule_config 且為 dict，轉為 JSON
+            if field == 'rule_config' and isinstance(value, dict):
+                value = json.dumps(value, ensure_ascii=False)
+            values.append(value)
+
+    if not update_fields:
+        return False, "沒有提供要更新的欄位"
+
+    values.append(rule_id)
+
+    try:
+        with connection.cursor() as cursor:
+            # 檢查規則是否存在
+            cursor.execute("SELECT id FROM processing_rules WHERE id = %s", (rule_id,))
+            if not cursor.fetchone():
+                return False, "規則不存在"
+
+            sql = f"UPDATE processing_rules SET {', '.join(update_fields)} WHERE id = %s"
+            cursor.execute(sql, values)
+            connection.commit()
+
+            return True, "規則更新成功"
+    except Exception as e:
+        print(f"❌ 更新處理規則失敗: {e}")
+        return False, str(e)
+    finally:
+        connection.close()
+
+
+def create_processing_rule(rule_name, rule_category, rule_description=None, rule_config=None, display_order=0):
+    """
+    建立新的處理規則
+
+    參數:
+        rule_name: 規則名稱
+        rule_category: 規則類別 ('erp', 'transit', 'forecast', 'mapping', 'cleanup')
+        rule_description: 規則描述
+        rule_config: 規則配置 (dict)
+        display_order: 顯示順序
+
+    返回: (success, message, rule_id)
+    """
+    connection = get_db_connection()
+    if not connection:
+        return False, "資料庫連線失敗", None
+
+    try:
+        import json
+        config_json = json.dumps(rule_config, ensure_ascii=False) if rule_config else None
+
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO processing_rules (rule_name, rule_category, rule_description, rule_config, display_order)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (rule_name, rule_category, rule_description, config_json, display_order))
+            connection.commit()
+
+            return True, "規則建立成功", cursor.lastrowid
+    except Exception as e:
+        print(f"❌ 建立處理規則失敗: {e}")
+        return False, str(e), None
+    finally:
+        connection.close()
+
+
+def delete_processing_rule(rule_id):
+    """
+    刪除處理規則
+
+    參數:
+        rule_id: 規則 ID
+
+    返回: (success, message)
+    """
+    connection = get_db_connection()
+    if not connection:
+        return False, "資料庫連線失敗"
+
+    try:
+        with connection.cursor() as cursor:
+            # 檢查規則是否存在
+            cursor.execute("SELECT rule_name FROM processing_rules WHERE id = %s", (rule_id,))
+            rule = cursor.fetchone()
+            if not rule:
+                return False, "規則不存在"
+
+            cursor.execute("DELETE FROM processing_rules WHERE id = %s", (rule_id,))
+            connection.commit()
+
+            return True, f"規則「{rule['rule_name']}」已刪除"
+    except Exception as e:
+        print(f"❌ 刪除處理規則失敗: {e}")
+        return False, str(e)
+    finally:
+        connection.close()
+
+
+def toggle_processing_rule_status(rule_id):
+    """
+    切換規則啟用狀態
+
+    參數:
+        rule_id: 規則 ID
+
+    返回: (success, message, new_status)
+    """
+    connection = get_db_connection()
+    if not connection:
+        return False, "資料庫連線失敗", None
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT is_active FROM processing_rules WHERE id = %s", (rule_id,))
+            rule = cursor.fetchone()
+            if not rule:
+                return False, "規則不存在", None
+
+            new_status = not rule['is_active']
+            cursor.execute("UPDATE processing_rules SET is_active = %s WHERE id = %s", (new_status, rule_id))
+            connection.commit()
+
+            status_text = "啟用" if new_status else "停用"
+            return True, f"規則已{status_text}", new_status
+    except Exception as e:
+        print(f"❌ 切換規則狀態失敗: {e}")
         return False, str(e), None
     finally:
         connection.close()

@@ -27,7 +27,11 @@ from database import (
     create_user, update_user, delete_user, update_activity_logs_enum,
     # 管理者客戶映射 CRUD 函數
     admin_create_customer_mapping, admin_update_customer_mapping,
-    admin_delete_customer_mapping, admin_get_customer_mapping_by_id
+    admin_delete_customer_mapping, admin_get_customer_mapping_by_id,
+    # 規則管理 CRUD 函數
+    get_all_processing_rules, get_processing_rules_by_category,
+    get_processing_rule_by_id, update_processing_rule,
+    create_processing_rule, delete_processing_rule, toggle_processing_rule_status
 )
 
 def normalize_date_for_mapping(date_value):
@@ -2305,6 +2309,141 @@ def api_get_mapping(mapping_id):
         return jsonify({'success': True, 'mapping': mapping})
     except Exception as e:
         print(f"❌ 取得客戶映射失敗: {e}")
+        return jsonify({'success': False, 'message': str(e)})
+
+
+# ==================== 規則管理 API ====================
+
+@app.route('/rules')
+@admin_required
+def rules_view():
+    """規則管理頁面"""
+    user = get_current_user()
+    return render_template('rules.html', user=user)
+
+
+@app.route('/api/admin/rules')
+@admin_required
+def api_get_all_rules():
+    """取得所有處理規則"""
+    try:
+        category = request.args.get('category')
+        if category:
+            rules = get_processing_rules_by_category(category)
+        else:
+            rules = get_all_processing_rules()
+
+        # 處理日期格式
+        for rule in rules:
+            if rule.get('created_at'):
+                rule['created_at'] = rule['created_at'].strftime('%Y-%m-%d %H:%M:%S')
+            if rule.get('updated_at'):
+                rule['updated_at'] = rule['updated_at'].strftime('%Y-%m-%d %H:%M:%S')
+
+        return jsonify({'success': True, 'rules': rules})
+    except Exception as e:
+        print(f"❌ 取得處理規則失敗: {e}")
+        return jsonify({'success': False, 'message': str(e)})
+
+
+@app.route('/api/admin/rules/<int:rule_id>')
+@admin_required
+def api_get_rule(rule_id):
+    """取得單一處理規則"""
+    try:
+        rule = get_processing_rule_by_id(rule_id)
+        if not rule:
+            return jsonify({'success': False, 'message': '規則不存在'})
+
+        if rule.get('created_at'):
+            rule['created_at'] = rule['created_at'].strftime('%Y-%m-%d %H:%M:%S')
+        if rule.get('updated_at'):
+            rule['updated_at'] = rule['updated_at'].strftime('%Y-%m-%d %H:%M:%S')
+
+        return jsonify({'success': True, 'rule': rule})
+    except Exception as e:
+        print(f"❌ 取得處理規則失敗: {e}")
+        return jsonify({'success': False, 'message': str(e)})
+
+
+@app.route('/api/admin/rules', methods=['POST'])
+@admin_required
+def api_create_rule():
+    """新增處理規則"""
+    try:
+        data = request.get_json()
+        rule_name = data.get('rule_name', '').strip()
+        rule_category = data.get('rule_category', '').strip()
+        rule_description = data.get('rule_description', '').strip()
+        rule_config = data.get('rule_config')
+        display_order = data.get('display_order', 0)
+
+        if not rule_name:
+            return jsonify({'success': False, 'message': '規則名稱為必填'})
+
+        if rule_category not in ['erp', 'transit', 'forecast', 'mapping', 'cleanup']:
+            return jsonify({'success': False, 'message': '無效的規則類別'})
+
+        success, message, rule_id = create_processing_rule(
+            rule_name, rule_category, rule_description, rule_config, display_order
+        )
+
+        if success:
+            return jsonify({'success': True, 'message': message, 'rule_id': rule_id})
+        return jsonify({'success': False, 'message': message})
+    except Exception as e:
+        print(f"❌ 新增處理規則失敗: {e}")
+        return jsonify({'success': False, 'message': str(e)})
+
+
+@app.route('/api/admin/rules/<int:rule_id>', methods=['PUT'])
+@admin_required
+def api_update_rule(rule_id):
+    """更新處理規則"""
+    try:
+        data = request.get_json()
+        update_data = {}
+
+        if 'rule_name' in data:
+            update_data['rule_name'] = data['rule_name'].strip()
+        if 'rule_description' in data:
+            update_data['rule_description'] = data['rule_description'].strip()
+        if 'rule_config' in data:
+            update_data['rule_config'] = data['rule_config']
+        if 'is_active' in data:
+            update_data['is_active'] = data['is_active']
+        if 'display_order' in data:
+            update_data['display_order'] = data['display_order']
+
+        success, message = update_processing_rule(rule_id, **update_data)
+
+        return jsonify({'success': success, 'message': message})
+    except Exception as e:
+        print(f"❌ 更新處理規則失敗: {e}")
+        return jsonify({'success': False, 'message': str(e)})
+
+
+@app.route('/api/admin/rules/<int:rule_id>', methods=['DELETE'])
+@admin_required
+def api_delete_rule(rule_id):
+    """刪除處理規則"""
+    try:
+        success, message = delete_processing_rule(rule_id)
+        return jsonify({'success': success, 'message': message})
+    except Exception as e:
+        print(f"❌ 刪除處理規則失敗: {e}")
+        return jsonify({'success': False, 'message': str(e)})
+
+
+@app.route('/api/admin/rules/<int:rule_id>/toggle', methods=['POST'])
+@admin_required
+def api_toggle_rule_status(rule_id):
+    """切換規則啟用狀態"""
+    try:
+        success, message, new_status = toggle_processing_rule_status(rule_id)
+        return jsonify({'success': success, 'message': message, 'is_active': new_status})
+    except Exception as e:
+        print(f"❌ 切換規則狀態失敗: {e}")
         return jsonify({'success': False, 'message': str(e)})
 
 

@@ -4,7 +4,8 @@
       "Bash(ls -la \"d:\\\\github\\\\business_forecasting\\\\compare\"\" 2>/dev/null || dir \"d:githubbusiness_forecastingcompare\" 2>/dev/null || echo \"Directory not found \")",
       "Bash(dir /b \"d:\\\\github\\\\business_forecasting\\\\compare\")",
       "Bash(python:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(cd:*)"
     ]
   }
 }

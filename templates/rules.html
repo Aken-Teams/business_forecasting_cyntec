@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>規則管理 - FORECAST 數據處理系統</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        body {
+            background: #e6e3de;
+            min-height: 100vh;
+        }
+
+        .rules-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 30px 20px;
+        }
+
+        /* 頁面標題區 */
+        .page-title-bar {
+            background: white;
+            border-radius: 12px;
+            padding: 20px 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.06);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .page-title-bar h2 {
+            font-size: 1.3rem;
+            color: #2c3e50;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .page-title-bar h2 i {
+            color: #e74c3c;
+        }
+
+        .btn-back {
+            background: linear-gradient(135deg, #8e44ad 0%, #9b59b6 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s;
+            text-decoration: none;
+            font-size: 0.95rem;
+        }
+
+        .btn-back:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(142, 68, 173, 0.4);
+            color: white;
+        }
+
+        /* 類別標籤 */
+        .category-tabs {
+            background: white;
+            border-radius: 12px;
+            padding: 15px 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.06);
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .category-tab {
+            padding: 10px 20px;
+            border-radius: 25px;
+            border: 2px solid #ddd;
+            background: #f8f9fa;
+            color: #666;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .category-tab:hover {
+            border-color: #9b59b6;
+            color: #9b59b6;
+        }
+
+        .category-tab.active {
+            background: linear-gradient(135deg, #8e44ad 0%, #9b59b6 100%);
+            color: white;
+            border-color: transparent;
+        }
+
+        .category-tab.erp { --tab-color: #3498db; }
+        .category-tab.transit { --tab-color: #2ecc71; }
+        .category-tab.forecast { --tab-color: #e74c3c; }
+        .category-tab.mapping { --tab-color: #9b59b6; }
+        .category-tab.cleanup { --tab-color: #f39c12; }
+
+        .category-tab.active.erp { background: linear-gradient(135deg, #2980b9 0%, #3498db 100%); }
+        .category-tab.active.transit { background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%); }
+        .category-tab.active.forecast { background: linear-gradient(135deg, #c0392b 0%, #e74c3c 100%); }
+        .category-tab.active.mapping { background: linear-gradient(135deg, #8e44ad 0%, #9b59b6 100%); }
+        .category-tab.active.cleanup { background: linear-gradient(135deg, #e67e22 0%, #f39c12 100%); }
+
+        /* 規則卡片 */
+        .rules-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(450px, 1fr));
+            gap: 20px;
+        }
+
+        .rule-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.06);
+            overflow: hidden;
+            transition: all 0.3s;
+        }
+
+        .rule-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+        }
+
+        .rule-card.inactive {
+            opacity: 0.6;
+        }
+
+        .rule-header {
+            padding: 18px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #eee;
+        }
+
+        .rule-header.erp { background: linear-gradient(135deg, #e8f4fc 0%, #d0e8f7 100%); }
+        .rule-header.transit { background: linear-gradient(135deg, #e8f8f0 0%, #d0f0e0 100%); }
+        .rule-header.forecast { background: linear-gradient(135deg, #fce8e8 0%, #f7d0d0 100%); }
+        .rule-header.mapping { background: linear-gradient(135deg, #f3e8ff 0%, #e4d0f7 100%); }
+        .rule-header.cleanup { background: linear-gradient(135deg, #fef4e8 0%, #f7e8d0 100%); }
+
+        .rule-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .rule-title h3 {
+            font-size: 1.05rem;
+            color: #2c3e50;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .rule-category-badge {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .rule-category-badge.erp { background: #3498db; color: white; }
+        .rule-category-badge.transit { background: #2ecc71; color: white; }
+        .rule-category-badge.forecast { background: #e74c3c; color: white; }
+        .rule-category-badge.mapping { background: #9b59b6; color: white; }
+        .rule-category-badge.cleanup { background: #f39c12; color: white; }
+
+        .rule-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-toggle {
+            position: relative;
+            width: 44px;
+            height: 24px;
+            background: #ddd;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .status-toggle.active {
+            background: #27ae60;
+        }
+
+        .status-toggle::after {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            top: 2px;
+            left: 2px;
+            transition: all 0.3s;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+
+        .status-toggle.active::after {
+            left: 22px;
+        }
+
+        .rule-body {
+            padding: 20px;
+        }
+
+        .rule-description {
+            color: #666;
+            font-size: 0.9rem;
+            line-height: 1.6;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px dashed #eee;
+        }
+
+        .rule-config {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            max-height: 250px;
+            overflow-y: auto;
+        }
+
+        .rule-config::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .rule-config::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 3px;
+        }
+
+        .rule-config::-webkit-scrollbar-thumb {
+            background: #ccc;
+            border-radius: 3px;
+        }
+
+        .config-section {
+            margin-bottom: 12px;
+        }
+
+        .config-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .config-section-title {
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: 0.85rem;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .config-section-title i {
+            color: #9b59b6;
+            font-size: 0.8rem;
+        }
+
+        .config-item {
+            background: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-bottom: 6px;
+            font-size: 0.85rem;
+            color: #555;
+            border-left: 3px solid #9b59b6;
+        }
+
+        .config-item strong {
+            color: #2c3e50;
+        }
+
+        .config-item code {
+            background: #e8e8e8;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            color: #c0392b;
+        }
+
+        .rule-footer {
+            padding: 12px 20px;
+            background: #f8f9fa;
+            border-top: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.8rem;
+            color: #888;
+        }
+
+        .rule-order {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        /* 空狀態 */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #888;
+        }
+
+        .empty-state i {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            color: #ddd;
+        }
+
+        .empty-state h3 {
+            font-size: 1.3rem;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        /* 載入動畫 */
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: #888;
+        }
+
+        .loading i {
+            font-size: 3rem;
+            margin-bottom: 15px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Toast 通知 */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+        }
+
+        .toast {
+            background: white;
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin-bottom: 10px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.15);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            animation: slideIn 0.3s ease;
+            min-width: 280px;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        .toast.success i { color: #27ae60; }
+        .toast.error i { color: #e74c3c; }
+
+        .footer {
+            text-align: center;
+            padding: 30px 0;
+            color: #bc773e;
+            font-size: 0.9rem;
+            margin-top: 40px;
+            border-top: 2px solid #d4cbc4;
+        }
+
+        @media (max-width: 768px) {
+            .rules-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .page-title-bar {
+                flex-direction: column;
+                gap: 15px;
+            }
+
+            .category-tabs {
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="rules-container">
+        <!-- 頁面標題 -->
+        <div class="page-title-bar">
+            <h2><i class="fas fa-cogs"></i> 處理規則管理</h2>
+            <a href="/admin" class="btn-back">
+                <i class="fas fa-arrow-left"></i> 返回管理介面
+            </a>
+        </div>
+
+        <!-- 類別標籤 -->
+        <div class="category-tabs">
+            <div class="category-tab active" data-category="all" onclick="filterByCategory('all')">
+                <i class="fas fa-layer-group"></i> 全部規則
+            </div>
+            <div class="category-tab erp" data-category="erp" onclick="filterByCategory('erp')">
+                <i class="fas fa-database"></i> ERP 處理
+            </div>
+            <div class="category-tab transit" data-category="transit" onclick="filterByCategory('transit')">
+                <i class="fas fa-shipping-fast"></i> 在途處理
+            </div>
+            <div class="category-tab forecast" data-category="forecast" onclick="filterByCategory('forecast')">
+                <i class="fas fa-chart-line"></i> Forecast 處理
+            </div>
+            <div class="category-tab mapping" data-category="mapping" onclick="filterByCategory('mapping')">
+                <i class="fas fa-project-diagram"></i> 映射規則
+            </div>
+            <div class="category-tab cleanup" data-category="cleanup" onclick="filterByCategory('cleanup')">
+                <i class="fas fa-broom"></i> 清理規則
+            </div>
+        </div>
+
+        <!-- 規則列表 -->
+        <div id="rulesContent">
+            <div class="loading">
+                <i class="fas fa-spinner"></i>
+                <p>載入規則中...</p>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>&copy; 2025 智合科技，FORECAST 數據處理系統. 智能預測，精準分析.</p>
+        </footer>
+    </div>
+
+    <!-- Toast 容器 -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- 瀏覽器檢測腳本 -->
+    <script src="{{ url_for('static', filename='js/browser-check.js') }}?v={{ version }}"></script>
+
+    <script>
+        let allRules = [];
+        let currentCategory = 'all';
+
+        // 頁面載入時獲取規則
+        document.addEventListener('DOMContentLoaded', function() {
+            loadRules();
+        });
+
+        // 載入規則
+        async function loadRules() {
+            try {
+                const response = await fetch('/api/admin/rules');
+                const data = await response.json();
+
+                if (data.success) {
+                    allRules = data.rules;
+                    renderRules();
+                } else {
+                    showToast(data.message || '載入失敗', 'error');
+                }
+            } catch (error) {
+                console.error('載入規則失敗:', error);
+                showToast('載入規則失敗', 'error');
+            }
+        }
+
+        // 按類別篩選
+        function filterByCategory(category) {
+            currentCategory = category;
+
+            // 更新標籤狀態
+            document.querySelectorAll('.category-tab').forEach(tab => {
+                tab.classList.remove('active');
+                if (tab.dataset.category === category) {
+                    tab.classList.add('active');
+                }
+            });
+
+            renderRules();
+        }
+
+        // 渲染規則
+        function renderRules() {
+            const container = document.getElementById('rulesContent');
+            let filteredRules = allRules;
+
+            if (currentCategory !== 'all') {
+                filteredRules = allRules.filter(r => r.rule_category === currentCategory);
+            }
+
+            if (filteredRules.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-inbox"></i>
+                        <h3>沒有找到規則</h3>
+                        <p>${currentCategory === 'all' ? '目前沒有任何處理規則' : '此類別沒有規則'}</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '<div class="rules-grid">';
+
+            filteredRules.forEach(rule => {
+                html += renderRuleCard(rule);
+            });
+
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        // 渲染單一規則卡片
+        function renderRuleCard(rule) {
+            const isActive = rule.is_active;
+            const config = rule.rule_config || {};
+
+            let configHtml = renderConfig(config);
+
+            return `
+                <div class="rule-card ${isActive ? '' : 'inactive'}">
+                    <div class="rule-header ${rule.rule_category}">
+                        <div class="rule-title">
+                            <span class="rule-category-badge ${rule.rule_category}">${getCategoryName(rule.rule_category)}</span>
+                            <h3>${escapeHtml(rule.rule_name)}</h3>
+                        </div>
+                        <div class="rule-status">
+                            <div class="status-toggle ${isActive ? 'active' : ''}"
+                                 onclick="toggleRuleStatus(${rule.id})"
+                                 title="${isActive ? '點擊停用' : '點擊啟用'}">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="rule-body">
+                        <div class="rule-description">
+                            ${escapeHtml(rule.rule_description || '無描述')}
+                        </div>
+                        <div class="rule-config">
+                            ${configHtml}
+                        </div>
+                    </div>
+                    <div class="rule-footer">
+                        <div class="rule-order">
+                            <i class="fas fa-sort-numeric-up"></i> 順序: ${rule.display_order}
+                        </div>
+                        <div>更新: ${rule.updated_at || '-'}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 渲染配置內容
+        function renderConfig(config) {
+            if (!config || Object.keys(config).length === 0) {
+                return '<p style="color: #999; text-align: center;">無配置資訊</p>';
+            }
+
+            let html = '';
+
+            for (const [key, value] of Object.entries(config)) {
+                html += `<div class="config-section">`;
+                html += `<div class="config-section-title"><i class="fas fa-chevron-right"></i> ${formatConfigKey(key)}</div>`;
+
+                if (typeof value === 'object' && value !== null) {
+                    if (Array.isArray(value)) {
+                        value.forEach(item => {
+                            if (typeof item === 'object') {
+                                html += `<div class="config-item">${renderObjectAsText(item)}</div>`;
+                            } else {
+                                html += `<div class="config-item"><code>${escapeHtml(String(item))}</code></div>`;
+                            }
+                        });
+                    } else {
+                        for (const [subKey, subValue] of Object.entries(value)) {
+                            if (typeof subValue === 'object' && subValue !== null) {
+                                html += `<div class="config-item"><strong>${formatConfigKey(subKey)}:</strong> ${renderObjectAsText(subValue)}</div>`;
+                            } else {
+                                html += `<div class="config-item"><strong>${formatConfigKey(subKey)}:</strong> ${escapeHtml(String(subValue))}</div>`;
+                            }
+                        }
+                    }
+                } else {
+                    html += `<div class="config-item">${escapeHtml(String(value))}</div>`;
+                }
+
+                html += `</div>`;
+            }
+
+            return html;
+        }
+
+        // 將物件轉為文字
+        function renderObjectAsText(obj) {
+            if (!obj) return '';
+            let parts = [];
+            for (const [k, v] of Object.entries(obj)) {
+                if (typeof v === 'object') {
+                    parts.push(`<strong>${formatConfigKey(k)}:</strong> ${renderObjectAsText(v)}`);
+                } else {
+                    parts.push(`<strong>${formatConfigKey(k)}:</strong> ${escapeHtml(String(v))}`);
+                }
+            }
+            return parts.join(' | ');
+        }
+
+        // 格式化配置鍵名
+        function formatConfigKey(key) {
+            // 將底線轉為空格並首字母大寫
+            return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        }
+
+        // 獲取類別名稱
+        function getCategoryName(category) {
+            const names = {
+                'erp': 'ERP',
+                'transit': '在途',
+                'forecast': 'Forecast',
+                'mapping': '映射',
+                'cleanup': '清理'
+            };
+            return names[category] || category;
+        }
+
+        // 切換規則狀態
+        async function toggleRuleStatus(ruleId) {
+            try {
+                const response = await fetch(`/api/admin/rules/${ruleId}/toggle`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast(data.message, 'success');
+                    // 更新本地資料
+                    const rule = allRules.find(r => r.id === ruleId);
+                    if (rule) {
+                        rule.is_active = data.is_active;
+                    }
+                    renderRules();
+                } else {
+                    showToast(data.message || '操作失敗', 'error');
+                }
+            } catch (error) {
+                console.error('切換狀態失敗:', error);
+                showToast('操作失敗', 'error');
+            }
+        }
+
+        // 顯示 Toast 通知
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
+                <span>${escapeHtml(message)}</span>
+            `;
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.animation = 'slideIn 0.3s ease reverse';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // HTML 轉義
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
