@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登入 - FORECAST 數據處理系統</title>
+
+    <!-- Meta 資料 -->
+    <meta name="description" content="FORECAST 數據處理系統登入頁面">
+
+    <!-- 頁籤圖標 -->
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
+    <link rel="shortcut icon" type="image/png" href="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ version }}">
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #e6e3de;
+            padding: 20px;
+        }
+
+        .login-container {
+            background: #ffffff;
+            border-radius: 15px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            border: 1px solid #e7e4df;
+            width: 100%;
+            max-width: 480px;
+            overflow: hidden;
+        }
+
+        .login-header {
+            background: #f5f5f5;
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px solid #e7e4df;
+        }
+
+        .login-logo {
+            width: 60px;
+            height: 60px;
+            margin-bottom: 10px;
+        }
+
+        .login-header h1 {
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: #000000;
+            margin-bottom: 4px;
+        }
+
+        .login-header p {
+            font-size: 0.85rem;
+            color: #bc773e;
+        }
+
+        .login-body {
+            padding: 20px 25px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 6px;
+            font-size: 0.9rem;
+        }
+
+        .form-group label i {
+            margin-right: 6px;
+            color: #bc773e;
+        }
+
+        .form-input,
+        .form-select {
+            width: 100%;
+            padding: 12px 14px;
+            border: 2px solid #e7e4df;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            transition: all 0.3s ease;
+            background: #f8f8f8;
+            color: #333;
+        }
+
+        .form-input:focus,
+        .form-select:focus {
+            outline: none;
+            border-color: #bc773e;
+            background: #fff;
+            box-shadow: 0 0 0 3px rgba(188, 119, 62, 0.1);
+        }
+
+        .form-input::placeholder {
+            color: #aaa;
+        }
+
+        .form-select {
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23bc773e' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 16px center;
+            padding-right: 40px;
+        }
+
+        .form-select option {
+            padding: 10px;
+        }
+
+        .password-wrapper {
+            position: relative;
+        }
+
+        .password-toggle {
+            position: absolute;
+            right: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: #999;
+            cursor: pointer;
+            font-size: 1.1rem;
+            transition: color 0.3s ease;
+            padding: 5px;
+        }
+
+        .password-toggle:hover {
+            color: #bc773e;
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 14px;
+            background: #c87e41;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            box-shadow: 0 4px 12px rgba(188, 119, 62, 0.3);
+            margin-top: 5px;
+        }
+
+        .login-btn:hover {
+            background: #bc773e;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(188, 119, 62, 0.4);
+        }
+
+        .login-btn:active {
+            transform: translateY(0);
+        }
+
+        .login-btn:disabled {
+            background: #d4cbc4;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .login-btn .spinner {
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            background: #fff5f5;
+            border: 1px solid #fed7d7;
+            color: #c53030;
+            padding: 10px 14px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            display: none;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.9rem;
+        }
+
+        .error-message.show {
+            display: flex;
+        }
+
+        .error-message i {
+            font-size: 1.1rem;
+        }
+
+        /* 客戶選擇區塊 */
+        .customer-group {
+            display: none;
+            margin-bottom: 15px;
+            animation: slideDown 0.2s ease;
+        }
+
+        .customer-group.show {
+            display: block;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* 帳號顯示區塊 */
+        .username-display {
+            display: none;
+            margin-bottom: 15px;
+        }
+
+        .username-display.show {
+            display: block;
+        }
+
+        .username-box {
+            background: #f5f5f5;
+            border: 2px solid #e7e4df;
+            border-radius: 8px;
+            padding: 12px 14px;
+            font-size: 0.95rem;
+            color: #333;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .username-box i {
+            color: #bc773e;
+        }
+
+        /* 角色卡片選擇 */
+        .role-cards {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .role-card {
+            background: #f8f8f8;
+            border: 2px solid #e7e4df;
+            border-radius: 10px;
+            padding: 14px 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .role-card:hover {
+            border-color: #bc773e;
+            background: #fff;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(188, 119, 62, 0.15);
+        }
+
+        .role-card.selected {
+            border-color: #bc773e;
+            background: linear-gradient(135deg, rgba(200, 126, 65, 0.1) 0%, rgba(188, 119, 62, 0.05) 100%);
+            box-shadow: 0 4px 15px rgba(188, 119, 62, 0.2);
+        }
+
+        .role-card-icon {
+            width: 40px;
+            height: 40px;
+            background: #e7e4df;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 8px;
+            font-size: 1.1rem;
+            color: #bc773e;
+            transition: all 0.3s ease;
+        }
+
+        .role-card.selected .role-card-icon {
+            background: #c87e41;
+            color: white;
+        }
+
+        .role-card-title {
+            font-weight: 600;
+            color: #333;
+            font-size: 0.85rem;
+        }
+
+        .role-card.selected .role-card-title {
+            color: #bc773e;
+        }
+
+        .login-footer {
+            text-align: center;
+            padding: 15px 25px;
+            border-top: 1px solid #e7e4df;
+        }
+
+        .login-footer p {
+            color: #888;
+            font-size: 0.8rem;
+        }
+
+        /* 提示訊息 */
+        .hint-message {
+            background: #f0f7ff;
+            border: 1px solid #bee3f8;
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.85rem;
+            color: #2b6cb0;
+        }
+
+        .hint-message i {
+            color: #3182ce;
+        }
+
+        /* 響應式 */
+        @media (max-width: 520px) {
+            .login-container {
+                margin: 10px;
+            }
+
+            .login-header {
+                padding: 25px 20px;
+            }
+
+            .login-body {
+                padding: 25px 20px;
+            }
+
+            .role-cards {
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }
+
+            .role-card {
+                display: flex;
+                align-items: center;
+                gap: 15px;
+                padding: 15px;
+                text-align: left;
+            }
+
+            .role-card-icon {
+                margin: 0;
+                flex-shrink: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-header">
+            <img src="{{ url_for('static', filename='logo/forecast-analytics.png') }}" alt="Logo" class="login-logo">
+            <h1>FORECAST 數據處理系統</h1>
+            <p>智能預測數據整合與分析平台</p>
+        </div>
+
+        <div class="login-body">
+            <div class="error-message" id="error-message">
+                <i class="fas fa-exclamation-circle"></i>
+                <span id="error-text">帳號或密碼錯誤</span>
+            </div>
+
+            <form id="login-form" onsubmit="handleLogin(event)">
+                <!-- 角色選擇 -->
+                <div class="form-group">
+                    <label>
+                        <i class="fas fa-user-tag"></i>選擇角色
+                    </label>
+                    <div class="role-cards">
+                        <div class="role-card" data-role="admin" onclick="selectRole('admin')">
+                            <div class="role-card-icon">
+                                <i class="fas fa-user-shield"></i>
+                            </div>
+                            <div class="role-card-title">管理者</div>
+                        </div>
+                        <div class="role-card" data-role="it" onclick="selectRole('it')">
+                            <div class="role-card-icon">
+                                <i class="fas fa-laptop-code"></i>
+                            </div>
+                            <div class="role-card-title">IT 人員</div>
+                        </div>
+                        <div class="role-card" data-role="user" onclick="selectRole('user')">
+                            <div class="role-card-icon">
+                                <i class="fas fa-user"></i>
+                            </div>
+                            <div class="role-card-title">一般使用者</div>
+                        </div>
+                    </div>
+                    <input type="hidden" id="role" name="role" value="">
+                </div>
+
+                <!-- 客戶選擇（僅一般使用者顯示） -->
+                <div class="form-group customer-group" id="customer-group">
+                    <label for="customer">
+                        <i class="fas fa-building"></i>選擇客戶
+                    </label>
+                    <select id="customer" name="customer" class="form-select" onchange="selectCustomer()">
+                        <option value="">請選擇客戶</option>
+                        <option value="quanta">廣達電腦</option>
+                    </select>
+                </div>
+
+                <!-- 帳號顯示 -->
+                <div class="form-group username-display" id="username-display">
+                    <label>
+                        <i class="fas fa-user"></i>帳號
+                    </label>
+                    <div class="username-box">
+                        <i class="fas fa-check-circle"></i>
+                        <span id="username-text">-</span>
+                    </div>
+                    <input type="hidden" id="username" name="username" value="">
+                </div>
+
+                <!-- 密碼輸入 -->
+                <div class="form-group" id="password-group" style="display: none;">
+                    <label for="password">
+                        <i class="fas fa-lock"></i>密碼
+                    </label>
+                    <div class="password-wrapper">
+                        <input type="password" id="password" name="password" class="form-input"
+                               placeholder="請輸入密碼" autocomplete="current-password">
+                        <button type="button" class="password-toggle" onclick="togglePassword()">
+                            <i class="fas fa-eye" id="password-icon"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 提示訊息 -->
+                <div class="hint-message" id="hint-message" style="display: none;">
+                    <i class="fas fa-info-circle"></i>
+                    <span id="hint-text">請先選擇角色</span>
+                </div>
+
+                <button type="submit" class="login-btn" id="login-btn" disabled>
+                    <i class="fas fa-sign-in-alt"></i>
+                    <span>登入系統</span>
+                </button>
+            </form>
+        </div>
+
+        <div class="login-footer">
+            <p>&copy; 2025 智合科技 FORECAST 數據處理系統</p>
+        </div>
+    </div>
+
+    <!-- Chrome 瀏覽器阻擋彈窗 -->
+    <div id="chrome-block-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <i class="fas fa-exclamation-triangle"></i>
+                <h2>瀏覽器不支援</h2>
+            </div>
+            <div class="modal-body">
+                <p>檢測到您正在使用 Google Chrome 瀏覽器。</p>
+                <p>由於快取問題，本系統建議使用以下方式以獲得最佳體驗。</p>
+                <div class="browser-info">
+                    <div class="browser-item">
+                        <i class="fab fa-edge"></i>
+                        <div class="browser-details">
+                            <h3>Microsoft Edge</h3>
+                            <p>推薦瀏覽器，完全相容且無快取問題</p>
+                        </div>
+                    </div>
+                    <div class="browser-item">
+                        <i class="fab fa-firefox-browser"></i>
+                        <div class="browser-details">
+                            <h3>Mozilla Firefox</h3>
+                            <p>支援瀏覽器，穩定可靠且相容性佳</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-primary" onclick="openInEdge()">
+                        <i class="fab fa-edge"></i> 用 Edge 開啟
+                    </button>
+                    <button class="btn btn-firefox" onclick="openInFirefox()">
+                        <i class="fab fa-firefox-browser"></i> 用 Firefox 開啟
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firefox 教學彈窗 -->
+    <div id="firefox-tutorial-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header" style="background: linear-gradient(135deg, #ff9500, #ff7b00);">
+                <i class="fab fa-firefox-browser"></i>
+                <h2>Firefox 使用教學</h2>
+            </div>
+            <div class="modal-body">
+                <p>請按照以下步驟在 Firefox 瀏覽器中使用本系統：</p>
+
+                <div class="tutorial-steps">
+                    <div class="tutorial-step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h4>複製網址</h4>
+                            <p>請複製以下網址到剪貼簿：</p>
+                            <div class="url-copy-box">
+                                <input type="text" id="tutorial-url" value="" readonly>
+                                <button onclick="copyUrlToClipboard()" class="copy-btn">
+                                    <i class="fas fa-copy"></i> 複製
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tutorial-step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h4>開啟 Firefox</h4>
+                            <p>在您的電腦上開啟 Mozilla Firefox 瀏覽器</p>
+                        </div>
+                    </div>
+
+                    <div class="tutorial-step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h4>貼上網址</h4>
+                            <p>在 Firefox 的網址列中貼上網址並按 Enter 鍵</p>
+                        </div>
+                    </div>
+
+                    <div class="tutorial-step">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <h4>開始使用</h4>
+                            <p>現在您可以在 Firefox 中正常使用本系統了！</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-actions">
+                    <button class="btn btn-primary" onclick="closeFirefoxTutorial()">
+                        <i class="fas fa-check"></i> 我知道了
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 帳號對應表
+        const accountMap = {
+            'admin': { username: 'admin', displayName: '系統管理員' },
+            'it': { username: 'it_user', displayName: 'IT 管理人員' },
+            'quanta': { username: 'quanta', displayName: '廣達用戶' }
+        };
+
+        let selectedRole = '';
+        let selectedCustomer = '';
+
+        // 選擇角色
+        function selectRole(role) {
+            selectedRole = role;
+            selectedCustomer = '';
+
+            // 更新角色卡片樣式
+            document.querySelectorAll('.role-card').forEach(card => {
+                card.classList.remove('selected');
+            });
+            document.querySelector(`.role-card[data-role="${role}"]`).classList.add('selected');
+            document.getElementById('role').value = role;
+
+            // 重置客戶選擇
+            document.getElementById('customer').value = '';
+
+            // 根據角色顯示/隱藏客戶選擇
+            const customerGroup = document.getElementById('customer-group');
+            const usernameDisplay = document.getElementById('username-display');
+            const passwordGroup = document.getElementById('password-group');
+            const hintMessage = document.getElementById('hint-message');
+            const loginBtn = document.getElementById('login-btn');
+
+            if (role === 'user') {
+                // 一般使用者需要選擇客戶
+                customerGroup.classList.add('show');
+                usernameDisplay.classList.remove('show');
+                passwordGroup.style.display = 'none';
+                hintMessage.style.display = 'flex';
+                document.getElementById('hint-text').textContent = '請選擇客戶以繼續';
+                loginBtn.disabled = true;
+                document.getElementById('username').value = '';
+            } else {
+                // 管理者或 IT 人員直接顯示帳號
+                customerGroup.classList.remove('show');
+                const account = accountMap[role];
+                document.getElementById('username').value = account.username;
+                document.getElementById('username-text').textContent = account.username;
+                usernameDisplay.classList.add('show');
+                passwordGroup.style.display = 'block';
+                hintMessage.style.display = 'none';
+                loginBtn.disabled = false;
+
+                // 聚焦密碼欄位
+                setTimeout(() => {
+                    document.getElementById('password').focus();
+                }, 100);
+            }
+        }
+
+        // 選擇客戶
+        function selectCustomer() {
+            const customer = document.getElementById('customer').value;
+            selectedCustomer = customer;
+
+            const usernameDisplay = document.getElementById('username-display');
+            const passwordGroup = document.getElementById('password-group');
+            const hintMessage = document.getElementById('hint-message');
+            const loginBtn = document.getElementById('login-btn');
+
+            if (customer) {
+                const account = accountMap[customer];
+                document.getElementById('username').value = account.username;
+                document.getElementById('username-text').textContent = account.username;
+                usernameDisplay.classList.add('show');
+                passwordGroup.style.display = 'block';
+                hintMessage.style.display = 'none';
+                loginBtn.disabled = false;
+
+                // 聚焦密碼欄位
+                setTimeout(() => {
+                    document.getElementById('password').focus();
+                }, 100);
+            } else {
+                usernameDisplay.classList.remove('show');
+                passwordGroup.style.display = 'none';
+                hintMessage.style.display = 'flex';
+                document.getElementById('hint-text').textContent = '請選擇客戶以繼續';
+                loginBtn.disabled = true;
+                document.getElementById('username').value = '';
+            }
+        }
+
+        // 切換密碼顯示
+        function togglePassword() {
+            const passwordInput = document.getElementById('password');
+            const icon = document.getElementById('password-icon');
+
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                icon.classList.remove('fa-eye');
+                icon.classList.add('fa-eye-slash');
+            } else {
+                passwordInput.type = 'password';
+                icon.classList.remove('fa-eye-slash');
+                icon.classList.add('fa-eye');
+            }
+        }
+
+        // 處理登入
+        async function handleLogin(event) {
+            event.preventDefault();
+
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            const loginBtn = document.getElementById('login-btn');
+            const errorMessage = document.getElementById('error-message');
+            const errorText = document.getElementById('error-text');
+
+            // 驗證
+            if (!selectedRole) {
+                errorText.textContent = '請選擇角色';
+                errorMessage.classList.add('show');
+                return;
+            }
+
+            if (selectedRole === 'user' && !selectedCustomer) {
+                errorText.textContent = '請選擇客戶';
+                errorMessage.classList.add('show');
+                return;
+            }
+
+            if (!password) {
+                errorText.textContent = '請輸入密碼';
+                errorMessage.classList.add('show');
+                return;
+            }
+
+            // 隱藏錯誤訊息
+            errorMessage.classList.remove('show');
+
+            // 顯示載入狀態
+            loginBtn.disabled = true;
+            loginBtn.innerHTML = '<div class="spinner"></div><span>登入中...</span>';
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // 根據角色跳轉到對應頁面
+                    window.location.href = result.redirect_url || '/';
+                } else {
+                    // 顯示錯誤
+                    errorText.textContent = result.message || '帳號或密碼錯誤';
+                    errorMessage.classList.add('show');
+
+                    // 恢復按鈕
+                    loginBtn.disabled = false;
+                    loginBtn.innerHTML = '<i class="fas fa-sign-in-alt"></i><span>登入系統</span>';
+                }
+            } catch (error) {
+                console.error('登入錯誤:', error);
+                errorText.textContent = '系統連線失敗，請稍後再試';
+                errorMessage.classList.add('show');
+
+                // 恢復按鈕
+                loginBtn.disabled = false;
+                loginBtn.innerHTML = '<i class="fas fa-sign-in-alt"></i><span>登入系統</span>';
+            }
+        }
+
+        // Enter 鍵提交
+        document.getElementById('password').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                document.getElementById('login-form').dispatchEvent(new Event('submit'));
+            }
+        });
+    </script>
+
+    <!-- 瀏覽器檢測腳本 -->
+    <script>
+        // 檢測瀏覽器類型
+        function detectBrowser() {
+            const userAgent = navigator.userAgent;
+            const vendor = navigator.vendor;
+
+            // 先檢測Edge（因為Edge的User Agent也包含Chrome）
+            const isEdge = /Edg/.test(userAgent);
+
+            // 再檢測Chrome（排除Edge）
+            const isChrome = /Chrome/.test(userAgent) && /Google Inc/.test(vendor) && !isEdge;
+
+            // 檢測其他瀏覽器
+            const isFirefox = /Firefox/.test(userAgent);
+            const isSafari = /Safari/.test(userAgent) && !/Chrome/.test(userAgent);
+            const isOpera = /Opera/.test(userAgent) || /OPR/.test(userAgent);
+
+            return {
+                isChrome: isChrome,
+                isEdge: isEdge,
+                isFirefox: isFirefox,
+                isSafari: isSafari,
+                isOpera: isOpera,
+                userAgent: userAgent,
+                vendor: vendor
+            };
+        }
+
+        // 顯示Chrome阻擋彈窗
+        function showChromeModal() {
+            const modal = document.getElementById('chrome-block-modal');
+            modal.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+        }
+
+        // 用Firefox瀏覽器開啟當前頁面
+        function openInFirefox() {
+            const currentUrl = window.location.href;
+
+            // 設置教學彈窗中的網址
+            document.getElementById('tutorial-url').value = currentUrl;
+
+            try {
+                // 嘗試使用 Firefox 的 URL scheme
+                const firefoxUrl = `firefox://open-url?url=${encodeURIComponent(currentUrl)}`;
+
+                // 創建一個隱藏的連結來觸發 Firefox
+                const link = document.createElement('a');
+                link.href = firefoxUrl;
+                link.style.display = 'none';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+                // 延遲檢查是否成功跳轉
+                setTimeout(() => {
+                    if (document.visibilityState === 'visible') {
+                        showFirefoxTutorial();
+                    }
+                }, 2000);
+
+            } catch (error) {
+                showFirefoxTutorial();
+            }
+        }
+
+        // 顯示Firefox教學彈窗
+        function showFirefoxTutorial() {
+            const modal = document.getElementById('firefox-tutorial-modal');
+            modal.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+        }
+
+        // 關閉Firefox教學彈窗
+        function closeFirefoxTutorial() {
+            const modal = document.getElementById('firefox-tutorial-modal');
+            modal.style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }
+
+        // 複製網址到剪貼簿
+        function copyUrlToClipboard() {
+            const urlInput = document.getElementById('tutorial-url');
+            urlInput.select();
+            urlInput.setSelectionRange(0, 99999);
+
+            try {
+                document.execCommand('copy');
+                const copyBtn = event.target.closest('.copy-btn');
+                const originalText = copyBtn.innerHTML;
+                copyBtn.innerHTML = '<i class="fas fa-check"></i> 已複製';
+                copyBtn.style.background = '#28a745';
+
+                setTimeout(() => {
+                    copyBtn.innerHTML = originalText;
+                    copyBtn.style.background = '';
+                }, 2000);
+            } catch (err) {
+                alert('無法複製到剪貼簿，請手動複製網址');
+            }
+        }
+
+        // 用Edge瀏覽器開啟當前頁面
+        function openInEdge() {
+            const currentUrl = window.location.href;
+            const edgeUrl = `microsoft-edge:${currentUrl}`;
+
+            const redirectTime = Date.now();
+            window.edgeRedirectTime = redirectTime;
+
+            try {
+                const iframe = document.createElement('iframe');
+                iframe.style.display = 'none';
+                iframe.src = edgeUrl;
+                document.body.appendChild(iframe);
+
+                window.location.href = edgeUrl;
+
+                let blurHandled = false;
+                const handleBlur = () => {
+                    if (!blurHandled) {
+                        blurHandled = true;
+                        window.removeEventListener('blur', handleBlur);
+                        return;
+                    }
+                };
+                window.addEventListener('blur', handleBlur);
+
+                setTimeout(() => {
+                    if (Date.now() - redirectTime < 4000 && document.visibilityState === 'visible' && !blurHandled) {
+                        alert('無法自動開啟Edge瀏覽器，請手動複製網址到Edge瀏覽器中開啟：\n' + currentUrl);
+                    }
+                    if (iframe.parentNode) {
+                        iframe.parentNode.removeChild(iframe);
+                    }
+                }, 3000);
+
+            } catch (error) {
+                alert('無法自動開啟Edge瀏覽器，請手動複製網址到Edge瀏覽器中開啟：\n' + currentUrl);
+            }
+        }
+
+        // 頁面載入時檢測瀏覽器
+        document.addEventListener('DOMContentLoaded', function() {
+            const browser = detectBrowser();
+            console.log('瀏覽器檢測結果:', browser);
+
+            // 只要是Chrome瀏覽器就顯示阻擋彈窗
+            if (browser.isChrome) {
+                console.log('檢測到Chrome瀏覽器，顯示阻擋視窗');
+                showChromeModal();
+            }
+        });
+
+        // 阻止模態框外部點擊關閉
+        document.getElementById('chrome-block-modal').addEventListener('click', function(e) {
+            e.stopPropagation();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,1248 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>客戶映射管理 - FORECAST 數據處理系統</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        body {
+            background: #e6e3de;
+            min-height: 100vh;
+        }
+
+        .mappings-container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 30px 20px;
+        }
+
+        /* 頁面標題區 */
+        .page-title-bar {
+            background: white;
+            border-radius: 12px;
+            padding: 20px 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.06);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .page-title-bar h2 {
+            font-size: 1.3rem;
+            color: #2c3e50;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .page-title-bar h2 i {
+            color: #9b59b6;
+        }
+
+        .btn-add-mapping {
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s;
+            font-size: 0.95rem;
+        }
+
+        .btn-add-mapping:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(39, 174, 96, 0.4);
+        }
+
+        /* 篩選與統計區 */
+        .filter-stats-bar {
+            background: white;
+            border-radius: 12px;
+            padding: 20px 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.06);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .filter-section {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .filter-section label {
+            font-weight: 600;
+            color: #2c3e50;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .filter-section select {
+            padding: 10px 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            min-width: 200px;
+            background-color: white;
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 35px;
+        }
+
+        .filter-section select:focus {
+            outline: none;
+            border-color: #9b59b6;
+        }
+
+        .stats-row {
+            display: flex;
+            gap: 12px;
+        }
+
+        .stat-item {
+            background: #f8f9fa;
+            padding: 10px 18px;
+            border-radius: 25px;
+            font-size: 0.9rem;
+            color: #2c3e50;
+            border: 1px solid #eee;
+        }
+
+        .stat-item.companies {
+            background: #e8f4fc;
+            border-color: #d0e8f7;
+        }
+
+        .stat-item.companies strong {
+            color: #3498db;
+        }
+
+        .stat-item.customers {
+            background: #f3e8ff;
+            border-color: #e4d0f7;
+        }
+
+        .stat-item.customers strong {
+            color: #9b59b6;
+        }
+
+        .content-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.06);
+            overflow: hidden;
+        }
+
+        .mappings-table-container {
+            overflow-x: auto;
+        }
+
+        .mappings-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .mappings-table th,
+        .mappings-table td {
+            padding: 14px 18px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        .mappings-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            position: sticky;
+            top: 0;
+        }
+
+        .mappings-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .mappings-table td {
+            font-size: 0.95rem;
+            color: #444;
+        }
+
+        .company-badge {
+            background: linear-gradient(135deg, #3498db 0%, #5dade2 100%);
+            color: white;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .customer-name {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .mapping-value {
+            background: #f0f0f0;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-family: 'Consolas', monospace;
+            font-size: 0.9rem;
+        }
+
+        .empty-value {
+            color: #bbb;
+            font-style: italic;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-icon {
+            width: 32px;
+            height: 32px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            font-size: 0.85rem;
+        }
+
+        .btn-icon.edit {
+            background: #3498db;
+            color: white;
+        }
+
+        .btn-icon.edit:hover {
+            background: #2980b9;
+            transform: scale(1.1);
+        }
+
+        .btn-icon.delete {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .btn-icon.delete:hover {
+            background: #c0392b;
+            transform: scale(1.1);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px;
+            color: #7f8c8d;
+        }
+
+        .loading i {
+            font-size: 2.5rem;
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+            display: block;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 60px;
+            color: #7f8c8d;
+        }
+
+        .no-data i {
+            font-size: 3rem;
+            margin-bottom: 15px;
+            display: block;
+        }
+
+        /* Modal 樣式 - 完全覆蓋 style.css 的規則 */
+        .modal-overlay {
+            display: none;
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            background: rgba(0,0,0,0.5) !important;
+            z-index: 9999 !important;
+            justify-content: center !important;
+            align-items: center !important;
+            backdrop-filter: blur(3px) !important;
+        }
+
+        .modal-overlay.show {
+            display: flex !important;
+        }
+
+        /* 重置 style.css 中 .modal 的樣式並重新定義 */
+        .modal-overlay .modal {
+            position: relative !important;
+            top: auto !important;
+            left: auto !important;
+            width: 90% !important;
+            max-width: 550px !important;
+            height: auto !important;
+            max-height: 90vh !important;
+            background: white !important;
+            border-radius: 16px !important;
+            overflow: hidden !important;
+            animation: modalSlideIn 0.3s ease-out !important;
+            box-sizing: border-box !important;
+            display: flex !important;
+            flex-direction: column !important;
+            margin: auto !important;
+            cursor: default !important;
+            border: none !important;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3) !important;
+        }
+
+        .modal-overlay .modal * {
+            box-sizing: border-box !important;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: scale(0.9) translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+
+        /* Modal Header - 完全重新定義 */
+        .modal-overlay .modal .modal-header {
+            background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%) !important;
+            color: white !important;
+            padding: 20px 25px !important;
+            display: flex !important;
+            flex-direction: row !important;
+            justify-content: space-between !important;
+            align-items: center !important;
+            flex-shrink: 0 !important;
+            text-align: left !important;
+            border-radius: 0 !important;
+            position: relative !important;
+            width: 100%;
+        }
+
+        .modal-overlay .modal .modal-header h3 {
+            font-size: 1.2rem !important;
+            font-weight: 600 !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            gap: 10px !important;
+            margin: 0 !important;
+        }
+
+        .modal-overlay .modal .modal-header h3 i {
+            font-size: 1.5rem !important;
+            margin: 0 !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            animation: none !important;
+            vertical-align: middle !important;
+        }
+
+        .modal-overlay .modal .modal-header .close-btn i {
+            font-size: 1.5rem !important;
+            margin: 0 !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            animation: none !important;
+        }
+
+        .modal-overlay .modal .modal-header .close-btn {
+            background: rgba(255,255,255,0.2) !important;
+            border: none !important;
+            color: white !important;
+            width: 36px !important;
+            height: 36px !important;
+            min-width: 36px !important;
+            border-radius: 50% !important;
+            cursor: pointer !important;
+            font-size: 1.2rem !important;
+            transition: all 0.3s !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            flex-shrink: 0 !important;
+            padding: 0 !important;
+        }
+
+        .modal-overlay .modal .modal-header .close-btn:hover {
+            background: rgba(255,255,255,0.3) !important;
+            transform: rotate(90deg) !important;
+        }
+
+        /* Modal Body - 完全重新定義 */
+        .modal-overlay .modal .modal-body {
+            padding: 25px !important;
+            overflow-y: auto !important;
+            flex: 1 !important;
+            text-align: left !important;
+        }
+
+        .modal-overlay .modal .modal-body .form-group {
+            margin-bottom: 20px !important;
+            width: 100% !important;
+        }
+
+        .modal-overlay .modal .modal-body .form-group label {
+            display: block !important;
+            font-weight: 600 !important;
+            color: #2c3e50 !important;
+            margin-bottom: 8px !important;
+            font-size: 0.95rem !important;
+            text-align: left !important;
+        }
+
+        .modal-overlay .modal .modal-body .form-group label .required {
+            color: #e74c3c !important;
+            margin-left: 4px !important;
+        }
+
+        .modal-overlay .modal .modal-body .form-group input,
+        .modal-overlay .modal .modal-body .form-group select {
+            display: block !important;
+            width: 100% !important;
+            padding: 12px 15px !important;
+            border: 1px solid #ddd !important;
+            border-radius: 8px !important;
+            font-size: 0.95rem !important;
+            transition: border-color 0.3s !important;
+            background-color: white !important;
+            box-sizing: border-box !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
+            height: auto !important;
+        }
+
+        .modal-overlay .modal .modal-body .form-group select {
+            cursor: pointer !important;
+            appearance: none !important;
+            -webkit-appearance: none !important;
+            -moz-appearance: none !important;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E") !important;
+            background-repeat: no-repeat !important;
+            background-position: right 12px center !important;
+            padding-right: 35px !important;
+        }
+
+        .modal-overlay .modal .modal-body .form-group input:focus,
+        .modal-overlay .modal .modal-body .form-group select:focus {
+            outline: none !important;
+            border-color: #9b59b6 !important;
+        }
+
+        .modal-overlay .modal .modal-body .form-row {
+            display: grid !important;
+            grid-template-columns: 1fr 1fr !important;
+            gap: 20px !important;
+            width: 100% !important;
+            margin-bottom: 20px !important;
+        }
+
+        .modal-overlay .modal .modal-body .form-row .form-group {
+            margin-bottom: 0 !important;
+            width: 100% !important;
+            min-width: 0 !important;
+        }
+
+        /* ETD/ETA 週別+星期下拉選單組合 */
+        .modal-overlay .modal .modal-body .week-day-select {
+            display: flex !important;
+            gap: 8px !important;
+            width: 100% !important;
+        }
+
+        .modal-overlay .modal .modal-body .week-day-select select {
+            flex: 1 !important;
+            min-width: 0 !important;
+        }
+
+        /* Modal Footer - 完全重新定義 */
+        .modal-overlay .modal .modal-footer {
+            padding: 20px 25px !important;
+            border-top: 1px solid #eee !important;
+            display: flex !important;
+            flex-direction: row !important;
+            justify-content: flex-end !important;
+            align-items: center !important;
+            gap: 12px !important;
+            background: white !important;
+            flex-shrink: 0 !important;
+        }
+
+        .modal-overlay .modal .modal-footer .btn {
+            padding: 12px 24px !important;
+            border-radius: 8px !important;
+            font-weight: 600 !important;
+            cursor: pointer !important;
+            transition: all 0.3s !important;
+            font-size: 0.95rem !important;
+            border: none !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 8px !important;
+            white-space: nowrap !important;
+            flex-shrink: 0 !important;
+            flex: 0 0 auto !important;
+            min-width: auto !important;
+        }
+
+        .modal-overlay .modal .modal-footer .btn i {
+            font-size: 0.9rem !important;
+            margin: 0 !important;
+            display: inline !important;
+            animation: none !important;
+        }
+
+        .modal-overlay .modal .modal-footer .btn-cancel {
+            background: #95a5a6 !important;
+            color: white !important;
+        }
+
+        .modal-overlay .modal .modal-footer .btn-cancel:hover {
+            background: #7f8c8d !important;
+        }
+
+        .modal-overlay .modal .modal-footer .btn-save {
+            background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%) !important;
+            color: white !important;
+        }
+
+        .modal-overlay .modal .modal-footer .btn-save:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 5px 15px rgba(155, 89, 182, 0.4) !important;
+        }
+
+        .modal-overlay .modal .modal-footer .btn-delete {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%) !important;
+            color: white !important;
+        }
+
+        .modal-overlay .modal .modal-footer .btn-delete:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 5px 15px rgba(231, 76, 60, 0.4) !important;
+        }
+
+        /* Toast 通知 */
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            padding: 15px 25px;
+            border-radius: 10px;
+            color: white;
+            font-weight: 600;
+            display: none;
+            align-items: center;
+            gap: 10px;
+            z-index: 2000;
+            animation: toastSlideIn 0.3s ease;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+        }
+
+        @keyframes toastSlideIn {
+            from {
+                opacity: 0;
+                transform: translateX(100px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .toast.success {
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+        }
+
+        .toast.error {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+        }
+
+        .toast.show {
+            display: flex;
+        }
+
+        /* 刪除確認 Modal */
+        .modal-overlay.delete-modal .modal .modal-header {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%) !important;
+        }
+
+        .modal-overlay .modal .modal-body .delete-warning {
+            background: #fff5f5 !important;
+            border: 1px solid #fed7d7 !important;
+            border-radius: 8px !important;
+            padding: 15px !important;
+            color: #c53030 !important;
+            margin-bottom: 20px !important;
+        }
+
+        .modal-overlay .modal .modal-body .delete-warning i {
+            margin-right: 10px !important;
+        }
+
+        .modal-overlay .modal .modal-body .delete-info {
+            background: #f8f9fa !important;
+            border-radius: 8px !important;
+            padding: 15px !important;
+        }
+
+        .modal-overlay .modal .modal-body .delete-info p {
+            margin: 5px 0 !important;
+            color: #555 !important;
+            font-size: 0.95rem !important;
+            line-height: 1.6 !important;
+        }
+
+        .modal-overlay .modal .modal-body .delete-info strong {
+            color: #2c3e50 !important;
+        }
+
+        @media (max-width: 768px) {
+            .page-title-bar {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+
+            .filter-stats-bar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .filter-section {
+                justify-content: center;
+            }
+
+            .filter-section select {
+                min-width: 100%;
+            }
+
+            .stats-row {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+
+            .modal-overlay .modal .modal-body .form-row {
+                grid-template-columns: 1fr !important;
+            }
+
+            .modal-overlay .modal .modal-body .form-row .form-group {
+                margin-bottom: 20px !important;
+            }
+
+            .modal-overlay .modal .modal-body .form-row .form-group:last-child {
+                margin-bottom: 0 !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="mappings-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="header-left">
+                    <div class="header-logo">
+                        <img src="{{ url_for('static', filename='logo/logo.png') }}" alt="FORECAST Logo" class="logo-image">
+                    </div>
+                    <div class="header-text">
+                        <h1>客戶映射管理</h1>
+                        <p class="header-subtitle">管理所有用戶的客戶映射配置</p>
+                    </div>
+                </div>
+                <div class="header-user">
+                    <div class="user-info">
+                        <i class="fas fa-user-circle"></i>
+                        <span class="user-name">{{ user.display_name }}</span>
+                        <span class="user-role">(管理者)</span>
+                    </div>
+                    <a href="/admin" class="logout-btn" style="background: #6c757d;">
+                        <i class="fas fa-arrow-left"></i> 返回
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <!-- 頁面標題區 -->
+        <div class="page-title-bar">
+            <h2><i class="fas fa-project-diagram"></i> 映射列表</h2>
+            <button class="btn-add-mapping" onclick="showAddModal()">
+                <i class="fas fa-plus"></i> 新增映射
+            </button>
+        </div>
+
+        <!-- 篩選與統計區 -->
+        <div class="filter-stats-bar">
+            <div class="filter-section">
+                <label><i class="fas fa-filter"></i> 篩選：</label>
+                <select id="company-filter" onchange="filterByCompany()">
+                    <option value="">全部公司</option>
+                </select>
+            </div>
+            <div class="stats-row">
+                <div class="stat-item companies">
+                    總公司數：<strong id="total-companies">0</strong>
+                </div>
+                <div class="stat-item customers">
+                    總映射數：<strong id="total-customers">0</strong>
+                </div>
+            </div>
+        </div>
+
+        <!-- 映射表格 -->
+        <div class="content-card">
+            <div class="mappings-table-container">
+                <table class="mappings-table">
+                    <thead>
+                        <tr>
+                            <th>公司</th>
+                            <th>客戶簡稱</th>
+                            <th>客戶需求地區</th>
+                            <th>排程出貨日期斷點</th>
+                            <th>ETD</th>
+                            <th>ETA</th>
+                            <th>更新時間</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="mappings-tbody">
+                        <tr>
+                            <td colspan="8" class="loading">
+                                <i class="fas fa-spinner"></i>
+                                <p>載入中...</p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>&copy; 2025 智合科技，FORECAST 數據處理系統. 智能預測，精準分析.</p>
+        </footer>
+    </div>
+
+    <!-- 新增/編輯 Modal -->
+    <div class="modal-overlay" id="mapping-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3><i class="fas fa-edit"></i> <span id="modal-title">新增映射</span></h3>
+                <button class="close-btn" onclick="closeModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="mapping-id">
+                <div class="form-group">
+                    <label>選擇用戶<span class="required">*</span></label>
+                    <select id="mapping-user-id" required>
+                        <option value="">請選擇用戶</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>客戶簡稱<span class="required">*</span></label>
+                    <input type="text" id="mapping-customer-name" placeholder="例如：廣達-桃園" required>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>客戶需求地區</label>
+                        <input type="text" id="mapping-region" placeholder="例如：QCI">
+                    </div>
+                    <div class="form-group">
+                        <label>排程出貨日期斷點</label>
+                        <select id="mapping-schedule-breakpoint">
+                            <option value="">請選擇</option>
+                            <option value="禮拜一">禮拜一</option>
+                            <option value="禮拜二">禮拜二</option>
+                            <option value="禮拜三">禮拜三</option>
+                            <option value="禮拜四">禮拜四</option>
+                            <option value="禮拜五">禮拜五</option>
+                            <option value="禮拜六">禮拜六</option>
+                            <option value="禮拜日">禮拜日</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>ETD</label>
+                        <div class="week-day-select">
+                            <select id="mapping-etd-week">
+                                <option value="">週別</option>
+                                <option value="本週">本週</option>
+                                <option value="下週">下週</option>
+                                <option value="下下週">下下週</option>
+                                <option value="上週">上週</option>
+                            </select>
+                            <select id="mapping-etd-day">
+                                <option value="">星期</option>
+                                <option value="一">一</option>
+                                <option value="二">二</option>
+                                <option value="三">三</option>
+                                <option value="四">四</option>
+                                <option value="五">五</option>
+                                <option value="六">六</option>
+                                <option value="日">日</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>ETA</label>
+                        <div class="week-day-select">
+                            <select id="mapping-eta-week">
+                                <option value="">週別</option>
+                                <option value="本週">本週</option>
+                                <option value="下週">下週</option>
+                                <option value="下下週">下下週</option>
+                                <option value="上週">上週</option>
+                            </select>
+                            <select id="mapping-eta-day">
+                                <option value="">星期</option>
+                                <option value="一">一</option>
+                                <option value="二">二</option>
+                                <option value="三">三</option>
+                                <option value="四">四</option>
+                                <option value="五">五</option>
+                                <option value="六">六</option>
+                                <option value="日">日</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-cancel" onclick="closeModal()">
+                    <i class="fas fa-times"></i> 取消
+                </button>
+                <button class="btn btn-save" onclick="saveMapping()">
+                    <i class="fas fa-save"></i> 儲存
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 刪除確認 Modal -->
+    <div class="modal-overlay delete-modal" id="delete-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3><i class="fas fa-trash-alt"></i> 確認刪除</h3>
+                <button class="close-btn" onclick="closeDeleteModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="delete-mapping-id">
+                <div class="delete-warning">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    確定要刪除此映射嗎？此操作無法復原。
+                </div>
+                <div class="delete-info">
+                    <p><strong>公司：</strong><span id="delete-company">-</span></p>
+                    <p><strong>客戶簡稱：</strong><span id="delete-customer-name">-</span></p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-cancel" onclick="closeDeleteModal()">
+                    <i class="fas fa-times"></i> 取消
+                </button>
+                <button class="btn btn-delete" onclick="confirmDelete()">
+                    <i class="fas fa-trash"></i> 確認刪除
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast 通知 -->
+    <div class="toast" id="toast">
+        <i class="fas fa-check-circle"></i>
+        <span id="toast-message">操作成功</span>
+    </div>
+
+    <script>
+        let allMappings = [];
+        let allUsers = [];
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            loadUsers();
+            loadMappings();
+        });
+
+        // 載入用戶列表（用於新增映射時選擇）
+        async function loadUsers() {
+            try {
+                const response = await fetch('/api/admin/users');
+                const result = await response.json();
+                if (result.success) {
+                    // 只保留一般用戶（role='user'）
+                    allUsers = result.users.filter(u => u.role === 'user');
+                    populateUserSelect();
+                }
+            } catch (error) {
+                console.error('載入用戶列表失敗:', error);
+            }
+        }
+
+        // 填充用戶選擇下拉選單
+        function populateUserSelect() {
+            const select = document.getElementById('mapping-user-id');
+            select.innerHTML = '<option value="">請選擇用戶</option>';
+            allUsers.forEach(user => {
+                select.innerHTML += `<option value="${user.id}">${user.company} - ${user.display_name}</option>`;
+            });
+        }
+
+        // 載入映射資料
+        async function loadMappings() {
+            try {
+                const response = await fetch('/api/admin/mappings');
+                const result = await response.json();
+
+                if (result.success) {
+                    allMappings = result.mappings;
+                    populateCompanyFilter();
+                    renderMappings(allMappings);
+                    updateStats();
+                } else {
+                    showError('載入失敗：' + result.message);
+                }
+            } catch (error) {
+                console.error('載入映射資料失敗:', error);
+                showError('載入失敗：' + error.message);
+            }
+        }
+
+        // 填充公司篩選下拉選單
+        function populateCompanyFilter() {
+            const companies = [...new Set(allMappings.map(m => m.company))].filter(c => c);
+            const select = document.getElementById('company-filter');
+
+            select.innerHTML = '<option value="">全部公司</option>';
+            companies.forEach(company => {
+                select.innerHTML += `<option value="${company}">${company}</option>`;
+            });
+        }
+
+        // 根據公司篩選
+        function filterByCompany() {
+            const selectedCompany = document.getElementById('company-filter').value;
+            const filtered = selectedCompany
+                ? allMappings.filter(m => m.company === selectedCompany)
+                : allMappings;
+            renderMappings(filtered);
+        }
+
+        // 渲染映射表格
+        function renderMappings(mappings) {
+            const tbody = document.getElementById('mappings-tbody');
+
+            if (!mappings || mappings.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="8" class="no-data">
+                            <i class="fas fa-inbox"></i>
+                            <p>沒有映射資料</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            // 按公司分組
+            const groupedByCompany = {};
+            mappings.forEach(m => {
+                const company = m.company || '未知公司';
+                if (!groupedByCompany[company]) {
+                    groupedByCompany[company] = [];
+                }
+                groupedByCompany[company].push(m);
+            });
+
+            let html = '';
+            Object.keys(groupedByCompany).sort().forEach(company => {
+                const companyMappings = groupedByCompany[company];
+
+                companyMappings.forEach((mapping, index) => {
+                    html += `
+                        <tr>
+                            <td>
+                                <span class="company-badge">${company}</span>
+                            </td>
+                            <td class="customer-name">${mapping.customer_name || '-'}</td>
+                            <td>${mapping.region ? `<span class="mapping-value">${mapping.region}</span>` : '<span class="empty-value">未設定</span>'}</td>
+                            <td>${mapping.schedule_breakpoint ? `<span class="mapping-value">${mapping.schedule_breakpoint}</span>` : '<span class="empty-value">未設定</span>'}</td>
+                            <td>${mapping.etd ? `<span class="mapping-value">${mapping.etd}</span>` : '<span class="empty-value">未設定</span>'}</td>
+                            <td>${mapping.eta ? `<span class="mapping-value">${mapping.eta}</span>` : '<span class="empty-value">未設定</span>'}</td>
+                            <td style="font-size: 0.85rem; color: #7f8c8d;">${mapping.updated_at || '-'}</td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button class="btn-icon edit" onclick="editMapping(${mapping.id})" title="編輯">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <button class="btn-icon delete" onclick="showDeleteModal(${mapping.id}, '${company}', '${mapping.customer_name}')" title="刪除">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                });
+            });
+
+            tbody.innerHTML = html;
+        }
+
+        // 更新統計
+        function updateStats() {
+            const companies = [...new Set(allMappings.map(m => m.company))].filter(c => c);
+            document.getElementById('total-companies').textContent = companies.length;
+            document.getElementById('total-customers').textContent = allMappings.length;
+        }
+
+        // 解析 ETD/ETA 值為週別和星期
+        function parseWeekDay(value) {
+            if (!value) return { week: '', day: '' };
+            const weekPatterns = ['下下週', '下週', '本週', '上週'];
+            for (const week of weekPatterns) {
+                if (value.startsWith(week)) {
+                    const day = value.substring(week.length);
+                    return { week, day };
+                }
+            }
+            return { week: '', day: '' };
+        }
+
+        // 組合週別和星期為完整值
+        function combineWeekDay(week, day) {
+            if (!week || !day) return '';
+            return week + day;
+        }
+
+        // 顯示新增 Modal
+        function showAddModal() {
+            document.getElementById('modal-title').textContent = '新增映射';
+            document.getElementById('mapping-id').value = '';
+            document.getElementById('mapping-user-id').value = '';
+            document.getElementById('mapping-user-id').disabled = false;
+            document.getElementById('mapping-customer-name').value = '';
+            document.getElementById('mapping-region').value = '';
+            document.getElementById('mapping-schedule-breakpoint').value = '';
+            document.getElementById('mapping-etd-week').value = '';
+            document.getElementById('mapping-etd-day').value = '';
+            document.getElementById('mapping-eta-week').value = '';
+            document.getElementById('mapping-eta-day').value = '';
+
+            document.getElementById('mapping-modal').classList.add('show');
+        }
+
+        // 編輯映射
+        async function editMapping(id) {
+            try {
+                const response = await fetch(`/api/admin/mappings/${id}`);
+                const result = await response.json();
+
+                if (result.success) {
+                    const mapping = result.mapping;
+                    document.getElementById('modal-title').textContent = '編輯映射';
+                    document.getElementById('mapping-id').value = mapping.id;
+                    document.getElementById('mapping-user-id').value = mapping.user_id;
+                    document.getElementById('mapping-user-id').disabled = true; // 編輯時不能更改用戶
+                    document.getElementById('mapping-customer-name').value = mapping.customer_name || '';
+                    document.getElementById('mapping-region').value = mapping.region || '';
+                    document.getElementById('mapping-schedule-breakpoint').value = mapping.schedule_breakpoint || '';
+
+                    // 解析 ETD 和 ETA
+                    const etdParsed = parseWeekDay(mapping.etd || '');
+                    const etaParsed = parseWeekDay(mapping.eta || '');
+                    document.getElementById('mapping-etd-week').value = etdParsed.week;
+                    document.getElementById('mapping-etd-day').value = etdParsed.day;
+                    document.getElementById('mapping-eta-week').value = etaParsed.week;
+                    document.getElementById('mapping-eta-day').value = etaParsed.day;
+
+                    document.getElementById('mapping-modal').classList.add('show');
+                } else {
+                    showToast(result.message, 'error');
+                }
+            } catch (error) {
+                showToast('載入映射資料失敗', 'error');
+            }
+        }
+
+        // 關閉 Modal
+        function closeModal() {
+            document.getElementById('mapping-modal').classList.remove('show');
+        }
+
+        // 儲存映射
+        async function saveMapping() {
+            const id = document.getElementById('mapping-id').value;
+            const userId = document.getElementById('mapping-user-id').value;
+            const customerName = document.getElementById('mapping-customer-name').value.trim();
+            const region = document.getElementById('mapping-region').value.trim();
+            const scheduleBreakpoint = document.getElementById('mapping-schedule-breakpoint').value;
+
+            // 組合 ETD 和 ETA
+            const etdWeek = document.getElementById('mapping-etd-week').value;
+            const etdDay = document.getElementById('mapping-etd-day').value;
+            const etaWeek = document.getElementById('mapping-eta-week').value;
+            const etaDay = document.getElementById('mapping-eta-day').value;
+            const etd = combineWeekDay(etdWeek, etdDay);
+            const eta = combineWeekDay(etaWeek, etaDay);
+
+            if (!userId) {
+                showToast('請選擇用戶', 'error');
+                return;
+            }
+
+            if (!customerName) {
+                showToast('請輸入客戶簡稱', 'error');
+                return;
+            }
+
+            const data = {
+                user_id: parseInt(userId),
+                customer_name: customerName,
+                region: region || null,
+                schedule_breakpoint: scheduleBreakpoint || null,
+                etd: etd || null,
+                eta: eta || null
+            };
+
+            try {
+                let url = '/api/admin/mappings';
+                let method = 'POST';
+
+                if (id) {
+                    url = `/api/admin/mappings/${id}`;
+                    method = 'PUT';
+                }
+
+                const response = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast(id ? '映射更新成功' : '映射新增成功', 'success');
+                    closeModal();
+                    loadMappings();
+                } else {
+                    showToast(result.message, 'error');
+                }
+            } catch (error) {
+                showToast('操作失敗：' + error.message, 'error');
+            }
+        }
+
+        // 顯示刪除確認 Modal
+        function showDeleteModal(id, company, customerName) {
+            document.getElementById('delete-mapping-id').value = id;
+            document.getElementById('delete-company').textContent = company;
+            document.getElementById('delete-customer-name').textContent = customerName;
+            document.getElementById('delete-modal').classList.add('show');
+        }
+
+        // 關閉刪除 Modal
+        function closeDeleteModal() {
+            document.getElementById('delete-modal').classList.remove('show');
+        }
+
+        // 確認刪除
+        async function confirmDelete() {
+            const id = document.getElementById('delete-mapping-id').value;
+
+            try {
+                const response = await fetch(`/api/admin/mappings/${id}`, {
+                    method: 'DELETE'
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast('映射已刪除', 'success');
+                    closeDeleteModal();
+                    loadMappings();
+                } else {
+                    showToast(result.message, 'error');
+                }
+            } catch (error) {
+                showToast('刪除失敗：' + error.message, 'error');
+            }
+        }
+
+        // 顯示 Toast 通知
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            const toastMessage = document.getElementById('toast-message');
+            const icon = toast.querySelector('i');
+
+            toastMessage.textContent = message;
+            toast.className = `toast ${type} show`;
+            icon.className = type === 'success' ? 'fas fa-check-circle' : 'fas fa-exclamation-circle';
+
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // 顯示錯誤
+        function showError(message) {
+            const tbody = document.getElementById('mappings-tbody');
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" class="no-data">
+                        <i class="fas fa-exclamation-circle" style="color: #e74c3c;"></i>
+                        <p>${message}</p>
+                    </td>
+                </tr>
+            `;
+        }
+    </script>
+
+    <!-- 瀏覽器檢測腳本 -->
+    <script src="{{ url_for('static', filename='js/browser-check.js') }}?v={{ version }}"></script>
+</body>
+</html>

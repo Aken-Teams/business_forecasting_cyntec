@@ -1,0 +1,1076 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用戶管理 - FORECAST 數據處理系統</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        body {
+            background: #e6e3de;
+            min-height: 100vh;
+        }
+
+        .users-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 30px 20px;
+        }
+
+        .content-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.06);
+            overflow: hidden;
+        }
+
+        /* 頁面標題區 */
+        .page-title-bar {
+            background: white;
+            border-radius: 12px;
+            padding: 20px 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.06);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .page-title-bar h2 {
+            font-size: 1.3rem;
+            color: #2c3e50;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .page-title-bar h2 i {
+            color: #e67e22;
+        }
+
+        .btn-add-user {
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s;
+            font-size: 0.95rem;
+        }
+
+        .btn-add-user:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(39, 174, 96, 0.4);
+        }
+
+        /* 篩選與統計區 */
+        .filter-stats-bar {
+            background: white;
+            border-radius: 12px;
+            padding: 20px 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.06);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .filter-section {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .filter-section label {
+            font-weight: 600;
+            color: #2c3e50;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .filter-section select,
+        .filter-section input {
+            padding: 10px 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            min-width: 150px;
+            background-color: white;
+        }
+
+        .filter-section select {
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 35px;
+        }
+
+        .filter-section select:focus,
+        .filter-section input:focus {
+            outline: none;
+            border-color: #e67e22;
+        }
+
+        .stats-row {
+            display: flex;
+            gap: 12px;
+        }
+
+        .stat-item {
+            background: #f8f9fa;
+            padding: 10px 18px;
+            border-radius: 25px;
+            font-size: 0.9rem;
+            color: #2c3e50;
+            border: 1px solid #eee;
+        }
+
+        .stat-item.total {
+            background: #e8f4fc;
+            border-color: #d0e8f7;
+        }
+
+        .stat-item.total strong {
+            color: #3498db;
+        }
+
+        .stat-item.active {
+            background: #d4edda;
+            border-color: #c3e6cb;
+        }
+
+        .stat-item.active strong {
+            color: #28a745;
+        }
+
+        .stat-item.admin {
+            background: #f3e8ff;
+            border-color: #e4d0f7;
+        }
+
+        .stat-item.admin strong {
+            color: #9b59b6;
+        }
+
+        .users-table-container {
+            overflow-x: auto;
+        }
+
+        .users-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .users-table th,
+        .users-table td {
+            padding: 15px 20px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        .users-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+        }
+
+        .users-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .users-table td {
+            font-size: 0.95rem;
+            color: #444;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #3498db 0%, #5dade2 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 1rem;
+        }
+
+        .user-info-cell {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .user-name {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .user-username {
+            font-size: 0.85rem;
+            color: #7f8c8d;
+        }
+
+        .role-badge {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .role-admin {
+            background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
+            color: white;
+        }
+
+        .role-it {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+        }
+
+        .role-user {
+            background: #e8f4fc;
+            color: #2980b9;
+        }
+
+        .status-badge {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .status-active {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-inactive {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .last-login {
+            font-size: 0.85rem;
+            color: #7f8c8d;
+        }
+
+        .action-btns {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-action {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.3s;
+        }
+
+        .btn-edit {
+            background: #3498db;
+            color: white;
+        }
+
+        .btn-edit:hover {
+            background: #2980b9;
+        }
+
+        .btn-delete {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .btn-delete:hover {
+            background: #c0392b;
+        }
+
+        .btn-toggle {
+            background: #f39c12;
+            color: white;
+        }
+
+        .btn-toggle:hover {
+            background: #d68910;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px;
+            color: #7f8c8d;
+        }
+
+        .loading i {
+            font-size: 2.5rem;
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        /* Modal 樣式 */
+        .user-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+            backdrop-filter: blur(4px);
+        }
+
+        .user-modal.show {
+            display: flex;
+        }
+
+        .user-modal-content {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            width: 90%;
+            animation: modalSlideIn 0.3s ease-out;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: scale(0.9) translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+
+        .user-modal-header {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            padding: 20px 25px;
+            border-radius: 16px 16px 0 0;
+            color: white;
+        }
+
+        .user-modal-header.edit {
+            background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+        }
+
+        .user-modal-header h3 {
+            font-size: 1.3rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .user-modal-body {
+            padding: 25px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 8px;
+            font-size: 0.95rem;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .user-modal-footer {
+            padding: 20px 25px;
+            border-top: 1px solid #eee;
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+
+        .btn-modal {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s;
+        }
+
+        .btn-cancel {
+            background: #95a5a6;
+            color: white;
+        }
+
+        .btn-cancel:hover {
+            background: #7f8c8d;
+        }
+
+        .btn-save {
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+            color: white;
+        }
+
+        .btn-save:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(39, 174, 96, 0.4);
+        }
+
+        /* Toast 通知 */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 10px;
+            color: white;
+            font-weight: 600;
+            display: none;
+            align-items: center;
+            gap: 10px;
+            z-index: 20000;
+            animation: toastSlide 0.3s ease-out;
+        }
+
+        @keyframes toastSlide {
+            from {
+                opacity: 0;
+                transform: translateX(50px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .toast.success {
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+        }
+
+        .toast.error {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+        }
+
+        .toast.show {
+            display: flex;
+        }
+
+        @media (max-width: 768px) {
+            .page-title-bar {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+
+            .filter-stats-bar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .filter-section {
+                justify-content: center;
+            }
+
+            .filter-section select,
+            .filter-section input {
+                min-width: 100%;
+            }
+
+            .stats-row {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+
+            .action-btns {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="users-container">
+        <!-- Header 與測試功能頁面一致 -->
+        <header class="header">
+            <div class="header-content">
+                <div class="header-left">
+                    <div class="header-logo">
+                        <img src="{{ url_for('static', filename='logo/logo.png') }}" alt="FORECAST Logo" class="logo-image">
+                    </div>
+                    <div class="header-text">
+                        <h1>用戶管理</h1>
+                        <p class="header-subtitle">查看與管理所有系統用戶</p>
+                    </div>
+                </div>
+                <div class="header-user">
+                    <div class="user-info">
+                        <i class="fas fa-user-circle"></i>
+                        <span class="user-name">{{ user.display_name }}</span>
+                        <span class="user-role">(管理者)</span>
+                    </div>
+                    <a href="/admin" class="logout-btn" style="background: #6c757d;">
+                        <i class="fas fa-arrow-left"></i> 返回
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <!-- 頁面標題區 -->
+        <div class="page-title-bar">
+            <h2><i class="fas fa-users-cog"></i> 用戶列表</h2>
+            <button class="btn-add-user" onclick="showAddModal()">
+                <i class="fas fa-plus"></i> 新增用戶
+            </button>
+        </div>
+
+        <!-- 篩選與統計區 -->
+        <div class="filter-stats-bar">
+            <div class="filter-section">
+                <label><i class="fas fa-filter"></i> 篩選：</label>
+                <select id="filter-role" onchange="applyFilters()">
+                    <option value="">全部角色</option>
+                    <option value="admin">管理者</option>
+                    <option value="it">IT</option>
+                    <option value="user">一般用戶</option>
+                </select>
+                <select id="filter-status" onchange="applyFilters()">
+                    <option value="">全部狀態</option>
+                    <option value="1">啟用中</option>
+                    <option value="0">已停用</option>
+                </select>
+                <input type="text" id="filter-search" placeholder="搜尋用戶名稱..." oninput="applyFilters()">
+            </div>
+            <div class="stats-row">
+                <div class="stat-item total">
+                    總用戶數：<strong id="total-users">0</strong>
+                </div>
+                <div class="stat-item active">
+                    啟用中：<strong id="active-users">0</strong>
+                </div>
+                <div class="stat-item admin">
+                    管理者：<strong id="admin-users">0</strong>
+                </div>
+            </div>
+        </div>
+
+        <!-- 用戶表格 -->
+        <div class="content-card">
+            <div class="users-table-container">
+                <table class="users-table">
+                    <thead>
+                        <tr>
+                            <th>用戶</th>
+                            <th>公司</th>
+                            <th>角色</th>
+                            <th>狀態</th>
+                            <th>建立時間</th>
+                            <th>最後登入</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-tbody">
+                        <tr>
+                            <td colspan="7" class="loading">
+                                <i class="fas fa-spinner"></i>
+                                <p>載入中...</p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>&copy; 2025 智合科技，FORECAST 數據處理系統. 智能預測，精準分析.</p>
+        </footer>
+    </div>
+
+    <!-- 新增/編輯用戶 Modal -->
+    <div class="user-modal" id="user-modal">
+        <div class="user-modal-content">
+            <div class="user-modal-header" id="modal-header">
+                <h3 id="modal-title"><i class="fas fa-user-plus"></i> 新增用戶</h3>
+            </div>
+            <div class="user-modal-body">
+                <form id="user-form">
+                    <input type="hidden" id="user-id">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label><i class="fas fa-user"></i> 帳號</label>
+                            <input type="text" id="username" placeholder="請輸入帳號" required>
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-id-card"></i> 顯示名稱</label>
+                            <input type="text" id="display-name" placeholder="請輸入顯示名稱" required>
+                        </div>
+                    </div>
+                    <div class="form-group" id="password-group">
+                        <label><i class="fas fa-lock"></i> 密碼</label>
+                        <input type="password" id="password" placeholder="請輸入密碼">
+                        <small id="password-hint" style="color: #7f8c8d; font-size: 0.85rem;"></small>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label><i class="fas fa-building"></i> 公司</label>
+                            <input type="text" id="company" placeholder="請輸入公司名稱">
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-user-tag"></i> 角色</label>
+                            <select id="role">
+                                <option value="user">一般用戶</option>
+                                <option value="it">IT</option>
+                                <option value="admin">管理者</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label><i class="fas fa-toggle-on"></i> 狀態</label>
+                        <select id="is-active">
+                            <option value="1">啟用</option>
+                            <option value="0">停用</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="user-modal-footer">
+                <button class="btn-modal btn-cancel" onclick="closeModal()">
+                    <i class="fas fa-times"></i> 取消
+                </button>
+                <button class="btn-modal btn-save" onclick="saveUser()">
+                    <i class="fas fa-save"></i> 儲存
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 刪除確認 Modal -->
+    <div class="custom-modal-overlay" id="delete-modal">
+        <div class="custom-modal">
+            <div class="custom-modal-header">
+                <i class="fas fa-exclamation-triangle warning-icon"></i>
+                <h3>確認刪除</h3>
+            </div>
+            <div class="custom-modal-body">
+                <p>確定要刪除用戶 <strong id="delete-user-name"></strong> 嗎？</p>
+                <p class="warning-text">此操作無法復原！</p>
+            </div>
+            <div class="custom-modal-footer">
+                <button class="btn btn-secondary" onclick="closeDeleteModal()">
+                    <i class="fas fa-times"></i> 取消
+                </button>
+                <button class="btn btn-danger" id="confirm-delete-btn">
+                    <i class="fas fa-trash"></i> 確認刪除
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast 通知 -->
+    <div class="toast" id="toast">
+        <i class="fas fa-check-circle" id="toast-icon"></i>
+        <span id="toast-message"></span>
+    </div>
+
+    <script>
+        let allUsers = [];
+        let editingUserId = null;
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            loadUsers();
+        });
+
+        // 載入用戶資料
+        async function loadUsers() {
+            try {
+                const response = await fetch('/api/admin/users');
+                const result = await response.json();
+
+                if (result.success) {
+                    allUsers = result.users;
+                    renderUsers(allUsers);
+                    updateStats(allUsers);
+                } else {
+                    showError('載入失敗：' + result.message);
+                }
+            } catch (error) {
+                console.error('載入用戶資料失敗:', error);
+                showError('載入失敗：' + error.message);
+            }
+        }
+
+        // 渲染用戶表格
+        function renderUsers(users) {
+            const tbody = document.getElementById('users-tbody');
+
+            if (!users || users.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="loading">沒有用戶資料</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = users.map(user => `
+                <tr>
+                    <td>
+                        <div class="user-info-cell">
+                            <div class="user-avatar">${getInitials(user.display_name)}</div>
+                            <div>
+                                <div class="user-name">${escapeHtml(user.display_name)}</div>
+                                <div class="user-username">@${escapeHtml(user.username)}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td>${escapeHtml(user.company) || '-'}</td>
+                    <td>
+                        <span class="role-badge role-${user.role}">
+                            ${formatRole(user.role)}
+                        </span>
+                    </td>
+                    <td>
+                        <span class="status-badge status-${user.is_active ? 'active' : 'inactive'}">
+                            ${user.is_active ? '啟用' : '停用'}
+                        </span>
+                    </td>
+                    <td>${user.created_at || '-'}</td>
+                    <td class="last-login">${user.last_login || '從未登入'}</td>
+                    <td>
+                        <div class="action-btns">
+                            <button class="btn-action btn-edit" onclick="showEditModal(${user.id})" title="編輯">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn-action btn-toggle" onclick="toggleUserStatus(${user.id})" title="${user.is_active ? '停用' : '啟用'}">
+                                <i class="fas fa-${user.is_active ? 'ban' : 'check'}"></i>
+                            </button>
+                            <button class="btn-action btn-delete" onclick="showDeleteModal(${user.id}, '${escapeHtml(user.display_name)}')" title="刪除">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // 更新統計（始終基於全部用戶）
+        function updateStats(users) {
+            document.getElementById('total-users').textContent = users.length;
+            document.getElementById('active-users').textContent = users.filter(u => u.is_active).length;
+            document.getElementById('admin-users').textContent = users.filter(u => u.role === 'admin').length;
+        }
+
+        // 篩選功能
+        function applyFilters() {
+            const roleFilter = document.getElementById('filter-role').value;
+            const statusFilter = document.getElementById('filter-status').value;
+            const searchFilter = document.getElementById('filter-search').value.toLowerCase().trim();
+
+            let filtered = allUsers;
+
+            // 角色篩選
+            if (roleFilter) {
+                filtered = filtered.filter(u => u.role === roleFilter);
+            }
+
+            // 狀態篩選（處理布林值或數字）
+            if (statusFilter !== '') {
+                const isActiveFilter = statusFilter === '1';
+                filtered = filtered.filter(u => {
+                    // 處理 is_active 可能是布林值或數字
+                    const userIsActive = u.is_active === true || u.is_active === 1;
+                    return userIsActive === isActiveFilter;
+                });
+            }
+
+            // 搜尋篩選（名稱、帳號、公司）
+            if (searchFilter) {
+                filtered = filtered.filter(u =>
+                    (u.display_name && u.display_name.toLowerCase().includes(searchFilter)) ||
+                    (u.username && u.username.toLowerCase().includes(searchFilter)) ||
+                    (u.company && u.company.toLowerCase().includes(searchFilter))
+                );
+            }
+
+            renderUsers(filtered);
+        }
+
+        // 取得名字縮寫
+        function getInitials(name) {
+            if (!name) return '?';
+            return name.charAt(0).toUpperCase();
+        }
+
+        // 格式化角色
+        function formatRole(role) {
+            const mapping = {
+                'admin': '管理者',
+                'it': 'IT',
+                'user': '一般用戶'
+            };
+            return mapping[role] || role;
+        }
+
+        // HTML 轉義
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // 顯示新增用戶 Modal
+        function showAddModal() {
+            editingUserId = null;
+            document.getElementById('modal-title').innerHTML = '<i class="fas fa-user-plus"></i> 新增用戶';
+            document.getElementById('modal-header').className = 'user-modal-header';
+            document.getElementById('user-form').reset();
+            document.getElementById('user-id').value = '';
+            document.getElementById('username').disabled = false;
+            document.getElementById('password').required = true;
+            document.getElementById('password-hint').textContent = '';
+            document.getElementById('user-modal').classList.add('show');
+        }
+
+        // 顯示編輯用戶 Modal
+        function showEditModal(userId) {
+            const user = allUsers.find(u => u.id === userId);
+            if (!user) return;
+
+            editingUserId = userId;
+            document.getElementById('modal-title').innerHTML = '<i class="fas fa-user-edit"></i> 編輯用戶';
+            document.getElementById('modal-header').className = 'user-modal-header edit';
+
+            document.getElementById('user-id').value = user.id;
+            document.getElementById('username').value = user.username;
+            document.getElementById('username').disabled = true;
+            document.getElementById('display-name').value = user.display_name;
+            document.getElementById('password').value = '';
+            document.getElementById('password').required = false;
+            document.getElementById('password-hint').textContent = '留空則不修改密碼';
+            document.getElementById('company').value = user.company || '';
+            document.getElementById('role').value = user.role;
+            document.getElementById('is-active').value = user.is_active ? '1' : '0';
+
+            document.getElementById('user-modal').classList.add('show');
+        }
+
+        // 關閉 Modal
+        function closeModal() {
+            document.getElementById('user-modal').classList.remove('show');
+        }
+
+        // 儲存用戶
+        async function saveUser() {
+            const userId = document.getElementById('user-id').value;
+            const username = document.getElementById('username').value.trim();
+            const displayName = document.getElementById('display-name').value.trim();
+            const password = document.getElementById('password').value;
+            const company = document.getElementById('company').value.trim();
+            const role = document.getElementById('role').value;
+            const isActive = document.getElementById('is-active').value === '1';
+
+            // 驗證
+            if (!username || !displayName) {
+                showToast('請填寫帳號和顯示名稱', 'error');
+                return;
+            }
+
+            if (!userId && !password) {
+                showToast('新增用戶時必須設定密碼', 'error');
+                return;
+            }
+
+            const data = {
+                username,
+                display_name: displayName,
+                company,
+                role,
+                is_active: isActive
+            };
+
+            if (password) {
+                data.password = password;
+            }
+
+            try {
+                let response;
+                if (userId) {
+                    // 更新用戶
+                    response = await fetch(`/api/admin/users/${userId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                } else {
+                    // 新增用戶
+                    response = await fetch('/api/admin/users', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                }
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast(userId ? '用戶更新成功' : '用戶新增成功', 'success');
+                    closeModal();
+                    loadUsers();
+                } else {
+                    showToast(result.message || '操作失敗', 'error');
+                }
+            } catch (error) {
+                console.error('儲存用戶失敗:', error);
+                showToast('儲存失敗：' + error.message, 'error');
+            }
+        }
+
+        // 切換用戶狀態
+        async function toggleUserStatus(userId) {
+            const user = allUsers.find(u => u.id === userId);
+            if (!user) return;
+
+            try {
+                const response = await fetch(`/api/admin/users/${userId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ is_active: !user.is_active })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast(`用戶已${user.is_active ? '停用' : '啟用'}`, 'success');
+                    loadUsers();
+                } else {
+                    showToast(result.message || '操作失敗', 'error');
+                }
+            } catch (error) {
+                console.error('切換狀態失敗:', error);
+                showToast('操作失敗：' + error.message, 'error');
+            }
+        }
+
+        // 顯示刪除確認 Modal
+        function showDeleteModal(userId, userName) {
+            document.getElementById('delete-user-name').textContent = userName;
+            document.getElementById('confirm-delete-btn').onclick = function() {
+                deleteUser(userId);
+            };
+            document.getElementById('delete-modal').style.display = 'flex';
+            setTimeout(() => {
+                document.getElementById('delete-modal').classList.add('show');
+            }, 10);
+        }
+
+        // 關閉刪除確認 Modal
+        function closeDeleteModal() {
+            document.getElementById('delete-modal').classList.remove('show');
+            setTimeout(() => {
+                document.getElementById('delete-modal').style.display = 'none';
+            }, 300);
+        }
+
+        // 刪除用戶
+        async function deleteUser(userId) {
+            try {
+                const response = await fetch(`/api/admin/users/${userId}`, {
+                    method: 'DELETE'
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast('用戶已刪除', 'success');
+                    closeDeleteModal();
+                    loadUsers();
+                } else {
+                    showToast(result.message || '刪除失敗', 'error');
+                }
+            } catch (error) {
+                console.error('刪除用戶失敗:', error);
+                showToast('刪除失敗：' + error.message, 'error');
+            }
+        }
+
+        // 顯示 Toast 通知
+        function showToast(message, type) {
+            const toast = document.getElementById('toast');
+            const icon = document.getElementById('toast-icon');
+            const msg = document.getElementById('toast-message');
+
+            toast.className = `toast ${type} show`;
+            icon.className = type === 'success' ? 'fas fa-check-circle' : 'fas fa-exclamation-circle';
+            msg.textContent = message;
+
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // 顯示錯誤
+        function showError(message) {
+            const tbody = document.getElementById('users-tbody');
+            tbody.innerHTML = `<tr><td colspan="7" class="loading"><i class="fas fa-exclamation-circle" style="color: #e74c3c;"></i><p>${message}</p></td></tr>`;
+        }
+    </script>
+
+    <!-- 瀏覽器檢測腳本 -->
+    <script src="{{ url_for('static', filename='js/browser-check.js') }}?v={{ version }}"></script>
+</body>
+</html>

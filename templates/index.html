@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FORECAST 數據處理系統</title>
+    
+    <!-- Meta 資料 -->
+    <meta name="description" content="專業的FORECAST數據處理系統，支援ERP淨需求文件與Forecast文件整合，提供智能映射配置和高效數據處理功能">
+    <meta name="keywords" content="FORECAST, 數據處理, ERP, 淨需求, 映射配置, 數據整合, 業務預測">
+    <meta name="author" content="FORECAST 數據處理系統">
+    <meta name="robots" content="index, follow">
+    
+    <!-- Open Graph Meta 資料 -->
+    <meta property="og:title" content="FORECAST 數據處理系統">
+    <meta property="og:description" content="專業的FORECAST數據處理系統，支援ERP淨需求文件與Forecast文件整合">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="http://localhost:12026">
+    <meta property="og:image" content="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
+    <meta property="og:site_name" content="FORECAST 數據處理系統">
+    
+    <!-- Twitter Card Meta 資料 -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="FORECAST 數據處理系統">
+    <meta name="twitter:description" content="專業的FORECAST數據處理系統，支援ERP淨需求文件與Forecast文件整合">
+    <meta name="twitter:image" content="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
+    
+    <!-- 頁籤圖標 -->
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
+    <link rel="shortcut icon" type="image/png" href="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}?v={{ version }}" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- 標題區域 -->
+        <header class="header">
+            <div class="header-content">
+                <div class="header-left">
+                    <div class="header-logo">
+                        <img src="{{ url_for('static', filename='logo/logo.png') }}" alt="FORECAST Logo" class="logo-image">
+                    </div>
+                    <div class="header-text">
+                        <h1>FORECAST 數據處理系統</h1>
+                        <p class="header-subtitle">智能預測數據整合與分析平台</p>
+                    </div>
+                </div>
+                {% if user %}
+                <div class="header-user">
+                    <div class="user-info">
+                        <i class="fas fa-user-circle"></i>
+                        <span class="user-name">{{ user.display_name }}</span>
+                        <span class="user-role">({{ user.company }})</span>
+                    </div>
+                    <button class="logout-btn" onclick="handleLogout()">
+                        <i class="fas fa-sign-out-alt"></i> 登出
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+        </header>
+
+        <!-- 進度指示器 -->
+        <div class="progress-container">
+            <div class="progress-steps">
+                <div class="step active" data-step="1">
+                    <div class="step-circle">
+                        <i class="fas fa-upload"></i>
+                    </div>
+                    <div class="step-label">文件上傳</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step" data-step="2">
+                    <div class="step-circle">
+                        <i class="fas fa-cogs"></i>
+                    </div>
+                    <div class="step-label">數據清理</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step" data-step="3">
+                    <div class="step-circle">
+                        <i class="fas fa-link"></i>
+                    </div>
+                    <div class="step-label">映射整合</div>
+                </div>
+                <div class="step-line"></div>
+                <div class="step" data-step="4">
+                    <div class="step-circle">
+                        <i class="fas fa-magic"></i>
+                    </div>
+                    <div class="step-label">FORECAST處理</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 主要內容區域 -->
+        <main class="main-content">
+            <!-- 文件上傳區域 -->
+            <section class="upload-section" id="upload-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-upload"></i> 文件上傳</h2>
+                        <p>請上傳以下 3 個文件（必須全部上傳才能進入下一步）</p>
+                    </div>
+                    <div class="card-body">
+                        <div class="upload-grid">
+                            <!-- ERP文件上傳 -->
+                            <div class="upload-item">
+                                <div class="upload-box" id="erp-upload-box">
+                                    <i class="fas fa-file-excel upload-icon"></i>
+                                    <h3>ERP淨需求文件</h3>
+                                    <p>上傳廣達淨需求.xlsx</p>
+                                    <input type="file" id="erp-file" accept=".xlsx,.xls" style="display: none;">
+                                    <button class="btn btn-primary" onclick="document.getElementById('erp-file').click()">
+                                        <i class="fas fa-plus"></i> 選擇文件
+                                    </button>
+                                </div>
+                                <div class="upload-status" id="erp-status" style="display: none;">
+                                    <div class="status-content">
+                                        <i class="fas fa-check-circle status-icon success"></i>
+                                        <div class="status-text">
+                                            <div class="status-title">上傳成功</div>
+                                            <div class="status-details" id="erp-details"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Forecast文件上傳 -->
+                            <div class="upload-item">
+                                <div class="upload-box" id="forecast-upload-box">
+                                    <i class="fas fa-chart-bar upload-icon"></i>
+                                    <h3>Forecast文件</h3>
+                                    <p>上傳 ForecastDataFile_ALL.xlsx</p>
+                                    <input type="file" id="forecast-file" accept=".xlsx,.xls" style="display: none;">
+                                    <button class="btn btn-primary" onclick="document.getElementById('forecast-file').click()">
+                                        <i class="fas fa-plus"></i> 選擇文件
+                                    </button>
+                                </div>
+                                <div class="upload-status" id="forecast-status" style="display: none;">
+                                    <div class="status-content">
+                                        <i class="fas fa-check-circle status-icon success"></i>
+                                        <div class="status-text">
+                                            <div class="status-title">上傳成功</div>
+                                            <div class="status-details" id="forecast-details"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 在途文件上傳 -->
+                            <div class="upload-item">
+                                <div class="upload-box" id="transit-upload-box">
+                                    <i class="fas fa-truck upload-icon"></i>
+                                    <h3>在途文件</h3>
+                                    <p>上傳在途數據.xlsx</p>
+                                    <input type="file" id="transit-file" accept=".xlsx,.xls" style="display: none;">
+                                    <button class="btn btn-primary" onclick="document.getElementById('transit-file').click()">
+                                        <i class="fas fa-plus"></i> 選擇文件
+                                    </button>
+                                </div>
+                                <div class="upload-status" id="transit-status" style="display: none;">
+                                    <div class="status-content">
+                                        <i class="fas fa-check-circle status-icon success"></i>
+                                        <div class="status-text">
+                                            <div class="status-title">上傳成功</div>
+                                            <div class="status-details" id="transit-details"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 數據清理區域 -->
+            <section class="process-section" id="cleanup-section" style="display: none;">
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-broom"></i> 數據清理</h2>
+                        <p>清理Forecast文件中的特定數據</p>
+                    </div>
+                    <div class="card-body">
+                        <div class="process-info">
+                            <div class="info-item">
+                                <i class="fas fa-info-circle"></i>
+                                <span>當K欄位是"供應數量"時，清空L~AW欄位的數值</span>
+                            </div>
+                            <div class="info-item">
+                                <i class="fas fa-info-circle"></i>
+                                <span>當I欄位有"庫存數量"時，清空下一列I欄位的數值</span>
+                            </div>
+                        </div>
+                        <div class="action-buttons-row">
+                            <button class="btn btn-back" id="cleanup-back-btn" onclick="confirmGoBack(1)">
+                                <i class="fas fa-arrow-left"></i> 回上一步
+                            </button>
+                            <button class="btn btn-secondary" id="cleanup-btn">
+                                <i class="fas fa-play"></i> 開始清理
+                            </button>
+                        </div>
+                        <div class="progress-container" id="cleanup-progress" style="display: none;">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="cleanup-progress-fill"></div>
+                            </div>
+                            <div class="progress-text" id="cleanup-progress-text">處理中...</div>
+                        </div>
+                        <div class="process-result" id="cleanup-result" style="display: none;"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 映射整合區域 -->
+            <section class="process-section" id="mapping-section" style="display: none;">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-header-row">
+                            <div class="card-header-text">
+                                <h2><i class="fas fa-link"></i> 映射整合</h2>
+                                <p>整合 ERP 和在途數據與映射表的關係</p>
+                            </div>
+                            <button class="btn btn-secondary" id="mapping-config-btn">
+                                <i class="fas fa-cog"></i> 配置映射表
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="process-info">
+                            <div class="info-item">
+                                <i class="fas fa-file-excel"></i>
+                                <span>ERP 數據：根據客戶簡稱整合地區、排程斷點、ETD、ETA</span>
+                            </div>
+                            <div class="info-item">
+                                <i class="fas fa-truck"></i>
+                                <span>在途數據：根據 E 欄位與映射表 A 欄位比對，整合 B、D、E、F 欄位資訊</span>
+                            </div>
+                        </div>
+                        <div class="action-buttons-row">
+                            <button class="btn btn-back" id="mapping-back-btn" onclick="confirmGoBack(2)">
+                                <i class="fas fa-arrow-left"></i> 回上一步
+                            </button>
+                            <button class="btn btn-primary" id="mapping-process-btn">
+                                <i class="fas fa-play"></i> 開始整合
+                            </button>
+                        </div>
+                        <div class="progress-container" id="mapping-progress" style="display: none;">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="mapping-progress-fill"></div>
+                            </div>
+                            <div class="progress-text" id="mapping-progress-text">處理中...</div>
+                        </div>
+                        <div class="process-result" id="mapping-result" style="display: none;"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- FORECAST處理區域 -->
+            <section class="process-section" id="forecast-section" style="display: none;">
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-magic"></i> FORECAST處理</h2>
+                        <p>執行智能預測數據填寫</p>
+                    </div>
+                    <div class="card-body">
+                        <div class="process-info">
+                            <div class="info-item">
+                                <i class="fas fa-rocket"></i>
+                                <span>超高速批量處理，性能提升20倍</span>
+                            </div>
+                            <div class="info-item">
+                                <i class="fas fa-plus"></i>
+                                <span>支援累加邏輯，避免數據覆蓋</span>
+                            </div>
+                            <div class="info-item">
+                                <i class="fas fa-truck"></i>
+                                <span>自動整合 Transit 在途數據，根據 ETA 智能填寫</span>
+                            </div>
+                        </div>
+                        <div class="action-buttons-row">
+                            <button class="btn btn-back" id="forecast-back-btn" onclick="confirmGoBack(3)">
+                                <i class="fas fa-arrow-left"></i> 回上一步
+                            </button>
+                            <button class="btn btn-success" id="forecast-btn">
+                                <i class="fas fa-play"></i> 開始FORECAST處理
+                            </button>
+                        </div>
+                        <div class="progress-container" id="forecast-progress" style="display: none;">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="forecast-progress-fill"></div>
+                            </div>
+                            <div class="progress-text" id="forecast-progress-text">處理中...</div>
+                        </div>
+                        <div class="process-result" id="forecast-result" style="display: none;"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 結果下載區域 -->
+            <section class="download-section" id="download-section" style="display: none;">
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-download"></i> 結果下載</h2>
+                        <p>下載FORECAST處理完成的文件</p>
+                    </div>
+                    <div class="card-body">
+                        <!-- 完成資訊 -->
+                        <div class="completion-info" id="completion-info">
+                            <div class="completion-item">
+                                <i class="fas fa-user"></i>
+                                <span class="completion-label">客戶名稱：</span>
+                                <span class="completion-value" id="completion-customer">{{ user.display_name if user else '-' }}</span>
+                            </div>
+                            <div class="completion-item">
+                                <i class="fas fa-calendar-alt"></i>
+                                <span class="completion-label">完成日期：</span>
+                                <span class="completion-value" id="completion-date">-</span>
+                            </div>
+                            <div class="completion-item">
+                                <i class="fas fa-clock"></i>
+                                <span class="completion-label">完成時間：</span>
+                                <span class="completion-value" id="completion-time">-</span>
+                            </div>
+                        </div>
+                        <div class="download-single">
+                            <div class="download-item">
+                                <i class="fas fa-file-excel"></i>
+                                <div class="download-info">
+                                    <div class="download-title">FORECAST處理結果</div>
+                                    <div class="download-desc">forecast_result.xlsx</div>
+                                </div>
+                                <button class="btn btn-primary" onclick="downloadFile('forecast_result.xlsx')">
+                                    <i class="fas fa-download"></i> 下載
+                                </button>
+                            </div>
+                        </div>
+                        <div class="action-buttons-row" style="margin-top: 20px;">
+                            <button class="btn btn-back" onclick="confirmGoBack(4)">
+                                <i class="fas fa-arrow-left"></i> 回上一步
+                            </button>
+                            <button class="btn btn-secondary" onclick="confirmRestart()">
+                                <i class="fas fa-redo"></i> 重新開始
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- 頁腳 -->
+        <footer class="footer">
+            <p>&copy; 2025 智合科技，FORECAST 數據處理系統. 智能預測，精準分析.</p>
+        </footer>
+    </div>
+
+    <!-- Chrome 瀏覽器阻擋彈窗 -->
+    <div id="chrome-block-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <i class="fas fa-exclamation-triangle"></i>
+                <h2>瀏覽器不支援</h2>
+            </div>
+            <div class="modal-body">
+                <p>檢測到您正在使用 Google Chrome 瀏覽器。</p>
+                <p>由於快取問題，本系統建議使用以下方式以獲得最佳體驗。</p>
+                <div class="browser-info">
+                    <div class="browser-item">
+                        <i class="fab fa-edge"></i>
+                        <div class="browser-details">
+                            <h3>Microsoft Edge</h3>
+                            <p>推薦瀏覽器，完全相容且無快取問題</p>
+                        </div>
+                    </div>
+                    <div class="browser-item">
+                        <i class="fab fa-firefox-browser"></i>
+                        <div class="browser-details">
+                            <h3>Mozilla Firefox</h3>
+                            <p>支援瀏覽器，穩定可靠且相容性佳</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-primary" onclick="openInEdge()">
+                        <i class="fab fa-edge"></i> 用 Edge 開啟
+                    </button>
+                    <button class="btn btn-firefox" onclick="openInFirefox()">
+                        <i class="fab fa-firefox-browser"></i> 用 Firefox 開啟
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firefox 教學彈窗 -->
+    <div id="firefox-tutorial-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header" style="background: linear-gradient(135deg, #ff9500, #ff7b00);">
+                <i class="fab fa-firefox-browser"></i>
+                <h2>Firefox 使用教學</h2>
+            </div>
+            <div class="modal-body">
+                <p>請按照以下步驟在 Firefox 瀏覽器中使用本系統：</p>
+                
+                <div class="tutorial-steps">
+                    <div class="tutorial-step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h4>複製網址</h4>
+                            <p>請複製以下網址到剪貼簿：</p>
+                            <div class="url-copy-box">
+                                <input type="text" id="tutorial-url" value="" readonly>
+                                <button onclick="copyUrlToClipboard()" class="copy-btn">
+                                    <i class="fas fa-copy"></i> 複製
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="tutorial-step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h4>開啟 Firefox</h4>
+                            <p>在您的電腦上開啟 Mozilla Firefox 瀏覽器</p>
+                        </div>
+                    </div>
+                    
+                    <div class="tutorial-step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h4>貼上網址</h4>
+                            <p>在 Firefox 的網址列中貼上網址並按 Enter 鍵</p>
+                        </div>
+                    </div>
+                    
+                    <div class="tutorial-step">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <h4>開始使用</h4>
+                            <p>現在您可以在 Firefox 中正常使用本系統了！</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="modal-actions">
+                    <button class="btn btn-primary" onclick="closeFirefoxTutorial()">
+                        <i class="fas fa-check"></i> 我知道了
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <script src="{{ url_for('static', filename='js/main.js') }}?v={{ version }}"></script>
+
+    <!-- 登出功能 -->
+    <script>
+        // 顯示登出確認彈窗
+        function handleLogout() {
+            showLogoutModal();
+        }
+
+        // 顯示登出確認彈窗
+        function showLogoutModal() {
+            // 移除已存在的彈窗
+            const existingModal = document.getElementById('logout-modal');
+            if (existingModal) {
+                existingModal.remove();
+            }
+
+            // 創建彈窗
+            const modal = document.createElement('div');
+            modal.id = 'logout-modal';
+            modal.className = 'logout-modal';
+            modal.innerHTML = `
+                <div class="logout-modal-overlay"></div>
+                <div class="logout-modal-content">
+                    <div class="logout-modal-header">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>確認登出</span>
+                    </div>
+                    <div class="logout-modal-body">
+                        <div class="logout-icon">
+                            <i class="fas fa-user-circle"></i>
+                        </div>
+                        <div class="logout-message">
+                            您確定要登出系統嗎？
+                        </div>
+                        <div class="logout-hint">
+                            <i class="fas fa-info-circle"></i>
+                            登出後需要重新登入才能繼續使用
+                        </div>
+                    </div>
+                    <div class="logout-modal-footer">
+                        <button class="logout-cancel-btn" onclick="closeLogoutModal()">
+                            <i class="fas fa-times"></i> 取消
+                        </button>
+                        <button class="logout-confirm-btn" onclick="executeLogout()">
+                            <i class="fas fa-sign-out-alt"></i> 確定登出
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            // 添加樣式
+            addLogoutModalStyles();
+
+            // 添加到頁面
+            document.body.appendChild(modal);
+
+            // 點擊遮罩關閉
+            modal.querySelector('.logout-modal-overlay').addEventListener('click', closeLogoutModal);
+        }
+
+        // 添加登出彈窗樣式
+        function addLogoutModalStyles() {
+            if (document.getElementById('logout-modal-style')) return;
+
+            const style = document.createElement('style');
+            style.id = 'logout-modal-style';
+            style.textContent = `
+                .logout-modal {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    z-index: 10000;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+
+                .logout-modal-overlay {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0, 0, 0, 0.5);
+                    backdrop-filter: blur(3px);
+                }
+
+                .logout-modal-content {
+                    position: relative;
+                    background: #fff;
+                    border-radius: 16px;
+                    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                    max-width: 400px;
+                    width: 90%;
+                    animation: logoutModalSlideIn 0.3s ease-out;
+                    overflow: hidden;
+                }
+
+                @keyframes logoutModalSlideIn {
+                    from {
+                        opacity: 0;
+                        transform: scale(0.9) translateY(-20px);
+                    }
+                    to {
+                        opacity: 1;
+                        transform: scale(1) translateY(0);
+                    }
+                }
+
+                @keyframes logoutModalSlideOut {
+                    from {
+                        opacity: 1;
+                        transform: scale(1) translateY(0);
+                    }
+                    to {
+                        opacity: 0;
+                        transform: scale(0.9) translateY(-20px);
+                    }
+                }
+
+                .logout-modal-header {
+                    background: linear-gradient(135deg, #c87e41, #a66332);
+                    color: white;
+                    padding: 20px 24px;
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                    font-size: 1.2em;
+                    font-weight: 600;
+                }
+
+                .logout-modal-header i {
+                    font-size: 1.3em;
+                }
+
+                .logout-modal-body {
+                    padding: 30px 24px;
+                    text-align: center;
+                }
+
+                .logout-icon {
+                    font-size: 4em;
+                    color: #bc773e;
+                    margin-bottom: 20px;
+                }
+
+                .logout-message {
+                    font-size: 1.2em;
+                    color: #333;
+                    margin-bottom: 20px;
+                    font-weight: 500;
+                }
+
+                .logout-hint {
+                    background: #f8f9fa;
+                    border-radius: 8px;
+                    padding: 12px 16px;
+                    color: #6c757d;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 10px;
+                    font-size: 0.9em;
+                }
+
+                .logout-hint i {
+                    color: #bc773e;
+                }
+
+                .logout-modal-footer {
+                    padding: 16px 24px 24px;
+                    display: flex;
+                    justify-content: center;
+                    gap: 12px;
+                }
+
+                .logout-cancel-btn {
+                    background: #e9ecef;
+                    color: #495057;
+                    border: none;
+                    border-radius: 8px;
+                    padding: 12px 28px;
+                    font-size: 1em;
+                    font-weight: 600;
+                    cursor: pointer;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                    transition: all 0.2s ease;
+                }
+
+                .logout-cancel-btn:hover {
+                    background: #dee2e6;
+                }
+
+                .logout-confirm-btn {
+                    background: linear-gradient(135deg, #dc3545, #c82333);
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    padding: 12px 28px;
+                    font-size: 1em;
+                    font-weight: 600;
+                    cursor: pointer;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                    transition: all 0.2s ease;
+                }
+
+                .logout-confirm-btn:hover {
+                    background: linear-gradient(135deg, #c82333, #a71d2a);
+                    transform: translateY(-2px);
+                    box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        // 關閉登出彈窗
+        function closeLogoutModal() {
+            const modal = document.getElementById('logout-modal');
+            if (modal) {
+                modal.querySelector('.logout-modal-content').style.animation = 'logoutModalSlideOut 0.2s ease-in forwards';
+                setTimeout(() => {
+                    modal.remove();
+                }, 200);
+            }
+        }
+
+        // 執行登出
+        async function executeLogout() {
+            const confirmBtn = document.querySelector('.logout-confirm-btn');
+            if (confirmBtn) {
+                confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 登出中...';
+                confirmBtn.disabled = true;
+            }
+
+            try {
+                const response = await fetch('/api/logout', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    window.location.href = '/login';
+                } else {
+                    closeLogoutModal();
+                    showNotification('登出失敗，請重試', 'error');
+                }
+            } catch (error) {
+                console.error('登出錯誤:', error);
+                // 即使發生錯誤也跳轉到登入頁
+                window.location.href = '/login';
+            }
+        }
+    </script>
+
+    <!-- 瀏覽器檢測腳本 -->
+    <script>
+        // 檢測瀏覽器類型
+        function detectBrowser() {
+            const userAgent = navigator.userAgent;
+            const vendor = navigator.vendor;
+            
+            // 先檢測Edge（因為Edge的User Agent也包含Chrome）
+            const isEdge = /Edg/.test(userAgent);
+            
+            // 再檢測Chrome（排除Edge）
+            const isChrome = /Chrome/.test(userAgent) && /Google Inc/.test(vendor) && !isEdge;
+            
+            // 移除無痕模式檢測，只要是Chrome就阻擋
+            const isChromeIncognito = false;
+            
+            // 檢測其他瀏覽器
+            const isFirefox = /Firefox/.test(userAgent);
+            const isSafari = /Safari/.test(userAgent) && !/Chrome/.test(userAgent);
+            const isOpera = /Opera/.test(userAgent) || /OPR/.test(userAgent);
+            
+            return {
+                isChrome: isChrome && !isChromeIncognito, // 只有非無痕的Chrome才被視為需要阻擋
+                isChromeIncognito: isChromeIncognito,
+                isEdge: isEdge,
+                isFirefox: isFirefox,
+                isSafari: isSafari,
+                isOpera: isOpera,
+                userAgent: userAgent,
+                vendor: vendor
+            };
+        }
+        
+        // 顯示Chrome阻擋彈窗
+        function showChromeModal() {
+            const modal = document.getElementById('chrome-block-modal');
+            modal.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+        }
+        
+        // 用Firefox瀏覽器開啟當前頁面
+        function openInFirefox() {
+            const currentUrl = window.location.href;
+            
+            // 設置教學彈窗中的網址
+            document.getElementById('tutorial-url').value = currentUrl;
+            
+            try {
+                // 嘗試使用 Firefox 的 URL scheme
+                const firefoxUrl = `firefox://open-url?url=${encodeURIComponent(currentUrl)}`;
+                
+                // 創建一個隱藏的連結來觸發 Firefox
+                const link = document.createElement('a');
+                link.href = firefoxUrl;
+                link.style.display = 'none';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                // 延遲檢查是否成功跳轉
+                setTimeout(() => {
+                    // 如果頁面還在，表示 Firefox 沒有啟動或不存在，顯示教學彈窗
+                    if (document.visibilityState === 'visible') {
+                        showFirefoxTutorial();
+                    }
+                }, 2000);
+                
+            } catch (error) {
+                // 如果跳轉失敗，立即顯示教學彈窗
+                showFirefoxTutorial();
+            }
+        }
+        
+        // 顯示Firefox教學彈窗
+        function showFirefoxTutorial() {
+            const modal = document.getElementById('firefox-tutorial-modal');
+            modal.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+        }
+        
+        // 關閉Firefox教學彈窗
+        function closeFirefoxTutorial() {
+            const modal = document.getElementById('firefox-tutorial-modal');
+            modal.style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }
+        
+        // 複製網址到剪貼簿
+        function copyUrlToClipboard() {
+            const urlInput = document.getElementById('tutorial-url');
+            urlInput.select();
+            urlInput.setSelectionRange(0, 99999); // 對於行動裝置
+            
+            try {
+                document.execCommand('copy');
+                // 顯示複製成功提示
+                const copyBtn = event.target.closest('.copy-btn');
+                const originalText = copyBtn.innerHTML;
+                copyBtn.innerHTML = '<i class="fas fa-check"></i> 已複製';
+                copyBtn.style.background = '#28a745';
+                
+                setTimeout(() => {
+                    copyBtn.innerHTML = originalText;
+                    copyBtn.style.background = '';
+                }, 2000);
+            } catch (err) {
+                alert('無法複製到剪貼簿，請手動複製網址');
+            }
+        }
+        
+        
+        // 用Edge瀏覽器開啟當前頁面
+        function openInEdge() {
+            const currentUrl = window.location.href;
+            const edgeUrl = `microsoft-edge:${currentUrl}`;
+            
+            // 記錄跳轉前的時間
+            const redirectTime = Date.now();
+            window.edgeRedirectTime = redirectTime;
+            
+            // 嘗試用Edge開啟
+            try {
+                // 創建隱藏的iframe來嘗試跳轉
+                const iframe = document.createElement('iframe');
+                iframe.style.display = 'none';
+                iframe.src = edgeUrl;
+                document.body.appendChild(iframe);
+                
+                // 同時嘗試直接跳轉
+                window.location.href = edgeUrl;
+                
+                // 監聽頁面失去焦點事件（表示可能成功跳轉）
+                let blurHandled = false;
+                const handleBlur = () => {
+                    if (!blurHandled) {
+                        blurHandled = true;
+                        window.removeEventListener('blur', handleBlur);
+                        // 成功跳轉，不顯示提示
+                        return;
+                    }
+                };
+                window.addEventListener('blur', handleBlur);
+                
+                // 如果3秒後頁面仍然可見且沒有失去焦點，顯示提示
+                setTimeout(() => {
+                    if (Date.now() - redirectTime < 4000 && document.visibilityState === 'visible' && !blurHandled) {
+                        alert('無法自動開啟Edge瀏覽器，請手動複製網址到Edge瀏覽器中開啟：\n' + currentUrl);
+                    }
+                    // 清理iframe
+                    if (iframe.parentNode) {
+                        iframe.parentNode.removeChild(iframe);
+                    }
+                }, 3000);
+                
+            } catch (error) {
+                // 如果跳轉失敗，立即顯示提示
+                alert('無法自動開啟Edge瀏覽器，請手動複製網址到Edge瀏覽器中開啟：\n' + currentUrl);
+            }
+        }
+        
+        // 頁面載入時檢測瀏覽器
+        document.addEventListener('DOMContentLoaded', function() {
+            const browser = detectBrowser();
+            console.log('瀏覽器檢測結果:', browser);
+            console.log('User Agent:', browser.userAgent);
+            console.log('Vendor:', browser.vendor);
+            
+            // 只要是Chrome瀏覽器就顯示阻擋彈窗
+            if (browser.isChrome) {
+                console.log('檢測到Chrome瀏覽器，顯示阻擋視窗');
+                showChromeModal();
+            } else {
+                console.log('不是Chrome瀏覽器，系統可以正常使用');
+            }
+        });
+        
+        // 阻止模態框外部點擊關閉
+        document.getElementById('chrome-block-modal').addEventListener('click', function(e) {
+            e.stopPropagation();
+        });
+    </script>
+</body>
+</html>

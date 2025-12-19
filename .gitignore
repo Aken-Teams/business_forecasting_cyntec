@@ -1,0 +1,50 @@
+# 環境變數檔案（包含敏感資訊）
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 虛擬環境
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 上傳和處理的檔案
+uploads/
+processed/
+
+# 日誌
+*.log
+
+# 系統檔案
+.DS_Store
+Thumbs.db

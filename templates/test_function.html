@@ -1,0 +1,1402 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>測試功能 - FORECAST 數據處理系統</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}?v={{ version }}" rel="stylesheet">
+    <style>
+        /* 客戶選擇表單樣式 */
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 1rem;
+        }
+
+        .form-group label i {
+            color: #bc773e;
+            margin-right: 8px;
+        }
+
+        .form-group select {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #d4cbc4;
+            border-radius: 10px;
+            font-size: 1rem;
+            transition: all 0.3s;
+            background: white;
+            background-color: white;
+            color: #333;
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 15px center;
+            padding-right: 40px;
+        }
+
+        .form-group select:focus {
+            outline: none;
+            border-color: #bc773e;
+            box-shadow: 0 0 0 3px rgba(188, 119, 62, 0.1);
+        }
+
+        .btn-confirm {
+            width: 100%;
+            padding: 18px;
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        /* 返回按鈕圖標無底線 */
+        .logout-btn i,
+        .btn-change-customer i,
+        .btn-back i {
+            text-decoration: none !important;
+        }
+
+        /* 上傳進度條樣式 */
+        .upload-progress {
+            display: none;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .upload-progress.active {
+            display: block;
+        }
+
+        .upload-progress .progress-icon {
+            font-size: 2.5rem;
+            color: #bc773e;
+            margin-bottom: 15px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .upload-progress .progress-text {
+            font-size: 1rem;
+            color: #666;
+            margin-bottom: 15px;
+        }
+
+        .upload-progress .progress-bar-container {
+            background: #e0e0e0;
+            border-radius: 10px;
+            height: 8px;
+            overflow: hidden;
+        }
+
+        .upload-progress .progress-bar-fill {
+            background: linear-gradient(135deg, #bc773e 0%, #d4a574 100%);
+            height: 100%;
+            width: 0%;
+            transition: width 0.3s ease;
+            border-radius: 10px;
+        }
+
+        .upload-progress .file-name {
+            font-size: 0.9rem;
+            color: #888;
+            margin-top: 10px;
+            word-break: break-all;
+        }
+
+        /* 回上一步確認彈窗樣式 */
+        .goback-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(3px);
+        }
+
+        .goback-modal-content {
+            position: relative;
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 480px;
+            width: 90%;
+            animation: gobackModalSlideIn 0.3s ease-out;
+            overflow: hidden;
+        }
+
+        @keyframes gobackModalSlideIn {
+            from {
+                opacity: 0;
+                transform: scale(0.9) translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+
+        .goback-modal-header {
+            background: linear-gradient(135deg, #f39c12, #e67e22);
+            color: white;
+            padding: 20px 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 1.2em;
+            font-weight: 600;
+        }
+
+        .goback-modal-header i {
+            font-size: 1.5em;
+        }
+
+        .goback-modal-header h3 {
+            margin: 0;
+            font-size: 1.2rem;
+        }
+
+        .goback-modal-body {
+            padding: 24px;
+        }
+
+        .goback-modal-body p {
+            font-size: 1.1em;
+            color: #333;
+            margin: 0 0 16px 0;
+            line-height: 1.5;
+        }
+
+        .goback-modal-body #goback-step-name {
+            color: #c87941;
+            font-weight: 600;
+        }
+
+        .goback-warning {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 8px;
+            padding: 12px 16px;
+            color: #856404;
+            font-weight: 500;
+            font-size: 0.95rem;
+            margin: 0;
+        }
+
+        .goback-modal-footer {
+            padding: 16px 24px 24px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+
+        .goback-modal-footer .btn {
+            padding: 12px 24px;
+            font-size: 1em;
+            font-weight: 600;
+        }
+
+        /* 測試模式標籤 */
+        .test-mode-banner {
+            background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+            color: white;
+            padding: 12px 25px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 4px 15px rgba(243, 156, 18, 0.3);
+        }
+
+        .test-mode-banner .info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .test-mode-banner .info i {
+            font-size: 1.3rem;
+        }
+
+        .test-mode-banner .customer-name {
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+
+        .test-mode-banner .mode-label {
+            background: rgba(255,255,255,0.2);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+        }
+
+        .btn-change-customer {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.3s;
+        }
+
+        .btn-change-customer:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        /* 隱藏的操作區塊 */
+        .workflow-section {
+            display: none;
+        }
+
+        .workflow-section.active {
+            display: block;
+        }
+
+        /* RWD 調整 */
+        @media (max-width: 768px) {
+            .test-mode-banner {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 客戶選擇區塊 -->
+    <div class="container" id="customer-select-section">
+        <header class="header">
+            <div class="header-content">
+                <div class="header-left">
+                    <div class="header-logo">
+                        <img src="{{ url_for('static', filename='logo/logo.png') }}" alt="FORECAST Logo" class="logo-image">
+                    </div>
+                    <div class="header-text">
+                        <h1>測試功能</h1>
+                        <p class="header-subtitle">模擬用戶操作流程</p>
+                    </div>
+                </div>
+                <div class="header-user">
+                    <div class="user-info">
+                        <i class="fas fa-user-circle"></i>
+                        <span class="user-name">{{ user.display_name }}</span>
+                        <span class="user-role">({{ '管理者' if user.role == 'admin' else 'IT' }})</span>
+                    </div>
+                    <a href="{% if user.role == 'admin' %}/admin{% else %}/it{% endif %}" class="logout-btn" style="background: #6c757d;">
+                        <i class="fas fa-arrow-left"></i> 返回
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <section class="upload-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-user-check"></i> 選擇測試客戶</h2>
+                        <p>選擇客戶後，將以該客戶的身份模擬完整操作流程</p>
+                    </div>
+
+                    <div class="card-body">
+                        <div class="process-info" style="margin-bottom: 25px;">
+                            <div class="info-item">
+                                <i class="fas fa-info-circle"></i>
+                                <span>選擇客戶後，您將看到與一般用戶相同的操作介面</span>
+                            </div>
+                            <div class="info-item">
+                                <i class="fas fa-upload"></i>
+                                <span>可以上傳 ERP、Forecast、在途文件進行完整流程測試</span>
+                            </div>
+                            <div class="info-item">
+                                <i class="fas fa-link"></i>
+                                <span>使用該客戶已配置的映射表進行資料整合</span>
+                            </div>
+                            <div class="info-item">
+                                <i class="fas fa-tools"></i>
+                                <span>這是模擬用戶操作的功能，方便 IT/管理員排查問題</span>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label><i class="fas fa-building"></i> 選擇客戶</label>
+                            <select id="customer-select">
+                                <option value="">-- 請選擇客戶 --</option>
+                            </select>
+                        </div>
+
+                        <button class="btn btn-primary btn-confirm" id="confirm-btn" onclick="confirmCustomer()" disabled>
+                            <i class="fas fa-check"></i> 確認並開始測試
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="footer">
+            <p>&copy; 2025 智合科技，FORECAST 數據處理系統. 智能預測，精準分析.</p>
+        </footer>
+    </div>
+
+    <!-- 工作流程區塊（選擇客戶後顯示） -->
+    <div class="container workflow-section" id="workflow-section">
+        <header class="header">
+            <div class="header-content">
+                <div class="header-left">
+                    <div class="header-logo">
+                        <img src="{{ url_for('static', filename='logo/logo.png') }}" alt="FORECAST Logo" class="logo-image">
+                    </div>
+                    <div class="header-text">
+                        <h1>FORECAST 數據處理系統</h1>
+                        <p class="header-subtitle">智能預測數據整合與分析平台</p>
+                    </div>
+                </div>
+                <div class="header-user">
+                    <div class="user-info">
+                        <i class="fas fa-user-circle"></i>
+                        <span class="user-name" id="header-customer-name">-</span>
+                        <span class="user-role" id="header-customer-company">(-)</span>
+                    </div>
+                    <button class="logout-btn" onclick="handleLogout()" style="background: #6c757d;">
+                        <i class="fas fa-arrow-left"></i> 返回選擇
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- 測試模式標籤 -->
+        <div class="test-mode-banner">
+            <div class="info">
+                <i class="fas fa-flask"></i>
+                <span class="mode-label">測試模式</span>
+                <span class="customer-name" id="test-customer-name">-</span>
+            </div>
+            <button class="btn-change-customer" onclick="changeCustomer()">
+                <i class="fas fa-exchange-alt"></i> 更換客戶
+            </button>
+        </div>
+
+        <!-- 進度指示器 -->
+        <div class="progress-container">
+            <div class="progress-steps">
+                <div class="step active" data-step="1">
+                    <div class="step-circle">
+                        <i class="fas fa-upload"></i>
+                    </div>
+                    <div class="step-label">文件上傳</div>
+                </div>
+                <div class="step-line" id="line-1"></div>
+                <div class="step" data-step="2">
+                    <div class="step-circle">
+                        <i class="fas fa-cogs"></i>
+                    </div>
+                    <div class="step-label">數據清理</div>
+                </div>
+                <div class="step-line" id="line-2"></div>
+                <div class="step" data-step="3">
+                    <div class="step-circle">
+                        <i class="fas fa-link"></i>
+                    </div>
+                    <div class="step-label">映射整合</div>
+                </div>
+                <div class="step-line" id="line-3"></div>
+                <div class="step" data-step="4">
+                    <div class="step-circle">
+                        <i class="fas fa-magic"></i>
+                    </div>
+                    <div class="step-label">FORECAST處理</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 主要內容區域 -->
+        <main class="main-content">
+            <!-- 文件上傳區域 -->
+            <section class="upload-section" id="upload-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-upload"></i> 文件上傳</h2>
+                        <p>請上傳以下 3 個文件（必須全部上傳才能進入下一步）</p>
+                    </div>
+                    <div class="card-body">
+                        <div class="upload-grid">
+                            <!-- ERP文件上傳 -->
+                            <div class="upload-item">
+                                <div class="upload-box" id="erp-upload-box">
+                                    <i class="fas fa-file-excel upload-icon"></i>
+                                    <h3>ERP淨需求文件</h3>
+                                    <p>上傳 ERP 淨需求.xlsx</p>
+                                    <input type="file" id="erp-file" accept=".xlsx,.xls" style="display: none;">
+                                    <button class="btn btn-primary" onclick="document.getElementById('erp-file').click()">
+                                        <i class="fas fa-plus"></i> 選擇文件
+                                    </button>
+                                </div>
+                                <div class="upload-progress" id="erp-upload-progress">
+                                    <i class="fas fa-spinner progress-icon"></i>
+                                    <div class="progress-text">上傳中...</div>
+                                    <div class="progress-bar-container">
+                                        <div class="progress-bar-fill" id="erp-upload-progress-fill"></div>
+                                    </div>
+                                    <div class="file-name" id="erp-upload-file-name"></div>
+                                </div>
+                                <div class="upload-status" id="erp-status" style="display: none;">
+                                    <div class="status-content">
+                                        <i class="fas fa-check-circle status-icon success"></i>
+                                        <div class="status-text">
+                                            <div class="status-title">上傳成功</div>
+                                            <div class="status-details" id="erp-details"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Forecast文件上傳 -->
+                            <div class="upload-item">
+                                <div class="upload-box" id="forecast-upload-box">
+                                    <i class="fas fa-chart-bar upload-icon"></i>
+                                    <h3>Forecast文件</h3>
+                                    <p>上傳 ForecastDataFile_ALL.xlsx</p>
+                                    <input type="file" id="forecast-file" accept=".xlsx,.xls" style="display: none;">
+                                    <button class="btn btn-primary" onclick="document.getElementById('forecast-file').click()">
+                                        <i class="fas fa-plus"></i> 選擇文件
+                                    </button>
+                                </div>
+                                <div class="upload-progress" id="forecast-upload-progress">
+                                    <i class="fas fa-spinner progress-icon"></i>
+                                    <div class="progress-text">上傳中...</div>
+                                    <div class="progress-bar-container">
+                                        <div class="progress-bar-fill" id="forecast-upload-progress-fill"></div>
+                                    </div>
+                                    <div class="file-name" id="forecast-upload-file-name"></div>
+                                </div>
+                                <div class="upload-status" id="forecast-status" style="display: none;">
+                                    <div class="status-content">
+                                        <i class="fas fa-check-circle status-icon success"></i>
+                                        <div class="status-text">
+                                            <div class="status-title">上傳成功</div>
+                                            <div class="status-details" id="forecast-details"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 在途文件上傳 -->
+                            <div class="upload-item">
+                                <div class="upload-box" id="transit-upload-box">
+                                    <i class="fas fa-truck upload-icon"></i>
+                                    <h3>在途文件</h3>
+                                    <p>上傳在途數據.xlsx</p>
+                                    <input type="file" id="transit-file" accept=".xlsx,.xls" style="display: none;">
+                                    <button class="btn btn-primary" onclick="document.getElementById('transit-file').click()">
+                                        <i class="fas fa-plus"></i> 選擇文件
+                                    </button>
+                                </div>
+                                <div class="upload-progress" id="transit-upload-progress">
+                                    <i class="fas fa-spinner progress-icon"></i>
+                                    <div class="progress-text">上傳中...</div>
+                                    <div class="progress-bar-container">
+                                        <div class="progress-bar-fill" id="transit-upload-progress-fill"></div>
+                                    </div>
+                                    <div class="file-name" id="transit-upload-file-name"></div>
+                                </div>
+                                <div class="upload-status" id="transit-status" style="display: none;">
+                                    <div class="status-content">
+                                        <i class="fas fa-check-circle status-icon success"></i>
+                                        <div class="status-text">
+                                            <div class="status-title">上傳成功</div>
+                                            <div class="status-details" id="transit-details"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 數據清理區域 -->
+            <section class="process-section" id="cleanup-section" style="display: none;">
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-broom"></i> 數據清理</h2>
+                        <p>清理Forecast文件中的特定數據</p>
+                    </div>
+                    <div class="card-body">
+                        <div class="process-info">
+                            <div class="info-item">
+                                <i class="fas fa-info-circle"></i>
+                                <span>當K欄位是"供應數量"時，清空L~AW欄位的數值</span>
+                            </div>
+                            <div class="info-item">
+                                <i class="fas fa-info-circle"></i>
+                                <span>當I欄位有"庫存數量"時，清空下一列I欄位的數值</span>
+                            </div>
+                        </div>
+                        <div class="action-buttons-row">
+                            <button class="btn btn-back" id="cleanup-back-btn" onclick="confirmGoBack(1)">
+                                <i class="fas fa-arrow-left"></i> 回上一步
+                            </button>
+                            <button class="btn btn-secondary" id="cleanup-btn" onclick="runCleanup()">
+                                <i class="fas fa-play"></i> 開始清理
+                            </button>
+                        </div>
+                        <div class="progress-container" id="cleanup-progress" style="display: none;">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="cleanup-progress-fill"></div>
+                            </div>
+                            <div class="progress-text" id="cleanup-progress-text">處理中...</div>
+                        </div>
+                        <div class="process-result" id="cleanup-result" style="display: none;"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 映射整合區域 -->
+            <section class="process-section" id="mapping-section" style="display: none;">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-header-row">
+                            <div class="card-header-text">
+                                <h2><i class="fas fa-link"></i> 映射整合</h2>
+                                <p>整合 ERP 和在途數據與映射表的關係</p>
+                            </div>
+                            <button class="btn btn-secondary" id="mapping-config-btn" onclick="openMappingConfig()">
+                                <i class="fas fa-cog"></i> 配置映射表
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="process-info">
+                            <div class="info-item">
+                                <i class="fas fa-file-excel"></i>
+                                <span>ERP 數據：根據客戶簡稱整合地區、排程斷點、ETD、ETA</span>
+                            </div>
+                            <div class="info-item">
+                                <i class="fas fa-truck"></i>
+                                <span>在途數據：根據 E 欄位與映射表 A 欄位比對，整合 B、D、E、F 欄位資訊</span>
+                            </div>
+                        </div>
+                        <div class="action-buttons-row">
+                            <button class="btn btn-back" id="mapping-back-btn" onclick="confirmGoBack(2)">
+                                <i class="fas fa-arrow-left"></i> 回上一步
+                            </button>
+                            <button class="btn btn-primary" id="mapping-process-btn" onclick="runMapping()">
+                                <i class="fas fa-play"></i> 開始整合
+                            </button>
+                        </div>
+                        <div class="progress-container" id="mapping-progress" style="display: none;">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="mapping-progress-fill"></div>
+                            </div>
+                            <div class="progress-text" id="mapping-progress-text">處理中...</div>
+                        </div>
+                        <div class="process-result" id="mapping-result" style="display: none;"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- FORECAST處理區域 -->
+            <section class="process-section" id="forecast-section" style="display: none;">
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-magic"></i> FORECAST處理</h2>
+                        <p>執行智能預測數據填寫</p>
+                    </div>
+                    <div class="card-body">
+                        <div class="process-info">
+                            <div class="info-item">
+                                <i class="fas fa-rocket"></i>
+                                <span>超高速批量處理，性能提升20倍</span>
+                            </div>
+                            <div class="info-item">
+                                <i class="fas fa-plus"></i>
+                                <span>支援累加邏輯，避免數據覆蓋</span>
+                            </div>
+                            <div class="info-item">
+                                <i class="fas fa-truck"></i>
+                                <span>自動整合 Transit 在途數據，根據 ETA 智能填寫</span>
+                            </div>
+                        </div>
+                        <div class="action-buttons-row">
+                            <button class="btn btn-back" id="forecast-back-btn" onclick="confirmGoBack(3)">
+                                <i class="fas fa-arrow-left"></i> 回上一步
+                            </button>
+                            <button class="btn btn-success" id="forecast-btn" onclick="runForecast()">
+                                <i class="fas fa-play"></i> 開始FORECAST處理
+                            </button>
+                        </div>
+                        <div class="progress-container" id="forecast-progress" style="display: none;">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="forecast-progress-fill"></div>
+                            </div>
+                            <div class="progress-text" id="forecast-progress-text">處理中...</div>
+                        </div>
+                        <div class="process-result" id="forecast-result" style="display: none;"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 結果下載區域 -->
+            <section class="download-section" id="download-section" style="display: none;">
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-download"></i> 結果下載</h2>
+                        <p>下載FORECAST處理完成的文件</p>
+                    </div>
+                    <div class="card-body">
+                        <!-- 完成資訊 -->
+                        <div class="completion-info" id="completion-info">
+                            <div class="completion-item">
+                                <i class="fas fa-user"></i>
+                                <span class="completion-label">測試客戶：</span>
+                                <span class="completion-value" id="completion-customer">-</span>
+                            </div>
+                            <div class="completion-item">
+                                <i class="fas fa-upload"></i>
+                                <span class="completion-label">上傳時間：</span>
+                                <span class="completion-value" id="completion-upload-time">-</span>
+                            </div>
+                            <div class="completion-item">
+                                <i class="fas fa-calendar-alt"></i>
+                                <span class="completion-label">完成日期：</span>
+                                <span class="completion-value" id="completion-date">-</span>
+                            </div>
+                            <div class="completion-item">
+                                <i class="fas fa-clock"></i>
+                                <span class="completion-label">完成時間：</span>
+                                <span class="completion-value" id="completion-time">-</span>
+                            </div>
+                        </div>
+                        <div class="download-single">
+                            <div class="download-item">
+                                <i class="fas fa-file-excel"></i>
+                                <div class="download-info">
+                                    <div class="download-title">FORECAST處理結果</div>
+                                    <div class="download-desc">forecast_result.xlsx</div>
+                                </div>
+                                <button class="btn btn-primary" onclick="downloadResult()">
+                                    <i class="fas fa-download"></i> 下載
+                                </button>
+                            </div>
+                        </div>
+                        <div class="action-buttons-row" style="margin-top: 20px;">
+                            <button class="btn btn-back" onclick="confirmGoBack(4)">
+                                <i class="fas fa-arrow-left"></i> 回上一步
+                            </button>
+                            <button class="btn btn-secondary" onclick="restartTest()">
+                                <i class="fas fa-redo"></i> 重新開始
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- 頁腳 -->
+        <footer class="footer">
+            <p>&copy; 2025 智合科技，FORECAST 數據處理系統. 智能預測，精準分析.</p>
+        </footer>
+    </div>
+
+    <!-- 自製確認彈跳視窗 -->
+    <div class="custom-modal-overlay" id="confirm-modal">
+        <div class="custom-modal">
+            <div class="custom-modal-header">
+                <i class="fas fa-exclamation-triangle warning-icon"></i>
+                <h3 id="modal-title">確認操作</h3>
+            </div>
+            <div class="custom-modal-body">
+                <p id="modal-message">確定要執行此操作嗎？</p>
+                <p class="warning-text" id="modal-warning">目前的進度將會清除</p>
+            </div>
+            <div class="custom-modal-footer">
+                <button class="btn btn-secondary" onclick="closeConfirmModal()">
+                    <i class="fas fa-times"></i> 取消
+                </button>
+                <button class="btn btn-danger" id="modal-confirm-btn">
+                    <i class="fas fa-check"></i> 確定
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 回上一步確認彈跳視窗 -->
+    <div class="goback-modal" id="goback-modal" style="display: none;">
+        <div class="goback-modal-content">
+            <div class="goback-modal-header">
+                <i class="fas fa-arrow-left"></i>
+                <h3>確認返回</h3>
+            </div>
+            <div class="goback-modal-body">
+                <p>確定要返回「<span id="goback-step-name">文件上傳</span>」步驟嗎？</p>
+                <p class="goback-warning">返回後，目前步驟的處理結果將會清除</p>
+            </div>
+            <div class="goback-modal-footer">
+                <button class="btn btn-secondary" onclick="closeGoBackModal()">
+                    <i class="fas fa-times"></i> 取消
+                </button>
+                <button class="btn btn-primary" id="goback-confirm-btn">
+                    <i class="fas fa-arrow-left"></i> 確認返回
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局變數
+        let selectedCustomer = null;
+        let currentStep = 1;
+        let uploadedFiles = {
+            erp: false,
+            forecast: false,
+            transit: false
+        };
+        let uploadStartTime = null;  // 記錄上傳開始時間
+
+        // 步驟名稱映射
+        const stepNames = {
+            1: '文件上傳',
+            2: '數據清理',
+            3: '映射整合',
+            4: 'FORECAST處理'
+        };
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            loadCustomers();
+            setupFileInputs();
+        });
+
+        // 載入客戶列表
+        async function loadCustomers() {
+            try {
+                const response = await fetch('/api/test/customers');
+                const result = await response.json();
+
+                if (result.success) {
+                    const select = document.getElementById('customer-select');
+                    result.customers.forEach(customer => {
+                        const option = document.createElement('option');
+                        option.value = JSON.stringify(customer);
+                        option.textContent = `${customer.company} - ${customer.display_name}`;
+                        select.appendChild(option);
+                    });
+
+                    select.addEventListener('change', function() {
+                        document.getElementById('confirm-btn').disabled = !this.value;
+                    });
+                }
+            } catch (error) {
+                console.error('載入客戶列表失敗:', error);
+                alert('載入客戶列表失敗：' + error.message);
+            }
+        }
+
+        // 確認選擇客戶
+        function confirmCustomer() {
+            const select = document.getElementById('customer-select');
+            if (!select.value) {
+                alert('請選擇客戶');
+                return;
+            }
+
+            selectedCustomer = JSON.parse(select.value);
+
+            // 更新顯示的客戶名稱
+            document.getElementById('test-customer-name').textContent =
+                `${selectedCustomer.company} - ${selectedCustomer.display_name}`;
+            document.getElementById('header-customer-name').textContent = selectedCustomer.display_name;
+            document.getElementById('header-customer-company').textContent = `(${selectedCustomer.company})`;
+
+            // 切換到工作流程區塊
+            document.getElementById('customer-select-section').style.display = 'none';
+            document.getElementById('workflow-section').classList.add('active');
+
+            // 重置狀態
+            resetWorkflow();
+        }
+
+        // 更換客戶 / 返回選擇
+        function changeCustomer() {
+            showConfirmModal(
+                '更換客戶',
+                '確定要更換客戶嗎？',
+                '目前的進度將會清除',
+                function() {
+                    document.getElementById('customer-select-section').style.display = 'block';
+                    document.getElementById('workflow-section').classList.remove('active');
+                    resetWorkflow();
+                    closeConfirmModal();
+                }
+            );
+        }
+
+        // 登出 / 返回
+        function handleLogout() {
+            changeCustomer();
+        }
+
+        // 顯示自製確認彈跳視窗
+        function showConfirmModal(title, message, warning, onConfirm) {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-message').textContent = message;
+            document.getElementById('modal-warning').textContent = warning;
+
+            const confirmBtn = document.getElementById('modal-confirm-btn');
+            confirmBtn.onclick = onConfirm;
+
+            const modal = document.getElementById('confirm-modal');
+            modal.style.display = 'flex';
+            setTimeout(() => modal.classList.add('show'), 10);
+        }
+
+        // 關閉確認彈跳視窗
+        function closeConfirmModal() {
+            const modal = document.getElementById('confirm-modal');
+            modal.classList.remove('show');
+            setTimeout(() => modal.style.display = 'none', 300);
+        }
+
+        // 確認回上一步
+        function confirmGoBack(targetStep) {
+            const stepName = stepNames[targetStep];
+            showGoBackModal(targetStep, stepName);
+        }
+
+        // 顯示回上一步確認彈窗
+        function showGoBackModal(targetStep, stepName) {
+            document.getElementById('goback-step-name').textContent = stepName;
+
+            const confirmBtn = document.getElementById('goback-confirm-btn');
+            confirmBtn.onclick = function() {
+                // 根據目標步驟重置對應狀態
+                resetStepState(targetStep);
+                goToStep(targetStep);
+                closeGoBackModal();
+            };
+
+            const modal = document.getElementById('goback-modal');
+            modal.style.display = 'flex';
+        }
+
+        // 重置特定步驟的狀態
+        function resetStepState(targetStep) {
+            if (targetStep === 1) {
+                // 重置上傳狀態
+                uploadedFiles = { erp: false, forecast: false, transit: false };
+                uploadStartTime = null;  // 重置上傳時間
+                ['erp', 'forecast', 'transit'].forEach(type => {
+                    document.getElementById(`${type}-upload-box`).style.display = 'flex';
+                    document.getElementById(`${type}-upload-progress`).classList.remove('active');
+                    document.getElementById(`${type}-status`).style.display = 'none';
+                    document.getElementById(`${type}-file`).value = '';
+                });
+            }
+
+            if (targetStep <= 2) {
+                // 重置清理結果
+                const cleanupResult = document.getElementById('cleanup-result');
+                cleanupResult.classList.remove('success', 'error');
+                cleanupResult.style.display = 'none';
+                document.getElementById('cleanup-progress').style.display = 'none';
+                document.getElementById('cleanup-btn').disabled = false;
+            }
+
+            if (targetStep <= 3) {
+                // 重置映射結果
+                const mappingResult = document.getElementById('mapping-result');
+                mappingResult.classList.remove('success', 'error');
+                mappingResult.style.display = 'none';
+                document.getElementById('mapping-progress').style.display = 'none';
+                document.getElementById('mapping-process-btn').disabled = false;
+            }
+
+            if (targetStep <= 4) {
+                // 重置 FORECAST 結果
+                const forecastResult = document.getElementById('forecast-result');
+                forecastResult.classList.remove('success', 'error');
+                forecastResult.style.display = 'none';
+                document.getElementById('forecast-progress').style.display = 'none';
+                document.getElementById('forecast-btn').disabled = false;
+            }
+        }
+
+        // 關閉回上一步確認彈窗
+        function closeGoBackModal() {
+            const modal = document.getElementById('goback-modal');
+            modal.style.display = 'none';
+        }
+
+        // 重置工作流程
+        function resetWorkflow() {
+            currentStep = 1;
+            uploadedFiles = { erp: false, forecast: false, transit: false };
+            uploadStartTime = null;  // 重置上傳時間
+
+            // 重置進度指示器
+            updateStepIndicator(1);
+
+            // 重置上傳狀態
+            ['erp', 'forecast', 'transit'].forEach(type => {
+                document.getElementById(`${type}-upload-box`).style.display = 'flex';
+                document.getElementById(`${type}-upload-progress`).classList.remove('active');
+                document.getElementById(`${type}-status`).style.display = 'none';
+                document.getElementById(`${type}-file`).value = '';
+            });
+
+            // 隱藏所有區塊，只顯示上傳區塊
+            document.getElementById('upload-section').style.display = 'block';
+            document.getElementById('cleanup-section').style.display = 'none';
+            document.getElementById('mapping-section').style.display = 'none';
+            document.getElementById('forecast-section').style.display = 'none';
+            document.getElementById('download-section').style.display = 'none';
+
+            // 重置結果區塊
+            ['cleanup', 'mapping', 'forecast'].forEach(type => {
+                const result = document.getElementById(`${type}-result`);
+                result.classList.remove('success', 'error');
+                result.style.display = 'none';
+
+                const progress = document.getElementById(`${type}-progress`);
+                if (progress) progress.style.display = 'none';
+            });
+        }
+
+        // 設置文件輸入
+        function setupFileInputs() {
+            ['erp', 'forecast', 'transit'].forEach(type => {
+                const input = document.getElementById(`${type}-file`);
+                const box = document.getElementById(`${type}-upload-box`);
+
+                // 文件選擇事件
+                input.addEventListener('change', function(e) {
+                    if (e.target.files.length > 0) {
+                        handleFileUpload(type, e.target.files[0]);
+                    }
+                });
+
+                // 拖放事件
+                box.addEventListener('dragover', function(e) {
+                    e.preventDefault();
+                    box.classList.add('dragover');
+                });
+
+                box.addEventListener('dragleave', function(e) {
+                    e.preventDefault();
+                    box.classList.remove('dragover');
+                });
+
+                box.addEventListener('drop', function(e) {
+                    e.preventDefault();
+                    box.classList.remove('dragover');
+                    if (e.dataTransfer.files.length > 0) {
+                        handleFileUpload(type, e.dataTransfer.files[0]);
+                    }
+                });
+            });
+        }
+
+        // 處理文件上傳
+        async function handleFileUpload(type, file) {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('test_mode', 'true');
+            formData.append('customer_id', selectedCustomer.id);
+
+            // 根據文件類型選擇對應的上傳 API
+            const uploadUrls = {
+                'erp': '/upload_erp',
+                'forecast': '/upload_forecast',
+                'transit': '/upload_transit'
+            };
+
+            // 顯示進度條
+            const uploadBox = document.getElementById(`${type}-upload-box`);
+            const progressBox = document.getElementById(`${type}-upload-progress`);
+            const progressFill = document.getElementById(`${type}-upload-progress-fill`);
+            const fileName = document.getElementById(`${type}-upload-file-name`);
+
+            uploadBox.style.display = 'none';
+            progressBox.classList.add('active');
+            fileName.textContent = file.name;
+            progressFill.style.width = '0%';
+
+            try {
+                // 使用 XMLHttpRequest 來取得上傳進度
+                const result = await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+
+                    xhr.upload.addEventListener('progress', function(e) {
+                        if (e.lengthComputable) {
+                            const percent = Math.round((e.loaded / e.total) * 100);
+                            progressFill.style.width = percent + '%';
+                        }
+                    });
+
+                    xhr.addEventListener('load', function() {
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            resolve(JSON.parse(xhr.responseText));
+                        } else {
+                            reject(new Error('上傳失敗'));
+                        }
+                    });
+
+                    xhr.addEventListener('error', function() {
+                        reject(new Error('網路錯誤'));
+                    });
+
+                    xhr.open('POST', uploadUrls[type]);
+                    xhr.send(formData);
+                });
+
+                // 完成進度到 100%
+                progressFill.style.width = '100%';
+
+                // 短暫延遲後顯示成功狀態
+                await new Promise(r => setTimeout(r, 300));
+
+                if (result.success) {
+                    uploadedFiles[type] = true;
+                    console.log(`✅ ${type} 上傳成功，當前狀態:`, JSON.stringify(uploadedFiles));
+
+                    // 第一個檔案上傳成功時，記錄上傳開始時間
+                    if (!uploadStartTime) {
+                        uploadStartTime = new Date();
+                        console.log('📅 記錄上傳時間:', uploadStartTime.toLocaleString('zh-TW'));
+                    }
+
+                    // 隱藏進度條，顯示成功狀態
+                    progressBox.classList.remove('active');
+                    const status = document.getElementById(`${type}-status`);
+                    status.style.display = 'flex';
+                    document.getElementById(`${type}-details`).textContent = file.name;
+
+                    // 檢查是否全部上傳完成
+                    checkAllUploaded();
+                } else {
+                    // 隱藏進度條，恢復上傳框
+                    progressBox.classList.remove('active');
+                    uploadBox.style.display = 'flex';
+                    alert(`上傳失敗：${result.message}`);
+                }
+            } catch (error) {
+                console.error('上傳失敗:', error);
+                // 隱藏進度條，恢復上傳框
+                progressBox.classList.remove('active');
+                uploadBox.style.display = 'flex';
+                alert('上傳失敗：' + error.message);
+            }
+        }
+
+        // 檢查是否全部上傳完成
+        function checkAllUploaded() {
+            console.log('檢查上傳狀態:', JSON.stringify(uploadedFiles));
+            if (uploadedFiles.erp && uploadedFiles.forecast && uploadedFiles.transit) {
+                console.log('✅ 所有檔案已上傳，準備進入下一步');
+                // 自動進入下一步
+                setTimeout(() => {
+                    goToStep(2);
+                }, 500);
+            } else {
+                console.log('⏳ 尚有檔案未上傳');
+            }
+        }
+
+        // 更新進度指示器
+        function updateStepIndicator(step) {
+            for (let i = 1; i <= 4; i++) {
+                const stepEl = document.querySelector(`.step[data-step="${i}"]`);
+                const lineEl = document.getElementById(`line-${i}`);
+
+                stepEl.classList.remove('active', 'completed');
+                if (lineEl) lineEl.classList.remove('completed');
+
+                if (i < step) {
+                    stepEl.classList.add('completed');
+                    if (lineEl) lineEl.classList.add('completed');
+                } else if (i === step) {
+                    stepEl.classList.add('active');
+                }
+            }
+        }
+
+        // 跳轉到指定步驟
+        function goToStep(step) {
+            currentStep = step;
+            updateStepIndicator(step);
+
+            // 隱藏所有區塊
+            document.getElementById('upload-section').style.display = 'none';
+            document.getElementById('cleanup-section').style.display = 'none';
+            document.getElementById('mapping-section').style.display = 'none';
+            document.getElementById('forecast-section').style.display = 'none';
+            document.getElementById('download-section').style.display = 'none';
+
+            // 顯示對應區塊
+            switch (step) {
+                case 1:
+                    document.getElementById('upload-section').style.display = 'block';
+                    break;
+                case 2:
+                    document.getElementById('cleanup-section').style.display = 'block';
+                    break;
+                case 3:
+                    document.getElementById('mapping-section').style.display = 'block';
+                    break;
+                case 4:
+                    document.getElementById('forecast-section').style.display = 'block';
+                    break;
+                case 5:
+                    document.getElementById('download-section').style.display = 'block';
+                    break;
+            }
+        }
+
+        // 執行清理
+        async function runCleanup() {
+            const btn = document.getElementById('cleanup-btn');
+            const progress = document.getElementById('cleanup-progress');
+            const progressFill = document.getElementById('cleanup-progress-fill');
+            const progressText = document.getElementById('cleanup-progress-text');
+            const result = document.getElementById('cleanup-result');
+
+            btn.disabled = true;
+            progress.style.display = 'block';
+            progressFill.style.width = '0%';
+            result.style.display = 'none';
+
+            try {
+                // 模擬進度
+                let percent = 0;
+                const interval = setInterval(() => {
+                    percent += 10;
+                    progressFill.style.width = `${Math.min(percent, 90)}%`;
+                    progressText.textContent = `處理中... ${Math.min(percent, 90)}%`;
+                }, 200);
+
+                const response = await fetch('/process_forecast_cleanup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        test_mode: true,
+                        customer_id: selectedCustomer.id
+                    })
+                });
+
+                clearInterval(interval);
+                const data = await response.json();
+
+                if (data.success) {
+                    progressFill.style.width = '100%';
+                    progressText.textContent = '處理完成！';
+                    result.className = 'process-result success';
+                    result.innerHTML = `
+                        <i class="fas fa-check-circle" style="color: #27ae60; margin-right: 10px;"></i>
+                        數據清理完成！
+                    `;
+                    result.style.display = 'block';
+
+                    // 自動進入下一步
+                    setTimeout(() => goToStep(3), 1000);
+                } else {
+                    throw new Error(data.message);
+                }
+            } catch (error) {
+                // 失敗時隱藏進度條
+                progress.style.display = 'none';
+                result.className = 'process-result error';
+                result.innerHTML = `
+                    <i class="fas fa-times-circle" style="color: #e74c3c; margin-right: 10px;"></i>
+                    清理失敗：${error.message}
+                `;
+                result.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // 執行映射整合
+        async function runMapping() {
+            const btn = document.getElementById('mapping-process-btn');
+            const progress = document.getElementById('mapping-progress');
+            const progressFill = document.getElementById('mapping-progress-fill');
+            const progressText = document.getElementById('mapping-progress-text');
+            const result = document.getElementById('mapping-result');
+
+            btn.disabled = true;
+            progress.style.display = 'block';
+            progressFill.style.width = '0%';
+            result.style.display = 'none';
+
+            try {
+                let percent = 0;
+                const interval = setInterval(() => {
+                    percent += 10;
+                    progressFill.style.width = `${Math.min(percent, 90)}%`;
+                    progressText.textContent = `處理中... ${Math.min(percent, 90)}%`;
+                }, 200);
+
+                const response = await fetch('/process_erp_mapping', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        test_mode: true,
+                        customer_id: selectedCustomer.id
+                    })
+                });
+
+                clearInterval(interval);
+                const data = await response.json();
+
+                if (data.success) {
+                    progressFill.style.width = '100%';
+                    progressText.textContent = '處理完成！';
+                    result.className = 'process-result success';
+                    result.innerHTML = `
+                        <i class="fas fa-check-circle" style="color: #27ae60; margin-right: 10px;"></i>
+                        映射整合完成！
+                    `;
+                    result.style.display = 'block';
+
+                    setTimeout(() => goToStep(4), 1000);
+                } else {
+                    throw new Error(data.message);
+                }
+            } catch (error) {
+                // 失敗時隱藏進度條
+                progress.style.display = 'none';
+                result.className = 'process-result error';
+                result.innerHTML = `
+                    <i class="fas fa-times-circle" style="color: #e74c3c; margin-right: 10px;"></i>
+                    整合失敗：${error.message}
+                `;
+                result.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // 執行 FORECAST 處理
+        async function runForecast() {
+            const btn = document.getElementById('forecast-btn');
+            const progress = document.getElementById('forecast-progress');
+            const progressFill = document.getElementById('forecast-progress-fill');
+            const progressText = document.getElementById('forecast-progress-text');
+            const result = document.getElementById('forecast-result');
+
+            btn.disabled = true;
+            progress.style.display = 'block';
+            progressFill.style.width = '0%';
+            result.style.display = 'none';
+
+            try {
+                let percent = 0;
+                const interval = setInterval(() => {
+                    percent += 5;
+                    progressFill.style.width = `${Math.min(percent, 90)}%`;
+                    progressText.textContent = `處理中... ${Math.min(percent, 90)}%`;
+                }, 300);
+
+                const response = await fetch('/run_forecast', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        test_mode: true,
+                        customer_id: selectedCustomer.id
+                    })
+                });
+
+                clearInterval(interval);
+                const data = await response.json();
+
+                if (data.success) {
+                    progressFill.style.width = '100%';
+                    progressText.textContent = '處理完成！';
+                    result.className = 'process-result success';
+                    result.innerHTML = `
+                        <i class="fas fa-check-circle" style="color: #27ae60; margin-right: 10px;"></i>
+                        FORECAST 處理完成！
+                    `;
+                    result.style.display = 'block';
+
+                    // 更新完成資訊
+                    const now = new Date();
+                    document.getElementById('completion-customer').textContent =
+                        `${selectedCustomer.company} - ${selectedCustomer.display_name}`;
+                    document.getElementById('completion-upload-time').textContent =
+                        uploadStartTime ? uploadStartTime.toLocaleString('zh-TW') : '-';
+                    document.getElementById('completion-date').textContent =
+                        now.toLocaleDateString('zh-TW');
+                    document.getElementById('completion-time').textContent =
+                        now.toLocaleTimeString('zh-TW');
+
+                    setTimeout(() => goToStep(5), 1000);
+                } else {
+                    throw new Error(data.message);
+                }
+            } catch (error) {
+                // 失敗時隱藏進度條
+                progress.style.display = 'none';
+                result.className = 'process-result error';
+                result.innerHTML = `
+                    <i class="fas fa-times-circle" style="color: #e74c3c; margin-right: 10px;"></i>
+                    處理失敗：${error.message}
+                `;
+                result.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // 下載結果
+        function downloadResult() {
+            window.location.href = `/download/forecast_result.xlsx`;
+        }
+
+        // 開啟映射配置
+        function openMappingConfig() {
+            window.open(`/mapping?customer_id=${selectedCustomer.id}`, '_blank');
+        }
+
+        // 重新開始測試
+        function restartTest() {
+            showConfirmModal(
+                '重新開始',
+                '確定要重新開始測試嗎？',
+                '所有已上傳的檔案和處理結果將會清除',
+                function() {
+                    resetWorkflow();
+                    goToStep(1);
+                    closeConfirmModal();
+                }
+            );
+        }
+    </script>
+
+    <!-- 瀏覽器檢測腳本 -->
+    <script src="{{ url_for('static', filename='js/browser-check.js') }}?v={{ version }}"></script>
+</body>
+</html>

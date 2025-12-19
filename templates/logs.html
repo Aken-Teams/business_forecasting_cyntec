@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系統日誌 - FORECAST 數據處理系統</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        body {
+            background: #e6e3de;
+            min-height: 100vh;
+        }
+
+        .logs-container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 30px 20px;
+        }
+
+        .tabs-container {
+            background: white;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.06);
+            overflow: hidden;
+        }
+
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 15px 20px;
+            text-align: center;
+            cursor: pointer;
+            font-weight: 600;
+            color: #7f8c8d;
+            transition: all 0.3s;
+            border-bottom: 3px solid transparent;
+        }
+
+        .tab:hover {
+            background: #f8f9fa;
+            color: #3498db;
+        }
+
+        .tab.active {
+            color: #3498db;
+            border-bottom-color: #3498db;
+            background: #f0f8ff;
+        }
+
+        .tab i {
+            margin-right: 8px;
+        }
+
+        .filter-section {
+            padding: 20px;
+            border-bottom: 1px solid #e0e0e0;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            align-items: end;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .filter-group label {
+            font-size: 0.85rem;
+            color: #666;
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+
+        .filter-group select,
+        .filter-group input {
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            transition: border-color 0.3s;
+            background-color: white;
+        }
+
+        .filter-group select {
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 35px;
+        }
+
+        .filter-group select:focus,
+        .filter-group input:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
+        .filter-actions {
+            display: flex;
+            align-items: flex-end;
+        }
+
+        .filter-actions .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .btn-reset {
+            background: #95a5a6;
+            color: white;
+        }
+
+        .btn-reset:hover {
+            background: #7f8c8d;
+        }
+
+        .content-section {
+            padding: 20px;
+        }
+
+        .log-table-container {
+            overflow-x: auto;
+        }
+
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .log-table th,
+        .log-table td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        .log-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+        }
+
+        .log-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .log-table td {
+            font-size: 0.9rem;
+            color: #444;
+        }
+
+        .log-table td.detail-cell {
+            max-width: 250px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .log-table td.detail-cell:hover {
+            white-space: normal;
+            overflow: visible;
+            position: relative;
+            z-index: 10;
+            background: #fff;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            border-radius: 4px;
+        }
+
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .status-success { background: #d4edda; color: #155724; }
+        .status-failed { background: #f8d7da; color: #721c24; }
+        .status-started { background: #fff3cd; color: #856404; }
+        .status-pending { background: #e2e3e5; color: #383d41; }
+
+        .action-type {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .action-login { background: #cce5ff; color: #004085; }
+        .action-logout { background: #e2e3e5; color: #383d41; }
+        .action-upload { background: #d1ecf1; color: #0c5460; }
+        .action-process { background: #fff3cd; color: #856404; }
+        .action-download { background: #d4edda; color: #155724; }
+        .action-failed { background: #f8d7da; color: #721c24; }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            padding: 20px;
+            border-top: 1px solid #eee;
+        }
+
+        .pagination button {
+            padding: 8px 15px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .pagination button:hover:not(:disabled) {
+            background: #3498db;
+            color: white;
+            border-color: #3498db;
+        }
+
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .pagination .page-info {
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+
+        .loading i {
+            font-size: 2rem;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+
+        .no-data i {
+            font-size: 3rem;
+            margin-bottom: 15px;
+            display: block;
+        }
+
+        /* 檔案瀏覽 Modal */
+        .file-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .file-modal.active {
+            display: flex;
+        }
+
+        .file-modal-content {
+            background: white;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow: hidden;
+        }
+
+        .file-modal-header {
+            background: #f8f9fa;
+            padding: 20px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .file-modal-header h3 {
+            font-size: 1.2rem;
+            color: #2c3e50;
+        }
+
+        .file-modal-header .close-btn {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #7f8c8d;
+        }
+
+        .file-modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            max-height: 60vh;
+        }
+
+        .file-list {
+            list-style: none;
+        }
+
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 15px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            transition: all 0.3s;
+        }
+
+        .file-item:hover {
+            background: #f8f9fa;
+            border-color: #3498db;
+        }
+
+        .file-item .file-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .file-item .file-info i {
+            font-size: 1.2rem;
+            color: #3498db;
+        }
+
+        .file-item .file-name {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .file-item .file-meta {
+            font-size: 0.85rem;
+            color: #7f8c8d;
+        }
+
+        .file-item .download-btn {
+            background: #27ae60;
+            color: white;
+            padding: 8px 15px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .file-item .download-btn:hover {
+            background: #219a52;
+        }
+
+        .breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 15px;
+            font-size: 0.9rem;
+        }
+
+        .breadcrumb a {
+            color: #3498db;
+            text-decoration: none;
+        }
+
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 768px) {
+            .tabs {
+                flex-direction: column;
+            }
+
+            .filter-section {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="logs-container">
+        <!-- Header 與測試功能頁面一致 -->
+        <header class="header">
+            <div class="header-content">
+                <div class="header-left">
+                    <div class="header-logo">
+                        <img src="{{ url_for('static', filename='logo/logo.png') }}" alt="FORECAST Logo" class="logo-image">
+                    </div>
+                    <div class="header-text">
+                        <h1>系統日誌</h1>
+                        <p class="header-subtitle">活動記錄與檔案瀏覽</p>
+                    </div>
+                </div>
+                <div class="header-user">
+                    <div class="user-info">
+                        <i class="fas fa-user-circle"></i>
+                        <span class="user-name">{{ user.display_name }}</span>
+                        <span class="user-role">({{ '管理者' if user.role == 'admin' else 'IT' }})</span>
+                    </div>
+                    <a href="{% if user.role == 'admin' %}/admin{% else %}/it{% endif %}" class="logout-btn" style="background: #6c757d;">
+                        <i class="fas fa-arrow-left"></i> 返回
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <div class="tabs-container">
+            <div class="tabs">
+                <div class="tab active" data-tab="activity">
+                    <i class="fas fa-history"></i> 活動日誌
+                </div>
+                <div class="tab" data-tab="upload">
+                    <i class="fas fa-upload"></i> 上傳記錄
+                </div>
+                <div class="tab" data-tab="process">
+                    <i class="fas fa-cogs"></i> 處理記錄
+                </div>
+                <div class="tab" data-tab="files">
+                    <i class="fas fa-folder"></i> 檔案瀏覽
+                </div>
+            </div>
+
+            <div class="filter-section">
+                <div class="filter-group">
+                    <label>用戶</label>
+                    <select id="filter-user" onchange="onFilterChange()">
+                        <option value="">全部用戶</option>
+                    </select>
+                </div>
+                <div class="filter-group" id="filter-type-container">
+                    <label>操作類型</label>
+                    <select id="filter-type" onchange="onFilterChange()">
+                        <option value="">全部類型</option>
+                    </select>
+                </div>
+                <div class="filter-group" id="filter-status-container" style="display: none;">
+                    <label>狀態</label>
+                    <select id="filter-status" onchange="onFilterChange()">
+                        <option value="">全部狀態</option>
+                        <option value="success">成功</option>
+                        <option value="failed">失敗</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>開始日期</label>
+                    <input type="date" id="filter-start-date" onchange="onFilterChange()">
+                </div>
+                <div class="filter-group">
+                    <label>結束日期</label>
+                    <input type="date" id="filter-end-date" onchange="onFilterChange()">
+                </div>
+                <div class="filter-actions">
+                    <button class="btn btn-reset" onclick="resetFilters()">
+                        <i class="fas fa-redo"></i> 重置篩選
+                    </button>
+                </div>
+            </div>
+
+            <div class="content-section">
+                <!-- 活動日誌 -->
+                <div id="activity-content" class="tab-content">
+                    <div class="log-table-container">
+                        <table class="log-table">
+                            <thead>
+                                <tr>
+                                    <th>時間</th>
+                                    <th>用戶</th>
+                                    <th>操作類型</th>
+                                    <th>詳細內容</th>
+                                    <th>IP 位址</th>
+                                </tr>
+                            </thead>
+                            <tbody id="activity-tbody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 上傳記錄 -->
+                <div id="upload-content" class="tab-content" style="display: none;">
+                    <div class="log-table-container">
+                        <table class="log-table">
+                            <thead>
+                                <tr>
+                                    <th>時間</th>
+                                    <th>用戶</th>
+                                    <th>公司</th>
+                                    <th>檔案類型</th>
+                                    <th>檔案名稱</th>
+                                    <th>狀態</th>
+                                </tr>
+                            </thead>
+                            <tbody id="upload-tbody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 處理記錄 -->
+                <div id="process-content" class="tab-content" style="display: none;">
+                    <div class="log-table-container">
+                        <table class="log-table">
+                            <thead>
+                                <tr>
+                                    <th>時間</th>
+                                    <th>用戶</th>
+                                    <th>公司</th>
+                                    <th>處理類型</th>
+                                    <th>狀態</th>
+                                    <th>處理詳情</th>
+                                </tr>
+                            </thead>
+                            <tbody id="process-tbody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 檔案瀏覽 -->
+                <div id="files-content" class="tab-content" style="display: none;">
+                    <div class="file-browser">
+                        <div class="breadcrumb" id="file-breadcrumb">
+                            <a href="#" onclick="browseFiles()"><i class="fas fa-home"></i> 根目錄</a>
+                        </div>
+                        <div class="file-type-selector" style="margin-bottom: 20px; display: flex; gap: 20px;">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 12px 20px; background: #f8f9fa; border-radius: 8px; border: 2px solid transparent; transition: all 0.3s;" class="folder-type-label">
+                                <input type="radio" name="folder-type" value="uploads" checked onchange="browseFiles(); updateFolderTypeStyle();" style="width: 18px; height: 18px;">
+                                <i class="fas fa-upload" style="color: #27ae60; font-size: 1.1rem;"></i>
+                                <span style="font-weight: 600; font-size: 1rem;">上傳檔案</span>
+                                <span style="font-size: 0.85rem; color: #666;">(用戶上傳的原始檔)</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 12px 20px; background: #f8f9fa; border-radius: 8px; border: 2px solid transparent; transition: all 0.3s;" class="folder-type-label">
+                                <input type="radio" name="folder-type" value="processed" onchange="browseFiles(); updateFolderTypeStyle();" style="width: 18px; height: 18px;">
+                                <i class="fas fa-cogs" style="color: #3498db; font-size: 1.1rem;"></i>
+                                <span style="font-weight: 600; font-size: 1rem;">處理結果</span>
+                                <span style="font-size: 0.85rem; color: #666;">(系統產出的檔案)</span>
+                            </label>
+                        </div>
+                        <ul class="file-list" id="file-list">
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pagination" id="pagination">
+                <button onclick="goToPage(currentPage - 1)" id="prev-btn">
+                    <i class="fas fa-chevron-left"></i> 上一頁
+                </button>
+                <span class="page-info" id="page-info">第 1 頁 / 共 1 頁</span>
+                <button onclick="goToPage(currentPage + 1)" id="next-btn">
+                    下一頁 <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>&copy; 2025 智合科技，FORECAST 數據處理系統. 智能預測，精準分析.</p>
+        </footer>
+    </div>
+
+    <script>
+        let currentTab = 'activity';
+        let currentPage = 1;
+        let totalPages = 1;
+        let currentFilePath = '';
+
+        // 操作類型選項
+        const actionTypes = {
+            activity: [
+                { value: '', label: '全部類型' },
+                { value: 'login', label: '登入' },
+                { value: 'logout', label: '登出' },
+                { value: 'login_failed', label: '登入失敗' },
+                { value: 'upload_erp', label: '上傳 ERP' },
+                { value: 'upload_forecast', label: '上傳 Forecast' },
+                { value: 'upload_transit', label: '上傳 Transit' },
+                { value: 'cleanup_success', label: '清理成功' },
+                { value: 'cleanup_failed', label: '清理失敗' },
+                { value: 'mapping_success', label: '映射成功' },
+                { value: 'mapping_failed', label: '映射失敗' },
+                { value: 'forecast_success', label: '預測成功' },
+                { value: 'forecast_failed', label: '預測失敗' },
+                { value: 'download', label: '下載' }
+            ],
+            upload: [
+                { value: '', label: '全部類型' },
+                { value: 'erp', label: 'ERP' },
+                { value: 'forecast', label: 'Forecast' },
+                { value: 'transit', label: 'Transit' }
+            ],
+            process: [
+                { value: '', label: '全部類型' },
+                { value: 'cleanup', label: '數據清理' },
+                { value: 'mapping', label: '映射處理' },
+                { value: 'forecast', label: '預測處理' }
+            ]
+        };
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            loadUsers();
+            updateFilterOptions();
+            loadData();
+
+            // Tab 切換事件
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', function() {
+                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    this.classList.add('active');
+                    currentTab = this.dataset.tab;
+                    currentPage = 1;
+                    updateFilterOptions();
+
+                    document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+                    document.getElementById(currentTab + '-content').style.display = 'block';
+
+                    if (currentTab === 'files') {
+                        document.getElementById('pagination').style.display = 'none';
+                        document.querySelector('.filter-section').style.display = 'none';
+                        browseFiles();
+                        updateFolderTypeStyle();
+                    } else {
+                        document.getElementById('pagination').style.display = 'flex';
+                        document.querySelector('.filter-section').style.display = 'grid';
+                        loadData();
+                    }
+                });
+            });
+        });
+
+        // 載入用戶列表
+        async function loadUsers() {
+            try {
+                const response = await fetch('/api/users/list');
+                const result = await response.json();
+                if (result.success) {
+                    const select = document.getElementById('filter-user');
+                    select.innerHTML = '<option value="">全部用戶</option>';
+                    result.users.forEach(user => {
+                        select.innerHTML += `<option value="${user.id}">${user.display_name} (${user.company})</option>`;
+                    });
+                }
+            } catch (error) {
+                console.error('載入用戶列表失敗:', error);
+            }
+        }
+
+        // 更新篩選選項
+        function updateFilterOptions() {
+            const typeSelect = document.getElementById('filter-type');
+            const options = actionTypes[currentTab] || actionTypes.activity;
+            typeSelect.innerHTML = options.map(opt =>
+                `<option value="${opt.value}">${opt.label}</option>`
+            ).join('');
+
+            // 檔案瀏覽時隱藏類型篩選
+            document.getElementById('filter-type-container').style.display =
+                currentTab === 'files' ? 'none' : '';
+
+            // 上傳記錄和處理記錄顯示狀態篩選
+            document.getElementById('filter-status-container').style.display =
+                (currentTab === 'upload' || currentTab === 'process') ? '' : 'none';
+
+            // 重置狀態篩選
+            document.getElementById('filter-status').value = '';
+        }
+
+        // 載入數據
+        async function loadData() {
+            const userId = document.getElementById('filter-user').value;
+            const type = document.getElementById('filter-type').value;
+            const status = document.getElementById('filter-status').value;
+            const startDate = document.getElementById('filter-start-date').value;
+            const endDate = document.getElementById('filter-end-date').value;
+
+            let url = '';
+            switch (currentTab) {
+                case 'activity':
+                    url = `/api/logs/activity?page=${currentPage}&user_id=${userId}&action_type=${type}&start_date=${startDate}&end_date=${endDate}`;
+                    break;
+                case 'upload':
+                    url = `/api/logs/upload?page=${currentPage}&user_id=${userId}&file_type=${type}&status=${status}&start_date=${startDate}&end_date=${endDate}`;
+                    break;
+                case 'process':
+                    url = `/api/logs/process?page=${currentPage}&user_id=${userId}&process_type=${type}&status=${status}&start_date=${startDate}&end_date=${endDate}`;
+                    break;
+            }
+
+            showLoading();
+
+            try {
+                const response = await fetch(url);
+                const result = await response.json();
+
+                if (result.success) {
+                    totalPages = result.total_pages || 1;
+                    renderTable(result.records);
+                    updatePagination();
+                } else {
+                    showNoData();
+                }
+            } catch (error) {
+                console.error('載入數據失敗:', error);
+                showNoData();
+            }
+        }
+
+        // 渲染表格
+        function renderTable(records) {
+            let tbody;
+            switch (currentTab) {
+                case 'activity':
+                    tbody = document.getElementById('activity-tbody');
+                    tbody.innerHTML = records.length ? records.map(r => `
+                        <tr>
+                            <td>${r.created_at}</td>
+                            <td>${r.display_name || r.username || '-'}</td>
+                            <td><span class="action-type action-${getActionClass(r.action_type)}">${formatActionType(r.action_type)}</span></td>
+                            <td class="detail-cell" title="${r.action_detail || ''}">${r.action_detail || '-'}</td>
+                            <td>${r.ip_address || '-'}</td>
+                        </tr>
+                    `).join('') : '<tr><td colspan="5" class="no-data"><i class="fas fa-inbox"></i> 沒有資料</td></tr>';
+                    break;
+
+                case 'upload':
+                    tbody = document.getElementById('upload-tbody');
+                    tbody.innerHTML = records.length ? records.map(r => `
+                        <tr>
+                            <td>${r.created_at}</td>
+                            <td>${r.display_name || r.username || '-'}</td>
+                            <td>${r.company || '-'}</td>
+                            <td>${formatFileType(r.file_type)}</td>
+                            <td>${r.original_filename || '-'}</td>
+                            <td><span class="status-badge status-${r.upload_status}">${formatStatus(r.upload_status)}</span></td>
+                        </tr>
+                    `).join('') : '<tr><td colspan="6" class="no-data"><i class="fas fa-inbox"></i> 沒有資料</td></tr>';
+                    break;
+
+                case 'process':
+                    tbody = document.getElementById('process-tbody');
+                    tbody.innerHTML = records.length ? records.map(r => `
+                        <tr>
+                            <td>${r.created_at}</td>
+                            <td>${r.display_name || r.username || '-'}</td>
+                            <td>${r.company || '-'}</td>
+                            <td>${formatProcessType(r.process_type)}</td>
+                            <td><span class="status-badge status-${r.process_status}">${formatStatus(r.process_status)}</span></td>
+                            <td class="detail-cell" title="${r.process_detail || ''}">${r.process_detail || '-'}</td>
+                        </tr>
+                    `).join('') : '<tr><td colspan="6" class="no-data"><i class="fas fa-inbox"></i> 沒有資料</td></tr>';
+                    break;
+            }
+        }
+
+        // 格式化函數
+        function formatActionType(type) {
+            const mapping = {
+                'login': '登入', 'logout': '登出', 'login_failed': '登入失敗',
+                'upload_erp': '上傳 ERP', 'upload_forecast': '上傳 Forecast', 'upload_transit': '上傳 Transit',
+                'cleanup_start': '開始清理', 'cleanup_success': '清理成功', 'cleanup_failed': '清理失敗',
+                'mapping_start': '開始映射', 'mapping_success': '映射成功', 'mapping_failed': '映射失敗',
+                'forecast_start': '開始預測', 'forecast_success': '預測成功', 'forecast_failed': '預測失敗',
+                'download': '下載'
+            };
+            return mapping[type] || type;
+        }
+
+        function getActionClass(type) {
+            if (type.includes('login')) return 'login';
+            if (type.includes('logout')) return 'logout';
+            if (type.includes('upload')) return 'upload';
+            if (type.includes('failed')) return 'failed';
+            if (type.includes('download')) return 'download';
+            return 'process';
+        }
+
+        function formatFileType(type) {
+            return { 'erp': 'ERP', 'forecast': 'Forecast', 'transit': 'Transit' }[type] || type;
+        }
+
+        function formatProcessType(type) {
+            return { 'cleanup': '數據清理', 'mapping': '映射處理', 'forecast': '預測處理' }[type] || type;
+        }
+
+        function formatStatus(status) {
+            return { 'success': '成功', 'failed': '失敗', 'started': '進行中', 'pending': '等待中' }[status] || status;
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+        }
+
+        // 分頁
+        function updatePagination() {
+            document.getElementById('page-info').textContent = `第 ${currentPage} 頁 / 共 ${totalPages} 頁`;
+            document.getElementById('prev-btn').disabled = currentPage <= 1;
+            document.getElementById('next-btn').disabled = currentPage >= totalPages;
+        }
+
+        function goToPage(page) {
+            if (page < 1 || page > totalPages) return;
+            currentPage = page;
+            loadData();
+        }
+
+        // 即時篩選
+        function onFilterChange() {
+            currentPage = 1;
+            loadData();
+        }
+
+        function resetFilters() {
+            document.getElementById('filter-user').value = '';
+            document.getElementById('filter-type').value = '';
+            document.getElementById('filter-status').value = '';
+            document.getElementById('filter-start-date').value = '';
+            document.getElementById('filter-end-date').value = '';
+            currentPage = 1;
+            loadData();
+        }
+
+        // 載入中提示
+        function showLoading() {
+            const tbody = document.getElementById(currentTab + '-tbody');
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="6" class="loading"><i class="fas fa-spinner"></i> 載入中...</td></tr>';
+            }
+        }
+
+        function showNoData() {
+            const tbody = document.getElementById(currentTab + '-tbody');
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="6" class="no-data"><i class="fas fa-inbox"></i> 沒有資料</td></tr>';
+            }
+        }
+
+        // 檔案瀏覽
+        // 用戶 ID 對應名稱的映射表
+        let userMapping = {};
+
+        // 更新選中樣式
+        function updateFolderTypeStyle() {
+            document.querySelectorAll('.folder-type-label').forEach(label => {
+                const radio = label.querySelector('input[type="radio"]');
+                if (radio.checked) {
+                    label.style.borderColor = '#3498db';
+                    label.style.background = '#e8f4fc';
+                } else {
+                    label.style.borderColor = 'transparent';
+                    label.style.background = '#f8f9fa';
+                }
+            });
+        }
+
+        async function browseFiles(path = '') {
+            currentFilePath = path;
+            const folderType = document.querySelector('input[name="folder-type"]:checked').value;
+            const fileList = document.getElementById('file-list');
+
+            console.log('[browseFiles] path:', path, 'folderType:', folderType);
+            fileList.innerHTML = '<li class="loading"><i class="fas fa-spinner"></i> 載入中...</li>';
+            updateFolderTypeStyle();
+
+            try {
+                let url = path ? `/api/files/browse/${path}?type=${folderType}` : `/api/files/browse?type=${folderType}`;
+                console.log('[browseFiles] API URL:', url);
+                const response = await fetch(url);
+                const result = await response.json();
+
+                console.log('[browseFiles] API 回傳:', result);
+
+                if (result.success) {
+                    // 儲存用戶映射
+                    if (result.user_mapping) {
+                        userMapping = result.user_mapping;
+                    }
+                    updateBreadcrumb(path);
+                    renderFileList(result.folders || [], result.files || []);
+                } else {
+                    fileList.innerHTML = '<li class="no-data"><i class="fas fa-exclamation-circle"></i> ' + (result.message || '載入失敗') + '</li>';
+                }
+            } catch (error) {
+                console.error('載入檔案列表失敗:', error);
+                fileList.innerHTML = '<li class="no-data"><i class="fas fa-exclamation-circle"></i> 載入失敗</li>';
+            }
+        }
+
+        // 取得顯示名稱（將 ID 轉換為用戶名稱）
+        function getDisplayName(name) {
+            // 如果是純數字（用戶 ID），嘗試從映射表取得名稱
+            if (/^\d+$/.test(name) && userMapping[name]) {
+                return userMapping[name];
+            }
+            return name;
+        }
+
+        function updateBreadcrumb(path) {
+            const breadcrumb = document.getElementById('file-breadcrumb');
+            let html = '<a href="#" onclick="browseFiles()"><i class="fas fa-home"></i> 根目錄</a>';
+
+            if (path) {
+                const parts = path.split('/');
+                let currentPath = '';
+                parts.forEach((part, index) => {
+                    currentPath += (index > 0 ? '/' : '') + part;
+                    const displayName = getDisplayName(part);
+                    html += ` <i class="fas fa-chevron-right"></i> `;
+                    if (index === parts.length - 1) {
+                        html += `<span>${displayName}</span>`;
+                    } else {
+                        html += `<a href="#" onclick="browseFiles('${currentPath}')">${displayName}</a>`;
+                    }
+                });
+            }
+
+            breadcrumb.innerHTML = html;
+        }
+
+        function renderFileList(folders, files) {
+            const fileList = document.getElementById('file-list');
+            const folderType = document.querySelector('input[name="folder-type"]:checked').value;
+
+            console.log('[renderFileList] folders:', folders.length, 'files:', files.length);
+
+            if (folders.length === 0 && files.length === 0) {
+                fileList.innerHTML = '<li class="no-data"><i class="fas fa-folder-open"></i> 資料夾為空</li>';
+                return;
+            }
+
+            let html = '';
+
+            // 資料夾
+            folders.forEach(folder => {
+                const displayName = getDisplayName(folder.name);
+                html += `
+                    <li class="file-item" onclick="browseFiles('${folder.path}')">
+                        <div class="file-info">
+                            <i class="fas fa-folder" style="color: #f39c12;"></i>
+                            <div>
+                                <div class="file-name">${displayName}</div>
+                                <div class="file-meta">${folder.file_count || 0} 個檔案 | ${folder.modified}</div>
+                            </div>
+                        </div>
+                    </li>
+                `;
+            });
+
+            // 檔案
+            files.forEach(file => {
+                html += `
+                    <li class="file-item">
+                        <div class="file-info">
+                            <i class="fas fa-file-excel" style="color: #27ae60;"></i>
+                            <div>
+                                <div class="file-name">${file.name}</div>
+                                <div class="file-meta">${formatFileSize(file.size)} | ${file.modified}</div>
+                            </div>
+                        </div>
+                        <button class="download-btn" onclick="downloadFile('${file.path}', '${folderType}')">
+                            <i class="fas fa-download"></i> 下載
+                        </button>
+                    </li>
+                `;
+            });
+
+            fileList.innerHTML = html;
+        }
+
+        function downloadFile(path, type) {
+            window.location.href = `/api/files/download/${path}?type=${type}`;
+        }
+    </script>
+
+    <!-- 瀏覽器檢測腳本 -->
+    <script src="{{ url_for('static', filename='js/browser-check.js') }}?v={{ version }}"></script>
+</body>
+</html>

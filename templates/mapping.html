@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>映射表配置 - FORECAST 數據處理系統</title>
+    
+    <!-- Meta 資料 -->
+    <meta name="description" content="FORECAST數據處理系統映射表配置頁面，配置客戶簡稱與地區的映射關係">
+    <meta name="keywords" content="映射表, 配置, 客戶簡稱, 地區映射, FORECAST">
+    <meta name="author" content="FORECAST 數據處理系統">
+    <meta name="robots" content="index, follow">
+    
+    <!-- Open Graph Meta 資料 -->
+    <meta property="og:title" content="映射表配置 - FORECAST 數據處理系統">
+    <meta property="og:description" content="FORECAST數據處理系統映射表配置頁面，配置客戶簡稱與地區的映射關係">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="http://localhost:12026/mapping">
+    <meta property="og:image" content="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
+    <meta property="og:site_name" content="FORECAST 數據處理系統">
+    
+    <!-- Twitter Card Meta 資料 -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="映射表配置 - FORECAST 數據處理系統">
+    <meta name="twitter:description" content="FORECAST數據處理系統映射表配置頁面，配置客戶簡稱與地區的映射關係">
+    <meta name="twitter:image" content="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
+    
+    <!-- 頁籤圖標 -->
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
+    <link rel="shortcut icon" type="image/png" href="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}?v={{ version }}" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- 標題區域 -->
+        <header class="header">
+            <div class="header-content">
+                <div class="header-logo">
+                    <img src="{{ url_for('static', filename='logo/logo.png') }}" alt="FORECAST Logo" class="logo-image">
+                </div>
+                <div class="header-text">
+                    <h1>映射表配置</h1>
+                    <p class="header-subtitle">配置客戶簡稱與地區的映射關係</p>
+                </div>
+            </div>
+        </header>
+
+        <!-- 主要內容 -->
+        <main class="main-content">
+            <div class="card">
+                <div class="card-header">
+                    <h2><i class="fas fa-cog"></i> 映射配置</h2>
+                    <p>為每個客戶簡稱配置對應的地區和時間參數</p>
+                </div>
+                <div class="card-body">
+                    <!-- 載入狀態 -->
+                    <div class="loading-state" id="loading-state">
+                        <div class="spinner"></div>
+                        <p>正在載入客戶數據...</p>
+                    </div>
+
+                    <!-- 映射表格 -->
+                    <div class="mapping-table-container" id="mapping-table-container" style="display: none;">
+                        <div class="table-header">
+                            <h3>客戶映射配置</h3>
+                            <div class="table-header-actions">
+                                <button class="btn btn-success" id="add-customer-btn">
+                                    <i class="fas fa-plus"></i> 新增客戶
+                                </button>
+                                <button class="btn btn-primary" id="save-mapping-btn">
+                                    <i class="fas fa-save"></i> 保存配置
+                                </button>
+                            </div>
+                        </div>
+                        <div class="table-wrapper">
+                            <table class="mapping-table">
+                                <thead>
+                                    <tr>
+                                        <th>客戶簡稱</th>
+                                        <th>客戶需求地區</th>
+                                        <th>排程出貨日期斷點</th>
+                                        <th style="min-width: 160px;">ETD</th>
+                                        <th style="min-width: 160px;">ETA</th>
+                                        <th style="width: 80px;">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="mapping-tbody">
+                                    <!-- 動態生成 -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- 錯誤狀態 -->
+                    <div class="error-state" id="error-state" style="display: none;">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <h3>載入失敗</h3>
+                        <p id="error-message"></p>
+                        <button class="btn btn-secondary" onclick="location.reload()">
+                            <i class="fas fa-refresh"></i> 重新載入
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 配置說明 -->
+            <div class="card">
+                <div class="card-header">
+                    <h2><i class="fas fa-info-circle"></i> 配置說明</h2>
+                </div>
+                <div class="card-body">
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <div class="info-icon">
+                                <i class="fas fa-map-marker-alt"></i>
+                            </div>
+                            <div class="info-content">
+                                <h4>客戶需求地區</h4>
+                                <p>指定客戶所屬的地區代碼，用於數據匹配</p>
+                            </div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-icon">
+                                <i class="fas fa-calendar-week"></i>
+                            </div>
+                            <div class="info-content">
+                                <h4>排程出貨日期斷點</h4>
+                                <p>指定週別斷點，如"禮拜四"表示週五到週四為一週</p>
+                            </div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-icon">
+                                <i class="fas fa-ship"></i>
+                            </div>
+                            <div class="info-content">
+                                <h4>ETD (Estimated Time of Departure)</h4>
+                                <p>預估離港時間，用於計算運輸時間</p>
+                            </div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-icon">
+                                <i class="fas fa-truck"></i>
+                            </div>
+                            <div class="info-content">
+                                <h4>ETA (Estimated Time of Arrival)</h4>
+                                <p>預估到貨時間，如"下下週二"</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- 頁腳 -->
+        <footer class="footer">
+            <p>&copy; 2025 智合科技，FORECAST 數據處理系統. 智能預測，精準分析.</p>
+        </footer>
+    </div>
+
+    <!-- Chrome 瀏覽器阻擋彈窗 -->
+    <div id="chrome-block-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <i class="fas fa-exclamation-triangle"></i>
+                <h2>瀏覽器不支援</h2>
+            </div>
+            <div class="modal-body">
+                <p>檢測到您正在使用 Google Chrome 瀏覽器。</p>
+                <p>由於快取問題，本系統建議使用以下方式以獲得最佳體驗。</p>
+                <div class="browser-info">
+                    <div class="browser-item">
+                        <i class="fab fa-edge"></i>
+                        <div class="browser-details">
+                            <h3>Microsoft Edge</h3>
+                            <p>推薦瀏覽器，完全相容且無快取問題</p>
+                        </div>
+                    </div>
+                    <div class="browser-item">
+                        <i class="fab fa-firefox-browser"></i>
+                        <div class="browser-details">
+                            <h3>Mozilla Firefox</h3>
+                            <p>支援瀏覽器，穩定可靠且相容性佳</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-primary" onclick="openInEdge()">
+                        <i class="fab fa-edge"></i> 用 Edge 開啟
+                    </button>
+                    <button class="btn btn-firefox" onclick="openInFirefox()">
+                        <i class="fab fa-firefox-browser"></i> 用 Firefox 開啟
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firefox 教學彈窗 -->
+    <div id="firefox-tutorial-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header" style="background: linear-gradient(135deg, #ff9500, #ff7b00);">
+                <i class="fab fa-firefox-browser"></i>
+                <h2>Firefox 使用教學</h2>
+            </div>
+            <div class="modal-body">
+                <p>請按照以下步驟在 Firefox 瀏覽器中使用本系統：</p>
+                
+                <div class="tutorial-steps">
+                    <div class="tutorial-step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h4>複製網址</h4>
+                            <p>請複製以下網址到剪貼簿：</p>
+                            <div class="url-copy-box">
+                                <input type="text" id="tutorial-url" value="" readonly>
+                                <button onclick="copyUrlToClipboard()" class="copy-btn">
+                                    <i class="fas fa-copy"></i> 複製
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="tutorial-step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h4>開啟 Firefox</h4>
+                            <p>在您的電腦上開啟 Mozilla Firefox 瀏覽器</p>
+                        </div>
+                    </div>
+                    
+                    <div class="tutorial-step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h4>貼上網址</h4>
+                            <p>在 Firefox 的網址列中貼上網址並按 Enter 鍵</p>
+                        </div>
+                    </div>
+                    
+                    <div class="tutorial-step">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <h4>開始使用</h4>
+                            <p>現在您可以在 Firefox 中正常使用本系統了！</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="modal-actions">
+                    <button class="btn btn-primary" onclick="closeFirefoxTutorial()">
+                        <i class="fas fa-check"></i> 我知道了
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <script src="{{ url_for('static', filename='js/mapping.js') }}?v={{ version }}"></script>
+    
+    <!-- 瀏覽器檢測腳本 -->
+    <script>
+        // 檢測瀏覽器類型
+        function detectBrowser() {
+            const userAgent = navigator.userAgent;
+            const vendor = navigator.vendor;
+            
+            // 先檢測Edge（因為Edge的User Agent也包含Chrome）
+            const isEdge = /Edg/.test(userAgent);
+            
+            // 再檢測Chrome（排除Edge）
+            const isChrome = /Chrome/.test(userAgent) && /Google Inc/.test(vendor) && !isEdge;
+            
+            // 移除無痕模式檢測，只要是Chrome就阻擋
+            const isChromeIncognito = false;
+            
+            // 檢測其他瀏覽器
+            const isFirefox = /Firefox/.test(userAgent);
+            const isSafari = /Safari/.test(userAgent) && !/Chrome/.test(userAgent);
+            const isOpera = /Opera/.test(userAgent) || /OPR/.test(userAgent);
+            
+            return {
+                isChrome: isChrome && !isChromeIncognito, // 只有非無痕的Chrome才被視為需要阻擋
+                isChromeIncognito: isChromeIncognito,
+                isEdge: isEdge,
+                isFirefox: isFirefox,
+                isSafari: isSafari,
+                isOpera: isOpera,
+                userAgent: userAgent,
+                vendor: vendor
+            };
+        }
+        
+        // 顯示Chrome阻擋彈窗
+        function showChromeModal() {
+            const modal = document.getElementById('chrome-block-modal');
+            modal.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+        }
+        
+        // 用Firefox瀏覽器開啟當前頁面
+        function openInFirefox() {
+            const currentUrl = window.location.href;
+            
+            // 設置教學彈窗中的網址
+            document.getElementById('tutorial-url').value = currentUrl;
+            
+            try {
+                // 嘗試使用 Firefox 的 URL scheme
+                const firefoxUrl = `firefox://open-url?url=${encodeURIComponent(currentUrl)}`;
+                
+                // 創建一個隱藏的連結來觸發 Firefox
+                const link = document.createElement('a');
+                link.href = firefoxUrl;
+                link.style.display = 'none';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                // 延遲檢查是否成功跳轉
+                setTimeout(() => {
+                    // 如果頁面還在，表示 Firefox 沒有啟動或不存在，顯示教學彈窗
+                    if (document.visibilityState === 'visible') {
+                        showFirefoxTutorial();
+                    }
+                }, 2000);
+                
+            } catch (error) {
+                // 如果跳轉失敗，立即顯示教學彈窗
+                showFirefoxTutorial();
+            }
+        }
+        
+        // 顯示Firefox教學彈窗
+        function showFirefoxTutorial() {
+            const modal = document.getElementById('firefox-tutorial-modal');
+            modal.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+        }
+        
+        // 關閉Firefox教學彈窗
+        function closeFirefoxTutorial() {
+            const modal = document.getElementById('firefox-tutorial-modal');
+            modal.style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }
+        
+        // 複製網址到剪貼簿
+        function copyUrlToClipboard() {
+            const urlInput = document.getElementById('tutorial-url');
+            urlInput.select();
+            urlInput.setSelectionRange(0, 99999); // 對於行動裝置
+            
+            try {
+                document.execCommand('copy');
+                // 顯示複製成功提示
+                const copyBtn = event.target.closest('.copy-btn');
+                const originalText = copyBtn.innerHTML;
+                copyBtn.innerHTML = '<i class="fas fa-check"></i> 已複製';
+                copyBtn.style.background = '#28a745';
+                
+                setTimeout(() => {
+                    copyBtn.innerHTML = originalText;
+                    copyBtn.style.background = '';
+                }, 2000);
+            } catch (err) {
+                alert('無法複製到剪貼簿，請手動複製網址');
+            }
+        }
+        
+        
+        // 用Edge瀏覽器開啟當前頁面
+        function openInEdge() {
+            const currentUrl = window.location.href;
+            const edgeUrl = `microsoft-edge:${currentUrl}`;
+            
+            // 記錄跳轉前的時間
+            const redirectTime = Date.now();
+            window.edgeRedirectTime = redirectTime;
+            
+            // 嘗試用Edge開啟
+            try {
+                // 創建隱藏的iframe來嘗試跳轉
+                const iframe = document.createElement('iframe');
+                iframe.style.display = 'none';
+                iframe.src = edgeUrl;
+                document.body.appendChild(iframe);
+                
+                // 同時嘗試直接跳轉
+                window.location.href = edgeUrl;
+                
+                // 監聽頁面失去焦點事件（表示可能成功跳轉）
+                let blurHandled = false;
+                const handleBlur = () => {
+                    if (!blurHandled) {
+                        blurHandled = true;
+                        window.removeEventListener('blur', handleBlur);
+                        // 成功跳轉，不顯示提示
+                        return;
+                    }
+                };
+                window.addEventListener('blur', handleBlur);
+                
+                // 如果3秒後頁面仍然可見且沒有失去焦點，顯示提示
+                setTimeout(() => {
+                    if (Date.now() - redirectTime < 4000 && document.visibilityState === 'visible' && !blurHandled) {
+                        alert('無法自動開啟Edge瀏覽器，請手動複製網址到Edge瀏覽器中開啟：\n' + currentUrl);
+                    }
+                    // 清理iframe
+                    if (iframe.parentNode) {
+                        iframe.parentNode.removeChild(iframe);
+                    }
+                }, 3000);
+                
+            } catch (error) {
+                // 如果跳轉失敗，立即顯示提示
+                alert('無法自動開啟Edge瀏覽器，請手動複製網址到Edge瀏覽器中開啟：\n' + currentUrl);
+            }
+        }
+        
+        // 頁面載入時檢測瀏覽器
+        document.addEventListener('DOMContentLoaded', function() {
+            const browser = detectBrowser();
+            console.log('瀏覽器檢測結果:', browser);
+            console.log('User Agent:', browser.userAgent);
+            console.log('Vendor:', browser.vendor);
+            
+            // 只要是Chrome瀏覽器就顯示阻擋彈窗
+            if (browser.isChrome) {
+                console.log('檢測到Chrome瀏覽器，顯示阻擋視窗');
+                showChromeModal();
+            } else {
+                console.log('不是Chrome瀏覽器，系統可以正常使用');
+            }
+        });
+        
+        // 阻止模態框外部點擊關閉
+        document.getElementById('chrome-block-modal').addEventListener('click', function(e) {
+            e.stopPropagation();
+        });
+    </script>
+</body>
+</html>
