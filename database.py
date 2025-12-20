@@ -164,10 +164,11 @@ def init_database():
                 if "Duplicate key name" not in str(add_error):
                     print(f"ℹ️ 唯一索引檢查: {add_error}")
 
-            # 建立處理規則表（儲存預測處理的計算規則）
+            # 建立處理規則表（儲存預測處理的計算規則，依客戶區分）
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS processing_rules (
                     id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
                     rule_name VARCHAR(100) NOT NULL,
                     rule_category ENUM('erp', 'transit', 'forecast', 'mapping', 'cleanup') NOT NULL,
                     rule_description TEXT,
@@ -175,14 +176,68 @@ def init_database():
                     is_active BOOLEAN DEFAULT TRUE,
                     display_order INT DEFAULT 0,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """)
 
-            # 檢查是否需要初始化預設規則
+            # 確保 user_id 欄位存在（用於舊資料庫升級）
+            try:
+                # 檢查 user_id 欄位是否存在
+                cursor.execute("""
+                    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                    AND TABLE_NAME = 'processing_rules'
+                    AND COLUMN_NAME = 'user_id'
+                """)
+                if not cursor.fetchone():
+                    # 欄位不存在，需要升級
+                    # 先取得廣達用戶的 ID 作為預設值
+                    cursor.execute("SELECT id FROM users WHERE username = 'quanta'")
+                    quanta_user = cursor.fetchone()
+                    default_user_id = quanta_user['id'] if quanta_user else 1
+
+                    # 加入 user_id 欄位（允許 NULL）
+                    cursor.execute("""
+                        ALTER TABLE processing_rules
+                        ADD COLUMN user_id INT NULL AFTER id
+                    """)
+                    print("✅ 已新增 processing_rules.user_id 欄位")
+
+                    # 將舊資料設定為預設用戶
+                    cursor.execute("""
+                        UPDATE processing_rules SET user_id = %s WHERE user_id IS NULL
+                    """, (default_user_id,))
+                    print(f"✅ 已將舊規則資料關聯到用戶 ID: {default_user_id}")
+
+                    # 設定為 NOT NULL
+                    cursor.execute("""
+                        ALTER TABLE processing_rules
+                        MODIFY COLUMN user_id INT NOT NULL
+                    """)
+
+                    # 加入外鍵約束
+                    try:
+                        cursor.execute("""
+                            ALTER TABLE processing_rules
+                            ADD CONSTRAINT fk_processing_rules_user
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                        """)
+                        print("✅ 已新增外鍵約束")
+                    except Exception as fk_error:
+                        if "Duplicate" not in str(fk_error):
+                            print(f"⚠️ 外鍵約束警告: {fk_error}")
+            except Exception as alter_error:
+                print(f"⚠️ 資料表升級檢查: {alter_error}")
+
+            # 檢查是否需要初始化預設規則（為廣達用戶初始化）
             cursor.execute("SELECT COUNT(*) as count FROM processing_rules")
             if cursor.fetchone()['count'] == 0:
-                init_default_processing_rules(cursor)
+                # 取得廣達用戶的 ID
+                cursor.execute("SELECT id FROM users WHERE username = 'quanta'")
+                quanta_user = cursor.fetchone()
+                if quanta_user:
+                    init_default_processing_rules(cursor, quanta_user['id'])
 
             connection.commit()
             print("✅ 資料庫表格初始化完成")
@@ -195,8 +250,14 @@ def init_database():
         connection.close()
 
 
-def init_default_processing_rules(cursor):
-    """初始化預設的處理規則"""
+def init_default_processing_rules(cursor, user_id):
+    """
+    初始化預設的處理規則（給指定客戶）
+
+    參數:
+        cursor: 資料庫游標
+        user_id: 客戶的用戶 ID
+    """
     import json
 
     default_rules = [
@@ -393,12 +454,12 @@ def init_default_processing_rules(cursor):
 
     for rule in default_rules:
         cursor.execute("""
-            INSERT INTO processing_rules (rule_name, rule_category, rule_description, rule_config, display_order)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (rule['rule_name'], rule['rule_category'], rule['rule_description'],
+            INSERT INTO processing_rules (user_id, rule_name, rule_category, rule_description, rule_config, display_order)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (user_id, rule['rule_name'], rule['rule_category'], rule['rule_description'],
               rule['rule_config'], rule['display_order']))
 
-    print("✅ 已初始化預設處理規則")
+    print(f"✅ 已初始化預設處理規則 (user_id: {user_id})")
 
 
 def update_activity_logs_enum():
@@ -1453,9 +1514,13 @@ def delete_user(user_id):
 
 # ==================== 規則管理 CRUD ====================
 
-def get_all_processing_rules():
+def get_all_processing_rules(user_id=None):
     """
     取得所有處理規則
+
+    參數:
+        user_id: 用戶 ID（可選，如果指定則只返回該用戶的規則）
+
     返回: 規則列表
     """
     connection = get_db_connection()
@@ -1464,12 +1529,25 @@ def get_all_processing_rules():
 
     try:
         with connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT id, rule_name, rule_category, rule_description,
-                       rule_config, is_active, display_order, created_at, updated_at
-                FROM processing_rules
-                ORDER BY rule_category, display_order
-            """)
+            if user_id:
+                cursor.execute("""
+                    SELECT pr.id, pr.user_id, pr.rule_name, pr.rule_category, pr.rule_description,
+                           pr.rule_config, pr.is_active, pr.display_order, pr.created_at, pr.updated_at,
+                           u.username, u.display_name, u.company
+                    FROM processing_rules pr
+                    LEFT JOIN users u ON pr.user_id = u.id
+                    WHERE pr.user_id = %s
+                    ORDER BY pr.rule_category, pr.display_order
+                """, (user_id,))
+            else:
+                cursor.execute("""
+                    SELECT pr.id, pr.user_id, pr.rule_name, pr.rule_category, pr.rule_description,
+                           pr.rule_config, pr.is_active, pr.display_order, pr.created_at, pr.updated_at,
+                           u.username, u.display_name, u.company
+                    FROM processing_rules pr
+                    LEFT JOIN users u ON pr.user_id = u.id
+                    ORDER BY u.company, pr.rule_category, pr.display_order
+                """)
             rules = cursor.fetchall()
 
             # 處理 JSON 欄位
@@ -1489,12 +1567,25 @@ def get_all_processing_rules():
         connection.close()
 
 
-def get_processing_rules_by_category(category):
+def get_processing_rules_by_user(user_id):
+    """
+    取得指定用戶的所有處理規則
+
+    參數:
+        user_id: 用戶 ID
+
+    返回: 規則列表
+    """
+    return get_all_processing_rules(user_id)
+
+
+def get_processing_rules_by_category(category, user_id=None):
     """
     根據類別取得處理規則
 
     參數:
         category: 規則類別 ('erp', 'transit', 'forecast', 'mapping', 'cleanup')
+        user_id: 用戶 ID（可選）
 
     返回: 規則列表
     """
@@ -1504,13 +1595,26 @@ def get_processing_rules_by_category(category):
 
     try:
         with connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT id, rule_name, rule_category, rule_description,
-                       rule_config, is_active, display_order, created_at, updated_at
-                FROM processing_rules
-                WHERE rule_category = %s
-                ORDER BY display_order
-            """, (category,))
+            if user_id:
+                cursor.execute("""
+                    SELECT pr.id, pr.user_id, pr.rule_name, pr.rule_category, pr.rule_description,
+                           pr.rule_config, pr.is_active, pr.display_order, pr.created_at, pr.updated_at,
+                           u.username, u.display_name, u.company
+                    FROM processing_rules pr
+                    LEFT JOIN users u ON pr.user_id = u.id
+                    WHERE pr.rule_category = %s AND pr.user_id = %s
+                    ORDER BY pr.display_order
+                """, (category, user_id))
+            else:
+                cursor.execute("""
+                    SELECT pr.id, pr.user_id, pr.rule_name, pr.rule_category, pr.rule_description,
+                           pr.rule_config, pr.is_active, pr.display_order, pr.created_at, pr.updated_at,
+                           u.username, u.display_name, u.company
+                    FROM processing_rules pr
+                    LEFT JOIN users u ON pr.user_id = u.id
+                    WHERE pr.rule_category = %s
+                    ORDER BY u.company, pr.display_order
+                """, (category,))
             rules = cursor.fetchall()
 
             import json
@@ -1545,10 +1649,12 @@ def get_processing_rule_by_id(rule_id):
     try:
         with connection.cursor() as cursor:
             cursor.execute("""
-                SELECT id, rule_name, rule_category, rule_description,
-                       rule_config, is_active, display_order, created_at, updated_at
-                FROM processing_rules
-                WHERE id = %s
+                SELECT pr.id, pr.user_id, pr.rule_name, pr.rule_category, pr.rule_description,
+                       pr.rule_config, pr.is_active, pr.display_order, pr.created_at, pr.updated_at,
+                       u.username, u.display_name, u.company
+                FROM processing_rules pr
+                LEFT JOIN users u ON pr.user_id = u.id
+                WHERE pr.id = %s
             """, (rule_id,))
             rule = cursor.fetchone()
 
@@ -1619,11 +1725,12 @@ def update_processing_rule(rule_id, **kwargs):
         connection.close()
 
 
-def create_processing_rule(rule_name, rule_category, rule_description=None, rule_config=None, display_order=0):
+def create_processing_rule(user_id, rule_name, rule_category, rule_description=None, rule_config=None, display_order=0):
     """
     建立新的處理規則
 
     參數:
+        user_id: 用戶 ID（必填）
         rule_name: 規則名稱
         rule_category: 規則類別 ('erp', 'transit', 'forecast', 'mapping', 'cleanup')
         rule_description: 規則描述
@@ -1642,9 +1749,9 @@ def create_processing_rule(rule_name, rule_category, rule_description=None, rule
 
         with connection.cursor() as cursor:
             cursor.execute("""
-                INSERT INTO processing_rules (rule_name, rule_category, rule_description, rule_config, display_order)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (rule_name, rule_category, rule_description, config_json, display_order))
+                INSERT INTO processing_rules (user_id, rule_name, rule_category, rule_description, rule_config, display_order)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (user_id, rule_name, rule_category, rule_description, config_json, display_order))
             connection.commit()
 
             return True, "規則建立成功", cursor.lastrowid

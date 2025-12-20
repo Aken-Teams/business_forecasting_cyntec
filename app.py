@@ -31,7 +31,8 @@ from database import (
     # 規則管理 CRUD 函數
     get_all_processing_rules, get_processing_rules_by_category,
     get_processing_rule_by_id, update_processing_rule,
-    create_processing_rule, delete_processing_rule, toggle_processing_rule_status
+    create_processing_rule, delete_processing_rule, toggle_processing_rule_status,
+    get_processing_rules_by_user
 )
 
 def normalize_date_for_mapping(date_value):
@@ -2328,10 +2329,18 @@ def api_get_all_rules():
     """取得所有處理規則"""
     try:
         category = request.args.get('category')
-        if category:
-            rules = get_processing_rules_by_category(category)
+        user_id = request.args.get('user_id', type=int)
+
+        if user_id:
+            if category:
+                rules = get_processing_rules_by_category(category, user_id)
+            else:
+                rules = get_processing_rules_by_user(user_id)
         else:
-            rules = get_all_processing_rules()
+            if category:
+                rules = get_processing_rules_by_category(category)
+            else:
+                rules = get_all_processing_rules()
 
         # 處理日期格式
         for rule in rules:
@@ -2372,11 +2381,15 @@ def api_create_rule():
     """新增處理規則"""
     try:
         data = request.get_json()
+        user_id = data.get('user_id')
         rule_name = data.get('rule_name', '').strip()
         rule_category = data.get('rule_category', '').strip()
         rule_description = data.get('rule_description', '').strip()
         rule_config = data.get('rule_config')
         display_order = data.get('display_order', 0)
+
+        if not user_id:
+            return jsonify({'success': False, 'message': '用戶 ID 為必填'})
 
         if not rule_name:
             return jsonify({'success': False, 'message': '規則名稱為必填'})
@@ -2385,7 +2398,7 @@ def api_create_rule():
             return jsonify({'success': False, 'message': '無效的規則類別'})
 
         success, message, rule_id = create_processing_rule(
-            rule_name, rule_category, rule_description, rule_config, display_order
+            user_id, rule_name, rule_category, rule_description, rule_config, display_order
         )
 
         if success:
