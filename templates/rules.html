@@ -360,6 +360,7 @@
             font-size: 1rem;
         }
 
+        .category-icon.upload { background: linear-gradient(135deg, #17a2b8 0%, #138496 100%); }
         .category-icon.erp { background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); }
         .category-icon.transit { background: linear-gradient(135deg, #27ae60 0%, #1e8449 100%); }
         .category-icon.forecast { background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); }
@@ -373,35 +374,35 @@
         }
 
         .rule-item {
-            background: #f8f9fa;
+            background: white;
             border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 15px;
-            border-left: 4px solid #3498db;
+            margin-bottom: 20px;
+            border: 1px solid #e0e0e0;
+            overflow: hidden;
         }
 
-        .rule-item.erp { border-left-color: #3498db; }
-        .rule-item.transit { border-left-color: #27ae60; }
-        .rule-item.forecast { border-left-color: #e74c3c; }
-        .rule-item.mapping { border-left-color: #9b59b6; }
-        .rule-item.cleanup { border-left-color: #f39c12; }
+        .rule-item:last-child {
+            margin-bottom: 0;
+        }
 
         .rule-item-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 10px;
+            padding: 16px 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
         }
 
         .rule-item-title {
-            font-weight: 600;
+            font-weight: 700;
             color: #2c3e50;
-            font-size: 1rem;
+            font-size: 1.05rem;
         }
 
         .rule-item-status {
-            padding: 4px 10px;
-            border-radius: 12px;
+            padding: 5px 12px;
+            border-radius: 20px;
             font-size: 0.75rem;
             font-weight: 600;
         }
@@ -416,44 +417,279 @@
             color: #721c24;
         }
 
+        .rule-item-body {
+            padding: 20px;
+        }
+
         .rule-item-desc {
-            color: #666;
-            font-size: 0.9rem;
-            margin-bottom: 12px;
-        }
-
-        .rule-config-details {
-            background: white;
-            border-radius: 8px;
-            padding: 15px;
-        }
-
-        .config-row {
-            display: flex;
-            margin-bottom: 8px;
-            font-size: 0.85rem;
-        }
-
-        .config-row:last-child {
-            margin-bottom: 0;
-        }
-
-        .config-label {
-            font-weight: 600;
             color: #555;
-            min-width: 120px;
+            font-size: 0.95rem;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px dashed #ddd;
+            text-align: center;
         }
 
-        .config-value {
+        .rule-config-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .rule-config-table tr {
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .rule-config-table tr:last-child {
+            border-bottom: none;
+        }
+
+        .rule-config-table th {
+            text-align: left;
+            padding: 10px 15px;
+            background: #f8f9fa;
+            color: #666;
+            font-weight: 600;
+            font-size: 0.85rem;
+            width: 140px;
+            vertical-align: top;
+            white-space: nowrap;
+        }
+
+        .rule-config-table td {
+            padding: 10px 15px;
+            color: #333;
+            font-size: 0.9rem;
+            vertical-align: top;
+            text-align: left;
+        }
+
+        .rule-config-table td code {
+            background: #e8f4f8;
+            color: #2980b9;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-right: 8px;
+            display: inline-block;
+            margin-bottom: 4px;
+            border: 1px solid #bde0eb;
+        }
+
+        .rule-config-table td .config-list {
+            margin: 0;
+            padding-left: 0;
+            list-style: none;
             color: #333;
         }
 
-        .config-value code {
-            background: #e9ecef;
-            padding: 2px 6px;
+        .rule-config-table td .config-list li {
+            margin-bottom: 6px;
+            line-height: 1.6;
+            padding: 2px 0;
+            padding-left: 15px;
+            position: relative;
+        }
+
+        .rule-config-table td .config-list li::before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: #3498db;
+            font-weight: bold;
+        }
+
+        .rule-config-table td .config-list li:last-child {
+            margin-bottom: 0;
+        }
+
+        .rule-config-table td .config-list li strong {
+            color: #2c3e50;
+            margin-right: 5px;
+        }
+
+        /* 物件陣列樣式（用於清理規則等） */
+        .config-object-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .config-object-item {
+            padding-left: 16px;
+            position: relative;
+        }
+
+        .config-object-item::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 6px;
+            width: 6px;
+            height: 6px;
+            background: #3498db;
+            border-radius: 50%;
+        }
+
+        .config-object-row {
+            display: block;
+            margin-bottom: 4px;
+            line-height: 1.6;
+            font-size: 0.9rem;
+        }
+
+        .config-object-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .config-object-row .config-label {
+            color: #666;
+            font-weight: 600;
+        }
+
+        .config-object-row .config-value {
+            color: #2c3e50;
+        }
+
+        .config-highlight {
+            background: #fff3cd;
+            padding: 2px 8px;
             border-radius: 4px;
+            font-weight: 600;
+            color: #856404;
+        }
+
+        /* 上傳步驟樣式 */
+        .upload-steps-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+
+        .upload-step-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 15px;
+            padding: 16px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .upload-step-item:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+
+        .upload-step-item:first-child {
+            padding-top: 0;
+        }
+
+        .upload-step-number {
+            width: 32px;
+            height: 32px;
+            min-width: 32px;
+            background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.9rem;
+        }
+
+        .upload-step-content {
+            flex: 1;
+        }
+
+        .upload-step-name {
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: 0.95rem;
+            margin-bottom: 4px;
+        }
+
+        .upload-step-desc {
+            color: #666;
+            font-size: 0.85rem;
+            line-height: 1.5;
+        }
+
+        .upload-step-meta {
+            display: flex;
+            gap: 10px;
+            margin-top: 8px;
+            flex-wrap: wrap;
+        }
+
+        .upload-step-tag {
+            font-size: 0.75rem;
+            padding: 3px 10px;
+            border-radius: 12px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .upload-step-tag.file-type {
+            background: #e8f4f8;
+            color: #2980b9;
+        }
+
+        .upload-step-tag.required {
+            background: #ffeeba;
+            color: #856404;
+        }
+
+        .upload-step-tag.auto {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .upload-step-tag.output {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        /* 規則說明區塊 */
+        .rules-intro {
+            padding: 0 0 20px 0;
+            margin-bottom: 20px;
+            border-bottom: 1px dashed #ddd;
+        }
+
+        .rules-intro-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            color: #555;
+            font-size: 0.9rem;
+        }
+
+        .rules-intro-header i {
+            color: #3498db;
+        }
+
+        .rules-intro-files {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .rules-intro-files .file-tag {
+            background: #e8f4f8;
+            color: #2980b9;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .rules-intro-files .file-tag i {
             font-size: 0.8rem;
-            color: #c0392b;
         }
 
         /* Toast 通知 */
@@ -739,8 +975,9 @@
                     return;
                 }
 
-                // 按類別分組規則
+                // 按類別分組規則（順序決定顯示順序）
                 const categories = {
+                    'upload': { name: '上傳文件流程', icon: 'cloud-upload-alt', rules: [] },
                     'erp': { name: 'ERP 淨需求處理', icon: 'database', rules: [] },
                     'transit': { name: '在途資料處理', icon: 'shipping-fast', rules: [] },
                     'forecast': { name: 'Forecast 處理', icon: 'chart-line', rules: [] },
@@ -754,7 +991,25 @@
                     }
                 });
 
-                let html = '';
+                // 根據有哪些規則類別來判斷需要上傳哪些文件
+                const fileTypes = [];
+                if (categories.erp.rules.length > 0) fileTypes.push({ name: 'ERP 淨需求', icon: 'file-excel' });
+                if (categories.transit.rules.length > 0) fileTypes.push({ name: '在途資料', icon: 'file-excel' });
+                if (categories.forecast.rules.length > 0) fileTypes.push({ name: 'Forecast', icon: 'file-excel' });
+
+                // 生成說明區塊
+                let html = `
+                    <div class="rules-intro">
+                        <div class="rules-intro-header">
+                            <i class="fas fa-info-circle"></i>
+                            <span>此客戶需上傳以下文件，系統依據下方規則進行處理</span>
+                        </div>
+                        <div class="rules-intro-files">
+                            ${fileTypes.map(f => `<span class="file-tag"><i class="fas fa-${f.icon}"></i> ${f.name}</span>`).join('')}
+                        </div>
+                    </div>
+                `;
+
                 for (const [key, category] of Object.entries(categories)) {
                     if (category.rules.length > 0) {
                         html += `
@@ -794,15 +1049,15 @@
             let configHtml = renderConfigDetails(config);
 
             return `
-                <div class="rule-item ${rule.rule_category}">
+                <div class="rule-item">
                     <div class="rule-item-header">
                         <span class="rule-item-title">${escapeHtml(rule.rule_name)}</span>
                         <span class="rule-item-status ${rule.is_active ? 'active' : 'inactive'}">
                             ${rule.is_active ? '啟用中' : '已停用'}
                         </span>
                     </div>
-                    <div class="rule-item-desc">${escapeHtml(rule.rule_description || '')}</div>
-                    <div class="rule-config-details">
+                    <div class="rule-item-body">
+                        ${rule.rule_description ? `<div class="rule-item-desc">${escapeHtml(rule.rule_description)}</div>` : ''}
                         ${configHtml}
                     </div>
                 </div>
@@ -812,22 +1067,67 @@
         // 渲染配置詳情
         function renderConfigDetails(config) {
             if (!config || Object.keys(config).length === 0) {
-                return '<p style="color: #999; margin: 0;">無詳細配置</p>';
+                return '<p style="color: #999; text-align: center; margin: 0;">無詳細配置</p>';
             }
 
-            let html = '';
-            for (const [key, value] of Object.entries(config)) {
-                html += `<div class="config-row">`;
-                html += `<span class="config-label">${formatKey(key)}:</span>`;
-                html += `<span class="config-value">${formatValue(value)}</span>`;
-                html += `</div>`;
+            // 特別處理上傳步驟
+            if (config.upload_steps && Array.isArray(config.upload_steps)) {
+                return renderUploadSteps(config.upload_steps);
             }
+
+            let html = '<table class="rule-config-table">';
+            for (const [key, value] of Object.entries(config)) {
+                html += `<tr>`;
+                html += `<th>${formatKey(key)}</th>`;
+                html += `<td>${formatValue(value)}</td>`;
+                html += `</tr>`;
+            }
+            html += '</table>';
+            return html;
+        }
+
+        // 渲染上傳步驟（專用格式）
+        function renderUploadSteps(steps) {
+            let html = '<div class="upload-steps-list">';
+            steps.forEach(step => {
+                const stepNum = step.step || '';
+                const name = step.name || '';
+                const desc = step.description || '';
+
+                // 構建標籤
+                let tags = '';
+                if (step.file_type) {
+                    tags += `<span class="upload-step-tag file-type"><i class="fas fa-file"></i> ${escapeHtml(step.file_type)}</span>`;
+                }
+                if (step.required) {
+                    tags += `<span class="upload-step-tag required"><i class="fas fa-asterisk"></i> 必要</span>`;
+                }
+                if (step.auto) {
+                    tags += `<span class="upload-step-tag auto"><i class="fas fa-magic"></i> 自動執行</span>`;
+                }
+                if (step.output) {
+                    tags += `<span class="upload-step-tag output"><i class="fas fa-download"></i> 輸出結果</span>`;
+                }
+
+                html += `
+                    <div class="upload-step-item">
+                        <div class="upload-step-number">${stepNum}</div>
+                        <div class="upload-step-content">
+                            <div class="upload-step-name">${escapeHtml(name)}</div>
+                            <div class="upload-step-desc">${escapeHtml(desc)}</div>
+                            ${tags ? `<div class="upload-step-meta">${tags}</div>` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
             return html;
         }
 
         // 格式化鍵名
         function formatKey(key) {
             const keyMap = {
+                // 基本欄位
                 'match_keys': '匹配欄位',
                 'source_columns': '來源欄位',
                 'description': '說明',
@@ -849,30 +1149,97 @@
                 'accumulation_logic': '累加邏輯',
                 'mapping_fields': '映射欄位',
                 'unique_key': '唯一鍵',
-                'cleanup_rules': '清理規則'
+                'cleanup_rules': '清理規則',
+                // 區塊識別相關
+                'method': '方法',
+                'primary_key': '主鍵',
+                'secondary_key': '次要鍵',
+                // 資料範圍相關
+                'date_columns': '日期欄位範圍',
+                'start_date_row': '起始日期行',
+                'end_date_row': '結束日期行',
+                'target_row_marker': '目標行標記',
+                // 欄位定位相關
+                'scan_range': '掃描範圍',
+                'date_range_check': '日期範圍檢查',
+                // 行定位相關
+                'marker': '標記',
+                // 累加邏輯相關
+                'rule': '規則',
+                // 清理規則相關
+                'action': '動作',
+                'condition': '條件',
+                'name': '名稱',
+                'purpose': '目的',
+                // 上傳流程相關
+                'upload_steps': '上傳步驟',
+                'step': '步驟',
+                'file_type': '檔案類型',
+                'required': '必要',
+                'auto': '自動執行',
+                'output': '輸出檔案',
+                // 其他
+                'erp_fill': 'ERP 填入',
+                'transit_fill': '在途填入',
+                'final_result': '最終結果'
             };
             return keyMap[key] || key.replace(/_/g, ' ');
+        }
+
+        // 格式化值（將特殊格式轉換為易讀格式）
+        function formatDisplayValue(val) {
+            if (typeof val !== 'string') return escapeHtml(String(val));
+
+            // 處理特殊格式
+            let formatted = val;
+
+            // 處理 "資料區塊起始行 + N" 格式
+            formatted = formatted.replace(/資料區塊起始行\s*\+\s*(\d+)/g, '資料區塊起始行 + $1');
+
+            // 處理欄位範圍 L~AW 等
+            formatted = formatted.replace(/([A-Z])~([A-Z]{1,2})\s*欄位/g, '$1 ~ $2 欄位');
+
+            // 處理 "K欄位" 格式
+            formatted = formatted.replace(/([A-Z])欄位/g, '$1 欄位');
+
+            return escapeHtml(formatted);
         }
 
         // 格式化值
         function formatValue(value) {
             if (Array.isArray(value)) {
-                return value.map(v => {
-                    if (typeof v === 'object') {
-                        return Object.entries(v).map(([k, val]) => `${formatKey(k)}: ${val}`).join(', ');
-                    }
-                    return `<code>${escapeHtml(String(v))}</code>`;
-                }).join(' / ');
+                // 如果是陣列，顯示為標籤或列表
+                if (value.length > 0 && typeof value[0] === 'object') {
+                    // 物件陣列 - 每個物件顯示為一個卡片區塊
+                    let listHtml = '<div class="config-object-list">';
+                    value.forEach((v, index) => {
+                        listHtml += `<div class="config-object-item">`;
+                        // 每個屬性分行顯示
+                        for (const [k, val] of Object.entries(v)) {
+                            listHtml += `<div class="config-object-row"><span class="config-label">${formatKey(k)}:</span> <span class="config-value">${formatDisplayValue(val)}</span></div>`;
+                        }
+                        listHtml += `</div>`;
+                    });
+                    listHtml += '</div>';
+                    return listHtml;
+                }
+                // 簡單陣列 - 顯示為標籤
+                return value.map(v => `<code>${escapeHtml(String(v))}</code>`).join(' ');
             }
             if (typeof value === 'object' && value !== null) {
-                return Object.entries(value).map(([k, v]) => {
-                    if (typeof v === 'object') {
-                        return `<strong>${formatKey(k)}:</strong> ${formatValue(v)}`;
+                // 物件 - 顯示為列表
+                let listHtml = '<ul class="config-list">';
+                for (const [k, v] of Object.entries(value)) {
+                    if (typeof v === 'object' && v !== null) {
+                        listHtml += `<li><strong>${formatKey(k)}:</strong> ${formatValue(v)}</li>`;
+                    } else {
+                        listHtml += `<li><strong>${formatKey(k)}:</strong> ${formatDisplayValue(v)}</li>`;
                     }
-                    return `<strong>${formatKey(k)}:</strong> ${escapeHtml(String(v))}`;
-                }).join('<br>');
+                }
+                listHtml += '</ul>';
+                return listHtml;
             }
-            return escapeHtml(String(value));
+            return formatDisplayValue(value);
         }
 
         // 關閉模態框

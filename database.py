@@ -170,7 +170,7 @@ def init_database():
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     user_id INT NOT NULL,
                     rule_name VARCHAR(100) NOT NULL,
-                    rule_category ENUM('erp', 'transit', 'forecast', 'mapping', 'cleanup') NOT NULL,
+                    rule_category ENUM('upload', 'erp', 'transit', 'forecast', 'mapping', 'cleanup') NOT NULL,
                     rule_description TEXT,
                     rule_config JSON,
                     is_active BOOLEAN DEFAULT TRUE,
@@ -261,6 +261,51 @@ def init_default_processing_rules(cursor, user_id):
     import json
 
     default_rules = [
+        # 上傳文件流程規則
+        {
+            'rule_name': '上傳文件流程',
+            'rule_category': 'upload',
+            'rule_description': '系統處理文件的標準流程',
+            'rule_config': json.dumps({
+                'upload_steps': [
+                    {
+                        'step': 1,
+                        'name': '上傳 Forecast 檔案',
+                        'description': '選擇並上傳客戶提供的 Forecast Excel 檔案',
+                        'file_type': 'Excel (.xlsx)',
+                        'required': True
+                    },
+                    {
+                        'step': 2,
+                        'name': '上傳 ERP 淨需求檔案',
+                        'description': '選擇並上傳 ERP 匯出的淨需求資料',
+                        'file_type': 'Excel (.xlsx)',
+                        'required': True
+                    },
+                    {
+                        'step': 3,
+                        'name': '上傳在途資料檔案',
+                        'description': '選擇並上傳在途貨物清單',
+                        'file_type': 'Excel (.xlsx)',
+                        'required': True
+                    },
+                    {
+                        'step': 4,
+                        'name': '系統自動處理',
+                        'description': '系統依據下方規則自動匹配並計算數據',
+                        'auto': True
+                    },
+                    {
+                        'step': 5,
+                        'name': '下載處理結果',
+                        'description': '下載已填入數據的 Forecast 檔案',
+                        'file_type': 'Excel (.xlsx)',
+                        'output': True
+                    }
+                ]
+            }, ensure_ascii=False),
+            'display_order': 0
+        },
         # ERP 處理規則
         {
             'rule_name': 'ERP 資料匹配規則',
@@ -460,6 +505,124 @@ def init_default_processing_rules(cursor, user_id):
               rule['rule_config'], rule['display_order']))
 
     print(f"✅ 已初始化預設處理規則 (user_id: {user_id})")
+
+
+def update_processing_rules_enum():
+    """更新 processing_rules 表的 rule_category ENUM，新增 upload 類別"""
+    connection = get_db_connection()
+    if not connection:
+        return False
+
+    try:
+        with connection.cursor() as cursor:
+            # 更新 ENUM 類型
+            cursor.execute("""
+                ALTER TABLE processing_rules
+                MODIFY COLUMN rule_category ENUM('upload', 'erp', 'transit', 'forecast', 'mapping', 'cleanup') NOT NULL
+            """)
+            connection.commit()
+            print("✅ processing_rules ENUM 更新完成（新增 upload）")
+            return True
+    except Exception as e:
+        print(f"❌ 更新 processing_rules ENUM 失敗: {e}")
+        return False
+    finally:
+        connection.close()
+
+
+def add_upload_rule_to_user(user_id):
+    """為指定用戶新增上傳文件流程規則"""
+    import json
+    connection = get_db_connection()
+    if not connection:
+        return False, "資料庫連線失敗"
+
+    try:
+        with connection.cursor() as cursor:
+            # 檢查是否已有此規則
+            cursor.execute("""
+                SELECT id FROM processing_rules
+                WHERE user_id = %s AND rule_category = 'upload'
+            """, (user_id,))
+            if cursor.fetchone():
+                return True, "上傳流程規則已存在"
+
+            # 新增上傳流程規則
+            rule_config = json.dumps({
+                'upload_steps': [
+                    {
+                        'step': 1,
+                        'name': '上傳 Forecast 檔案',
+                        'description': '選擇並上傳客戶提供的 Forecast Excel 檔案',
+                        'file_type': 'Excel (.xlsx)',
+                        'required': True
+                    },
+                    {
+                        'step': 2,
+                        'name': '上傳 ERP 淨需求檔案',
+                        'description': '選擇並上傳 ERP 匯出的淨需求資料',
+                        'file_type': 'Excel (.xlsx)',
+                        'required': True
+                    },
+                    {
+                        'step': 3,
+                        'name': '上傳在途資料檔案',
+                        'description': '選擇並上傳在途貨物清單',
+                        'file_type': 'Excel (.xlsx)',
+                        'required': True
+                    },
+                    {
+                        'step': 4,
+                        'name': '系統自動處理',
+                        'description': '系統依據下方規則自動匹配並計算數據',
+                        'auto': True
+                    },
+                    {
+                        'step': 5,
+                        'name': '下載處理結果',
+                        'description': '下載已填入數據的 Forecast 檔案',
+                        'file_type': 'Excel (.xlsx)',
+                        'output': True
+                    }
+                ]
+            }, ensure_ascii=False)
+
+            cursor.execute("""
+                INSERT INTO processing_rules (user_id, rule_name, rule_category, rule_description, rule_config, display_order)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (user_id, '上傳文件流程', 'upload', '系統處理文件的標準流程', rule_config, 0))
+            connection.commit()
+
+            return True, "上傳流程規則新增成功"
+    except Exception as e:
+        print(f"❌ 新增上傳流程規則失敗: {e}")
+        return False, str(e)
+    finally:
+        connection.close()
+
+
+def add_upload_rule_to_all_users():
+    """為所有一般用戶新增上傳文件流程規則"""
+    connection = get_db_connection()
+    if not connection:
+        return False
+
+    try:
+        with connection.cursor() as cursor:
+            # 取得所有一般用戶
+            cursor.execute("SELECT id, username FROM users WHERE role = 'user'")
+            users = cursor.fetchall()
+
+        for user in users:
+            success, msg = add_upload_rule_to_user(user['id'])
+            print(f"  - {user['username']}: {msg}")
+
+        return True
+    except Exception as e:
+        print(f"❌ 批次新增上傳流程規則失敗: {e}")
+        return False
+    finally:
+        connection.close()
 
 
 def update_activity_logs_enum():
@@ -1840,6 +2003,12 @@ if __name__ == "__main__":
 
         print("\n更新 activity_logs ENUM...")
         update_activity_logs_enum()
+
+        print("\n更新 processing_rules ENUM（新增 upload）...")
+        update_processing_rules_enum()
+
+        print("\n為現有用戶新增上傳流程規則...")
+        add_upload_rule_to_all_users()
 
         print("\n建立預設帳號...")
         create_default_users()
