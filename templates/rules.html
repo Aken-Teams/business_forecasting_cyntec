@@ -68,11 +68,12 @@
 
         /* 說明區塊 */
         .info-banner {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: white;
             border-radius: 12px;
             padding: 20px 25px;
             margin-bottom: 25px;
-            color: white;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.06);
+            border-left: 4px solid #e74c3c;
         }
 
         .info-banner h3 {
@@ -81,10 +82,15 @@
             display: flex;
             align-items: center;
             gap: 10px;
+            color: #2c3e50;
+        }
+
+        .info-banner h3 i {
+            color: #e74c3c;
         }
 
         .info-banner p {
-            opacity: 0.9;
+            color: #666;
             font-size: 0.9rem;
             line-height: 1.6;
         }
@@ -103,6 +109,9 @@
             overflow: hidden;
             transition: all 0.3s ease;
             cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            min-height: 280px;
         }
 
         .customer-card:hover {
@@ -166,13 +175,16 @@
 
         .customer-card-body {
             padding: 20px 25px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         }
 
         .rule-summary {
             display: flex;
             flex-wrap: wrap;
             gap: 10px;
-            margin-bottom: 15px;
         }
 
         .rule-badge {
@@ -211,6 +223,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            margin-top: auto;
         }
 
         .view-rules-btn {
@@ -267,42 +280,49 @@
         }
 
         .modal-header {
-            padding: 25px 30px;
-            border-bottom: 1px solid #eee;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            padding: 0;
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            border-radius: 16px 16px 0 0;
+            height: 60px;
+            display: grid;
+            grid-template-columns: 1fr auto;
+            align-items: stretch;
         }
 
-        .modal-header h3 {
-            font-size: 1.3rem;
-            color: #2c3e50;
+        .modal-header-title {
             display: flex;
             align-items: center;
             gap: 12px;
+            padding: 0 25px;
+            color: white;
+            font-size: 1.2rem;
+            font-weight: 600;
         }
 
-        .modal-header h3 i {
-            color: #3498db;
+        .modal-header-title svg {
+            width: 22px;
+            height: 22px;
+            fill: white;
+            flex-shrink: 0;
         }
 
         .modal-close {
-            width: 40px;
-            height: 40px;
+            width: 60px;
+            height: 60px;
             border: none;
-            background: #f8f9fa;
-            border-radius: 50%;
+            background: rgba(255,255,255,0.1);
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #666;
-            transition: all 0.3s;
+            color: white;
+            font-size: 3rem;
+            transition: background 0.3s;
+            border-radius: 0 16px 0 0;
         }
 
         .modal-close:hover {
-            background: #e74c3c;
-            color: white;
+            background: rgba(255,255,255,0.2);
         }
 
         .modal-body {
@@ -557,10 +577,11 @@
     <div class="modal-overlay" id="rulesModal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3><i class="fas fa-clipboard-list"></i> <span id="modalCustomerName">客戶規則</span></h3>
-                <button class="modal-close" onclick="closeModal()">
-                    <i class="fas fa-times"></i>
-                </button>
+                <div class="modal-header-title">
+                    <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                    <span id="modalCustomerName">客戶規則</span>
+                </div>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
             </div>
             <div class="modal-body" id="modalBody">
                 <!-- 動態內容 -->
