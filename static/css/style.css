@@ -1855,3 +1855,78 @@ kbd {
         width: 100%;
     }
 }
+
+/* ===== 多檔案清理結果樣式 ===== */
+.result-box {
+    padding: 15px;
+    border-radius: 10px;
+    background: #f8f9fa;
+}
+
+.result-box.success {
+    background: linear-gradient(135deg, #f0fff4 0%, #e8f5e9 100%);
+    border: 1px solid #c3e6cb;
+}
+
+.result-box.error {
+    background: linear-gradient(135deg, #fff5f5 0%, #ffebee 100%);
+    border: 1px solid #f5c6cb;
+}
+
+.result-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #27ae60;
+    margin-bottom: 10px;
+}
+
+.result-box.error .result-header {
+    color: #e74c3c;
+}
+
+.result-summary {
+    font-size: 0.95rem;
+    color: #333;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px dashed #d4cbc4;
+}
+
+.cleanup-files-list {
+    max-height: 200px;
+    overflow-y: auto;
+    padding-right: 5px;
+}
+
+.cleanup-file-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: #fff;
+    border-radius: 8px;
+    margin-bottom: 6px;
+    border: 1px solid #e7e4df;
+}
+
+.cleanup-file-item:last-child {
+    margin-bottom: 0;
+}
+
+.cleanup-file-item .file-name {
+    flex: 1;
+    font-weight: 500;
+    color: #333;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cleanup-file-item .file-status {
+    font-size: 0.85rem;
+    color: #666;
+    flex-shrink: 0;
+}

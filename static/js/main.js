@@ -674,38 +674,43 @@ function checkUploadComplete() {
     }
 }
 
-// 數據清理處理
+// 數據清理處理（支援多檔案）
 async function handleCleanup() {
     try {
         showButtonLoading('cleanup-btn');
         showProgress('cleanup-progress', 'cleanup-progress-fill', 'cleanup-progress-text');
-        
+
         // 模擬進度更新
         updateProgressBar('cleanup-progress-fill', 'cleanup-progress-text', 0, '開始清理數據...');
         await sleep(500);
-        
+
         updateProgressBar('cleanup-progress-fill', 'cleanup-progress-text', 30, '讀取Forecast文件...');
         await sleep(500);
-        
+
         updateProgressBar('cleanup-progress-fill', 'cleanup-progress-text', 60, '清理供應數量數據...');
         await sleep(500);
-        
+
         updateProgressBar('cleanup-progress-fill', 'cleanup-progress-text', 80, '清理庫存數量數據...');
         await sleep(500);
-        
+
         const response = await fetch('/process_forecast_cleanup', {
             method: 'POST'
         });
-        
+
         const result = await response.json();
-        
+
         updateProgressBar('cleanup-progress-fill', 'cleanup-progress-text', 100, '清理完成！');
         await sleep(500);
-        
+
         hideProgress('cleanup-progress');
-        
+
         if (result.success) {
-            showProcessResult('cleanup-result', result.message, 'success');
+            // 根據是否為多檔案模式顯示不同的結果
+            if (result.multi_file && result.files && result.files.length > 0) {
+                showMultiFileCleanupResult(result);
+            } else {
+                showProcessResult('cleanup-result', result.message, 'success');
+            }
             currentStep = 3;
             updateProgress();
             showSection('mapping');
@@ -719,6 +724,51 @@ async function handleCleanup() {
     } finally {
         hideButtonLoading('cleanup-btn');
     }
+}
+
+// 顯示多檔案清理結果
+function showMultiFileCleanupResult(result) {
+    const resultContainer = document.getElementById('cleanup-result');
+    if (!resultContainer) return;
+
+    const fileCount = result.file_count || 0;
+    const totalCells = result.total_cleaned_cells || 0;
+    const files = result.files || [];
+
+    let filesHtml = '';
+    files.forEach((file, index) => {
+        const statusIcon = file.status === 'success'
+            ? '<i class="fas fa-check-circle" style="color: #27ae60;"></i>'
+            : '<i class="fas fa-times-circle" style="color: #e74c3c;"></i>';
+        const statusText = file.status === 'success'
+            ? `清理 ${file.cleaned_cells} 個單元格`
+            : (file.message || '清理失敗');
+        const shortName = file.name.length > 30 ? file.name.substring(0, 27) + '...' : file.name;
+
+        filesHtml += `
+            <div class="cleanup-file-item">
+                ${statusIcon}
+                <span class="file-name" title="${file.name}">${shortName}</span>
+                <span class="file-status">${statusText}</span>
+            </div>
+        `;
+    });
+
+    resultContainer.innerHTML = `
+        <div class="result-box success">
+            <div class="result-header">
+                <i class="fas fa-check-circle"></i>
+                <span>數據清理完成</span>
+            </div>
+            <div class="result-summary">
+                <strong>${fileCount} 個檔案</strong>，共清理 <strong>${totalCells}</strong> 個單元格
+            </div>
+            <div class="cleanup-files-list">
+                ${filesHtml}
+            </div>
+        </div>
+    `;
+    resultContainer.style.display = 'block';
 }
 
 // 打開映射配置

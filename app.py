@@ -1484,73 +1484,176 @@ def process_forecast_cleanup():
     user = get_current_user()
     start_time = time.time()
     try:
-        # 檢查是否為測試模式
-        data = request.get_json() or {}
+        # 檢查是否為測試模式（支援無 body 的請求）
+        data = {}
+        try:
+            data = request.get_json(silent=True) or {}
+        except:
+            pass
         test_mode = data.get('test_mode', False)
 
         # 記錄開始處理
         log_activity(user['id'], user['username'], 'cleanup_start',
                    f"開始 Forecast 數據清理{' (測試模式)' if test_mode else ''}", get_client_ip(), request.headers.get('User-Agent'))
 
-        # 從 session 獲取當前用戶的 Forecast 檔案路徑
-        forecast_file = get_user_file_path('forecast')
-        if not forecast_file or not os.path.exists(forecast_file):
-            log_process(user['id'], 'cleanup', 'failed', '請先上傳Forecast文件')
-            return jsonify({'success': False, 'message': '請先上傳Forecast文件'})
+        # 檢查是否為多檔案模式
+        merge_mode = get_user_file_path('forecast_merge_mode')
+        forecast_files = get_user_file_path('forecast_files')  # 多檔案列表
+        forecast_file = get_user_file_path('forecast')  # 單一檔案（合併模式）
 
-        # 使用openpyxl保持格式
-        wb = load_workbook(forecast_file)
-        ws = wb.active
-
-        print("開始清理Forecast數據，保持原始格式...")
-
-        # 清理數據
-        cleaned_count = 0
-
-        for row_idx in range(1, ws.max_row + 1):
-            # 檢查K欄位（第11列）是否為"供應數量"
-            k_cell = ws.cell(row=row_idx, column=11)
-            if k_cell.value and str(k_cell.value) == "供應數量":
-                # 清空L~AW欄位（第12列到第49列）
-                for col_idx in range(12, min(50, ws.max_column + 1)):
-                    cell = ws.cell(row=row_idx, column=col_idx)
-                    if cell.value != 0:  # 只清除非零值
-                        cell.value = 0
-                        cleaned_count += 1
-
-            # 檢查I欄位（第9列）是否包含"庫存數量"
-            i_cell = ws.cell(row=row_idx, column=9)
-            if i_cell.value and "庫存數量" in str(i_cell.value):
-                # 清空下一列的I欄位
-                next_row_i_cell = ws.cell(row=row_idx + 1, column=9)
-                if next_row_i_cell.value != 0:  # 只清除非零值
-                    next_row_i_cell.value = 0
-                    cleaned_count += 1
-
-        # 使用資料夾管理結構：processed/{user_id}/{session_timestamp}/cleaned_forecast.xlsx
+        # 使用資料夾管理結構
         processed_folder, session_timestamp = get_or_create_session_folder(user['id'], 'processed')
-
-        # 保存清理後的文件
-        cleaned_file = os.path.join(processed_folder, 'cleaned_forecast.xlsx')
-        wb.save(cleaned_file)
 
         # 存儲 processed 資料夾路徑到 session
         session['current_processed_folder'] = processed_folder
 
-        duration = time.time() - start_time
-        print(f"Forecast數據清理完成，清理了 {cleaned_count} 個單元格")
+        # 多檔案分開模式
+        if merge_mode is False and forecast_files and len(forecast_files) > 0:
+            print(f"=== 多檔案清理模式：{len(forecast_files)} 個檔案 ===")
 
-        # 記錄處理成功
-        log_process(user['id'], 'cleanup', 'success', f'清理了 {cleaned_count} 個單元格', duration)
-        log_activity(user['id'], user['username'], 'cleanup_success',
-                   f"Forecast 數據清理成功，清理了 {cleaned_count} 個單元格", get_client_ip(), request.headers.get('User-Agent'))
+            total_cleaned_count = 0
+            cleaned_files_info = []
 
-        return jsonify({
-            'success': True,
-            'message': f'Forecast數據清理完成，清理了 {cleaned_count} 個單元格',
-            'file': 'cleaned_forecast.xlsx',
-            'cleaned_cells': cleaned_count
-        })
+            for idx, file_info in enumerate(forecast_files):
+                file_path = file_info.get('path')
+                original_name = file_info.get('original_name') or file_info.get('name', f'forecast_{idx + 1}.xlsx')
+
+                if not file_path or not os.path.exists(file_path):
+                    print(f"  ⚠️ 檔案不存在: {file_path}")
+                    cleaned_files_info.append({
+                        'name': original_name,
+                        'cleaned_cells': 0,
+                        'status': 'error',
+                        'message': '檔案不存在'
+                    })
+                    continue
+
+                print(f"  清理檔案 {idx + 1}/{len(forecast_files)}: {original_name}")
+
+                try:
+                    # 使用openpyxl保持格式
+                    wb = load_workbook(file_path)
+                    ws = wb.active
+
+                    # 清理數據
+                    cleaned_count = 0
+
+                    for row_idx in range(1, ws.max_row + 1):
+                        # 檢查K欄位（第11列）是否為"供應數量"
+                        k_cell = ws.cell(row=row_idx, column=11)
+                        if k_cell.value and str(k_cell.value) == "供應數量":
+                            # 清空L~AW欄位（第12列到第49列）
+                            for col_idx in range(12, min(50, ws.max_column + 1)):
+                                cell = ws.cell(row=row_idx, column=col_idx)
+                                if cell.value != 0:
+                                    cell.value = 0
+                                    cleaned_count += 1
+
+                        # 檢查I欄位（第9列）是否包含"庫存數量"
+                        i_cell = ws.cell(row=row_idx, column=9)
+                        if i_cell.value and "庫存數量" in str(i_cell.value):
+                            next_row_i_cell = ws.cell(row=row_idx + 1, column=9)
+                            if next_row_i_cell.value != 0:
+                                next_row_i_cell.value = 0
+                                cleaned_count += 1
+
+                    # 保存清理後的文件
+                    cleaned_filename = f'cleaned_forecast_{idx + 1}.xlsx'
+                    cleaned_file = os.path.join(processed_folder, cleaned_filename)
+                    wb.save(cleaned_file)
+
+                    total_cleaned_count += cleaned_count
+                    cleaned_files_info.append({
+                        'name': original_name,
+                        'cleaned_cells': cleaned_count,
+                        'status': 'success',
+                        'cleaned_path': cleaned_file
+                    })
+                    print(f"    ✅ 清理了 {cleaned_count} 個單元格")
+
+                except Exception as file_error:
+                    print(f"    ❌ 清理失敗: {str(file_error)}")
+                    cleaned_files_info.append({
+                        'name': original_name,
+                        'cleaned_cells': 0,
+                        'status': 'error',
+                        'message': str(file_error)
+                    })
+
+            # 更新 session 中的清理後檔案路徑
+            cleaned_paths = [f for f in cleaned_files_info if f['status'] == 'success']
+            set_user_file_path('cleaned_forecast_files', cleaned_paths)
+
+            duration = time.time() - start_time
+            print(f"=== 多檔案清理完成：共清理 {total_cleaned_count} 個單元格 ===")
+
+            log_process(user['id'], 'cleanup', 'success', f'清理了 {len(cleaned_paths)} 個檔案，共 {total_cleaned_count} 個單元格', duration)
+            log_activity(user['id'], user['username'], 'cleanup_success',
+                       f"Forecast 多檔案數據清理成功，{len(cleaned_paths)} 個檔案，共 {total_cleaned_count} 個單元格", get_client_ip(), request.headers.get('User-Agent'))
+
+            return jsonify({
+                'success': True,
+                'message': f'Forecast數據清理完成，清理了 {len(cleaned_paths)} 個檔案，共 {total_cleaned_count} 個單元格',
+                'multi_file': True,
+                'file_count': len(cleaned_paths),
+                'files': cleaned_files_info,
+                'total_cleaned_cells': total_cleaned_count
+            })
+
+        # 單檔案模式（合併模式或原本就只上傳一個檔案）
+        else:
+            if not forecast_file or not os.path.exists(forecast_file):
+                log_process(user['id'], 'cleanup', 'failed', '請先上傳Forecast文件')
+                return jsonify({'success': False, 'message': '請先上傳Forecast文件'})
+
+            # 使用openpyxl保持格式
+            wb = load_workbook(forecast_file)
+            ws = wb.active
+
+            print("開始清理Forecast數據，保持原始格式...")
+
+            # 清理數據
+            cleaned_count = 0
+
+            for row_idx in range(1, ws.max_row + 1):
+                # 檢查K欄位（第11列）是否為"供應數量"
+                k_cell = ws.cell(row=row_idx, column=11)
+                if k_cell.value and str(k_cell.value) == "供應數量":
+                    # 清空L~AW欄位（第12列到第49列）
+                    for col_idx in range(12, min(50, ws.max_column + 1)):
+                        cell = ws.cell(row=row_idx, column=col_idx)
+                        if cell.value != 0:
+                            cell.value = 0
+                            cleaned_count += 1
+
+                # 檢查I欄位（第9列）是否包含"庫存數量"
+                i_cell = ws.cell(row=row_idx, column=9)
+                if i_cell.value and "庫存數量" in str(i_cell.value):
+                    next_row_i_cell = ws.cell(row=row_idx + 1, column=9)
+                    if next_row_i_cell.value != 0:
+                        next_row_i_cell.value = 0
+                        cleaned_count += 1
+
+            # 保存清理後的文件
+            cleaned_file = os.path.join(processed_folder, 'cleaned_forecast.xlsx')
+            wb.save(cleaned_file)
+
+            duration = time.time() - start_time
+            print(f"Forecast數據清理完成，清理了 {cleaned_count} 個單元格")
+
+            # 記錄處理成功
+            log_process(user['id'], 'cleanup', 'success', f'清理了 {cleaned_count} 個單元格', duration)
+            log_activity(user['id'], user['username'], 'cleanup_success',
+                       f"Forecast 數據清理成功，清理了 {cleaned_count} 個單元格", get_client_ip(), request.headers.get('User-Agent'))
+
+            return jsonify({
+                'success': True,
+                'message': f'Forecast數據清理完成，清理了 {cleaned_count} 個單元格',
+                'multi_file': False,
+                'file': 'cleaned_forecast.xlsx',
+                'cleaned_cells': cleaned_count
+            })
+
     except Exception as e:
         duration = time.time() - start_time
         print(f"Forecast數據清理失敗: {str(e)}")
