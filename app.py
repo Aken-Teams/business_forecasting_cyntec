@@ -1050,46 +1050,129 @@ def upload_forecast():
 
             # ========== 根據合併選項處理 ==========
             if merge_files:
-                # 合併模式：使用 openpyxl 合併 Excel 檔案（保留格式）
-                from openpyxl import load_workbook
+                # 合併模式：使用 xlwings 操作 Excel 原生複製貼上，保留格式且速度快
+                import shutil
+                import time
 
-                # 以第一個檔案為基礎
+                print(f"開始合併 {len(temp_files)} 個 Forecast 檔案（使用 Excel 原生複製貼上保留格式）...")
+                merge_start = time.time()
+
+                # ===== 步驟 1：直接複製第一個檔案作為基礎 =====
                 first_temp_path = temp_files[0][1]
-                merged_wb = load_workbook(first_temp_path)
-                merged_ws = merged_wb.active
-
-                # 找到第一個檔案的最後一行
-                last_row = merged_ws.max_row
-
-                # 從第二個檔案開始合併
-                for idx in range(1, len(temp_files)):
-                    temp_path = temp_files[idx][1]
-                    wb = load_workbook(temp_path)
-                    ws = wb.active
-
-                    # 跳過標題行，從第2行開始複製
-                    for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=1):
-                        last_row += 1
-                        for col_idx, value in enumerate(row, start=1):
-                            merged_ws.cell(row=last_row, column=col_idx, value=value)
-
-                    wb.close()
-
-                # 儲存合併後的檔案
                 final_filename = 'forecast_data.xlsx'
                 final_filepath = os.path.join(upload_folder, final_filename)
-                merged_wb.save(final_filepath)
-                merged_wb.close()
+                shutil.copy2(first_temp_path, final_filepath)
+                print(f"  複製第一個檔案完成，耗時 {time.time() - merge_start:.2f} 秒")
 
-                print(f"=== 多檔案合併完成：{final_filepath} ===")
+                # ===== 步驟 2：使用 xlwings 進行真正的 Excel 複製貼上 =====
+                if len(temp_files) > 1:
+                    import xlwings as xw
+
+                    # 啟動 Excel（隱藏模式）
+                    app = xw.App(visible=False, add_book=False)
+                    app.display_alerts = False
+                    app.screen_updating = False
+
+                    try:
+                        # 打開目標檔案
+                        dest_wb = app.books.open(final_filepath)
+                        dest_ws = dest_wb.sheets[0]
+
+                        # 嘗試取消目標工作表保護
+                        try:
+                            if dest_ws.api.ProtectContents:
+                                dest_ws.api.Unprotect()
+                                print(f"  已取消目標工作表保護")
+                        except Exception as unprotect_err:
+                            # 如果有密碼保護，無法取消
+                            app.quit()
+                            # 清理暫存檔案
+                            for _, temp_path in temp_files:
+                                if os.path.exists(temp_path):
+                                    os.remove(temp_path)
+                            return jsonify({
+                                'success': False,
+                                'message': 'Forecast 檔案的工作表有密碼保護，無法進行合併',
+                                'details': '請先手動在 Excel 中取消工作表保護（檢閱 → 取消保護工作表），然後再重新上傳。'
+                            })
+
+                        # 取得第一個檔案的欄數（用於複製範圍）
+                        first_max_col = dest_ws.used_range.last_cell.column
+
+                        for file_idx in range(1, len(temp_files)):
+                            src_path = temp_files[file_idx][1]
+
+                            # 打開來源檔案
+                            src_wb = app.books.open(src_path)
+                            src_ws = src_wb.sheets[0]
+
+                            # 嘗試取消來源工作表保護
+                            try:
+                                if src_ws.api.ProtectContents:
+                                    src_ws.api.Unprotect()
+                                    print(f"  已取消來源檔案 {file_idx + 1} 工作表保護")
+                            except Exception as src_unprotect_err:
+                                src_wb.close()
+                                app.quit()
+                                # 清理暫存檔案
+                                for _, temp_path in temp_files:
+                                    if os.path.exists(temp_path):
+                                        os.remove(temp_path)
+                                return jsonify({
+                                    'success': False,
+                                    'message': f'第 {file_idx + 1} 個 Forecast 檔案的工作表有密碼保護，無法進行合併',
+                                    'details': '請先手動在 Excel 中取消工作表保護（檢閱 → 取消保護工作表），然後再重新上傳。'
+                                })
+
+                            # 取得來源資料範圍（跳過標題，從第2行開始）
+                            src_last_row = src_ws.used_range.last_cell.row
+                            src_last_col = src_ws.used_range.last_cell.column
+
+                            if src_last_row < 2:
+                                # 只有標題，沒有資料
+                                src_wb.close()
+                                print(f"  檔案 {file_idx + 1} 沒有資料行，跳過")
+                                continue
+
+                            # 複製來源資料區域（從第2行到最後一行）
+                            src_range = src_ws.range(f'A2:{xw.utils.col_name(src_last_col)}{src_last_row}')
+
+                            # 找到目標的下一個空白行
+                            dest_last_row = dest_ws.used_range.last_cell.row
+                            dest_start_row = dest_last_row + 1
+
+                            # 複製並貼上（保留格式）
+                            src_range.copy()
+                            dest_cell = dest_ws.range(f'A{dest_start_row}')
+                            dest_cell.paste(paste='all')
+
+                            # 清除剪貼簿
+                            app.api.CutCopyMode = False
+
+                            rows_copied = src_last_row - 1  # 減去標題行
+                            print(f"  合併檔案 {file_idx + 1} 完成（{rows_copied} 行），耗時 {time.time() - merge_start:.2f} 秒")
+
+                            # 關閉來源檔案（不儲存）
+                            src_wb.close()
+
+                        # 儲存並關閉目標檔案
+                        dest_wb.save()
+                        dest_wb.close()
+
+                    finally:
+                        # 確保 Excel 應用程式關閉
+                        app.quit()
+
+                # 計算總行數
+                total_rows = sum(df.shape[0] for df in all_dataframes)
+                print(f"=== 多檔案合併完成：{final_filepath}，總行數：{total_rows}，總耗時 {time.time() - merge_start:.2f} 秒 ===")
 
                 # 清理暫存檔案
                 for _, temp_path in temp_files:
                     if os.path.exists(temp_path) and temp_path != final_filepath:
                         os.remove(temp_path)
 
-                # 讀取合併後的檔案資訊
-                merged_df = pd.read_excel(final_filepath)
+                # 取得合併後的檔案大小
                 merged_size = os.path.getsize(final_filepath)
 
                 # 儲存路徑到 session（單一合併檔案）
@@ -1099,7 +1182,9 @@ def upload_forecast():
 
                 # 記錄日誌
                 filenames_str = ', '.join(original_filenames)
-                log_upload(user['id'], 'forecast', filenames_str, merged_size, len(merged_df), len(merged_df.columns), 'success')
+                # 計算總欄數（從第一個 dataframe 取得）
+                total_columns = len(all_dataframes[0].columns) if all_dataframes else 0
+                log_upload(user['id'], 'forecast', filenames_str, merged_size, total_rows, total_columns, 'success')
                 log_activity(user['id'], user['username'], 'upload_forecast',
                            f"Forecast 多檔案上傳成功：{len(files_list)} 個文件已合併", get_client_ip(), request.headers.get('User-Agent'))
 
@@ -1107,7 +1192,7 @@ def upload_forecast():
                     'success': True,
                     'message': f'{len(files_list)} 個 Forecast 文件上傳並合併成功',
                     'file_count': len(files_list),
-                    'total_rows': len(merged_df),
+                    'total_rows': total_rows,
                     'total_size': merged_size,
                     'files': files_info,
                     'merge_mode': True,

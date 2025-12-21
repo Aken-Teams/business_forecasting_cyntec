@@ -158,14 +158,18 @@ async function handleForecastUpload(event) {
             uploadedFiles.forecast = true;
             checkUploadComplete();
         } else {
-            // 檢查是否為格式驗證錯誤
+            // 標記失敗的檔案
+            for (let i = 0; i < files.length; i++) {
+                updateFileProgress(i, 'error', 100);
+            }
+            await sleep(300);
+
+            // 檢查是否為格式驗證錯誤或有詳細說明的錯誤
             if (result.validation_error) {
-                // 標記失敗的檔案
-                for (let i = 0; i < files.length; i++) {
-                    updateFileProgress(i, 'error', 100);
-                }
-                await sleep(300);
                 showValidationError('forecast', result.message, result.details);
+            } else if (result.details) {
+                // 有詳細說明的錯誤（如工作表保護）
+                showProtectionError('forecast', result.message, result.details);
             } else {
                 showError('forecast', result.message);
             }
@@ -405,6 +409,91 @@ function showValidationError(type, message, details) {
 
     // 創建驗證錯誤彈窗
     showValidationModal(type, message, details);
+}
+
+// 顯示工作表保護錯誤（帶詳細說明的彈窗）
+function showProtectionError(type, message, details) {
+    const uploadBox = document.getElementById(`${type}-upload-box`);
+    const status = document.getElementById(`${type}-status`);
+
+    uploadBox.style.display = 'block';
+    status.style.display = 'none';
+
+    // 重置文件輸入
+    const fileInput = document.getElementById(`${type}-file`);
+    if (fileInput) {
+        fileInput.value = '';
+    }
+
+    // 創建保護錯誤彈窗
+    showProtectionModal(type, message, details);
+}
+
+// 顯示工作表保護錯誤彈窗
+function showProtectionModal(type, message, details) {
+    // 移除已存在的彈窗
+    const existingModal = document.getElementById('protection-modal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    // 文件類型名稱對應
+    const typeNames = {
+        'erp': 'ERP 淨需求文件',
+        'forecast': 'Forecast 文件',
+        'transit': '在途文件'
+    };
+    const typeName = typeNames[type] || type;
+
+    const modalHtml = `
+        <div id="protection-modal" class="modal-overlay" style="display: flex;">
+            <div class="modal-content" style="max-width: 500px;">
+                <div class="modal-header" style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);">
+                    <i class="fas fa-lock"></i>
+                    <span>工作表保護錯誤</span>
+                </div>
+                <div class="modal-body" style="padding: 25px;">
+                    <div style="text-align: center; margin-bottom: 20px;">
+                        <i class="fas fa-exclamation-triangle" style="font-size: 48px; color: #e74c3c;"></i>
+                    </div>
+                    <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 15px; margin-bottom: 20px;">
+                        <div style="font-weight: 600; color: #856404; margin-bottom: 8px;">
+                            <i class="fas fa-info-circle"></i> ${message}
+                        </div>
+                        <div style="color: #856404; font-size: 0.9rem;">
+                            ${details}
+                        </div>
+                    </div>
+                    <div style="background: #e8f4fd; border-radius: 8px; padding: 15px;">
+                        <div style="font-weight: 600; color: #0c5460; margin-bottom: 10px;">
+                            <i class="fas fa-tools"></i> 操作步驟：
+                        </div>
+                        <ol style="margin: 0; padding-left: 20px; color: #0c5460; font-size: 0.9rem;">
+                            <li>用 Excel 開啟 Forecast 檔案</li>
+                            <li>點擊「檢閱」分頁</li>
+                            <li>點擊「取消保護工作表」</li>
+                            <li>儲存檔案後重新上傳</li>
+                        </ol>
+                    </div>
+                </div>
+                <div class="modal-footer" style="justify-content: center;">
+                    <button class="btn btn-primary" onclick="closeProtectionModal()">
+                        <i class="fas fa-check"></i> 我知道了
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+// 關閉保護錯誤彈窗
+function closeProtectionModal() {
+    const modal = document.getElementById('protection-modal');
+    if (modal) {
+        modal.remove();
+    }
 }
 
 // 顯示驗證錯誤彈窗
