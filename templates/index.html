@@ -128,16 +128,28 @@
                             </div>
 
                             <!-- Forecast文件上傳（支援多檔案） -->
-                            <div class="upload-item">
+                            <div class="upload-item forecast-multi-upload">
                                 <div class="upload-box" id="forecast-upload-box">
                                     <i class="fas fa-chart-bar upload-icon"></i>
                                     <h3>Forecast文件</h3>
                                     <p>上傳 ForecastDataFile_ALL.xlsx</p>
-                                    <p class="upload-hint">支援上傳多個檔案</p>
+                                    <p class="upload-hint"><i class="fas fa-layer-group"></i> 支援上傳多個檔案</p>
                                     <input type="file" id="forecast-file" accept=".xlsx,.xls" multiple style="display: none;">
                                     <button class="btn btn-primary" onclick="document.getElementById('forecast-file').click()">
                                         <i class="fas fa-plus"></i> 選擇文件
                                     </button>
+                                    <!-- 合併選項 -->
+                                    <div class="merge-option">
+                                        <label class="merge-checkbox">
+                                            <input type="checkbox" id="merge-forecast-files" checked>
+                                            <span class="checkmark"></span>
+                                            <span class="merge-label">下載時合併檔案</span>
+                                        </label>
+                                        <div class="merge-hint">
+                                            <i class="fas fa-info-circle"></i>
+                                            勾選後，最終下載的 Forecast 會合併為單一檔案
+                                        </div>
+                                    </div>
                                 </div>
                                 <div class="upload-status" id="forecast-status" style="display: none;">
                                     <div class="status-content">

@@ -871,61 +871,74 @@ def upload_erp():
 @app.route('/upload_forecast', methods=['POST'])
 @login_required
 def upload_forecast():
+    """
+    上傳 Forecast 文件（支援多檔案上傳）
+    - 多檔案：使用 'files' 欄位
+    - 單檔案：使用 'file' 欄位（向後兼容）
+    - 多個 Forecast 檔案會合併成一個 forecast_data.xlsx
+    """
     user = get_current_user()
-    original_filename = ''
+    original_filenames = []
     try:
-        if 'file' not in request.files:
+        # 檢查是否有上傳檔案（支援多檔案 'files' 或單檔案 'file'）
+        files_list = []
+        if 'files' in request.files:
+            files_list = request.files.getlist('files')
+        elif 'file' in request.files:
+            files_list = [request.files['file']]
+
+        if not files_list or all(f.filename == '' for f in files_list):
             return jsonify({'success': False, 'message': '沒有選擇文件'})
 
-        file = request.files['file']
-        if file.filename == '':
+        # 過濾掉空檔名
+        files_list = [f for f in files_list if f.filename != '']
+        if not files_list:
             return jsonify({'success': False, 'message': '沒有選擇文件'})
 
-        original_filename = file.filename
+        # 檢查所有文件格式
+        for file in files_list:
+            if not allowed_file(file.filename):
+                return jsonify({'success': False, 'message': f'不支持的文件格式: {file.filename}'})
+            original_filenames.append(file.filename)
 
-        if file and allowed_file(file.filename):
-            # 使用資料夾管理結構：uploads/{user_id}/{session_timestamp}/forecast_data.xlsx
-            upload_folder, session_timestamp = get_or_create_session_folder(user['id'], 'uploads')
+        # 使用資料夾管理結構
+        upload_folder, session_timestamp = get_or_create_session_folder(user['id'], 'uploads')
+
+        # 取得測試模式參數
+        test_mode = request.form.get('test_mode') == 'true'
+        customer_id = request.form.get('customer_id')
+        template_username = user['username']
+
+        if test_mode and customer_id and user['role'] in ['admin', 'it']:
+            test_customer = get_user_by_id(int(customer_id))
+            if test_customer:
+                template_username = test_customer['username']
+                print(f"[測試模式] 使用客戶 {template_username} 的模板進行驗證")
+
+        # ========== 處理多檔案上傳 ==========
+        if len(files_list) == 1:
+            # 單檔案上傳：維持原有邏輯
+            file = files_list[0]
+            original_filename = file.filename
             filename = 'forecast_data.xlsx'
             filepath = os.path.join(upload_folder, filename)
 
-            # 保存文件
             file.save(filepath)
             print(f"Forecast文件已保存到: {filepath} (session: {session_timestamp})")
 
-            # 檢查文件是否真的存在
             if not os.path.exists(filepath):
                 return jsonify({'success': False, 'message': '文件保存失敗'})
 
-            # ========== 格式驗證 ==========
-            # 檢查是否為測試模式，如果是則使用被測試客戶的 username
-            test_mode = request.form.get('test_mode') == 'true'
-            customer_id = request.form.get('customer_id')
-            template_username = user['username']
-
-            if test_mode and customer_id and user['role'] in ['admin', 'it']:
-                # 測試模式：取得被測試客戶的 username
-                test_customer = get_user_by_id(int(customer_id))
-                if test_customer:
-                    template_username = test_customer['username']
-                    print(f"[測試模式] 使用客戶 {template_username} 的模板進行驗證")
-
+            # 格式驗證
             print(f"開始驗證 Forecast 文件格式...（用戶: {template_username}）")
             is_valid, message, details = validate_forecast_format(filepath, template_username)
 
             if not is_valid:
-                # 驗證失敗，刪除已上傳的文件
                 os.remove(filepath)
                 print(f"❌ Forecast 文件格式驗證失敗: {message}")
-                if details:
-                    for detail in details:
-                        print(f"   - {detail}")
-
-                # 記錄上傳失敗
                 log_upload(user['id'], 'forecast', original_filename, 0, 0, 0, 'validation_failed', message)
                 log_activity(user['id'], user['username'], 'upload_forecast_failed',
                            f"Forecast 文件上傳失敗：{message}", get_client_ip(), request.headers.get('User-Agent'))
-
                 return jsonify({
                     'success': False,
                     'message': f'Forecast 文件格式驗證失敗：{message}',
@@ -934,36 +947,220 @@ def upload_forecast():
                 })
 
             print(f"✅ Forecast 文件格式驗證通過")
-            # ========== 格式驗證結束 ==========
 
-            # 讀取文件並返回基本信息
-            try:
-                df = pd.read_excel(filepath)
-                file_size = os.path.getsize(filepath)
-                print(f"Forecast文件讀取成功: {len(df)} 行, {len(df.columns)} 欄位")
+            # 讀取並返回
+            df = pd.read_excel(filepath)
+            file_size = os.path.getsize(filepath)
+            set_user_file_path('forecast', filepath)
 
-                # 將檔案路徑存入 session，供後續處理使用
-                set_user_file_path('forecast', filepath)
+            log_upload(user['id'], 'forecast', original_filename, file_size, len(df), len(df.columns), 'success')
+            log_activity(user['id'], user['username'], 'upload_forecast',
+                       f"Forecast 文件上傳成功：{original_filename}", get_client_ip(), request.headers.get('User-Agent'))
 
-                # 記錄上傳成功
-                log_upload(user['id'], 'forecast', original_filename, file_size, len(df), len(df.columns), 'success')
+            return jsonify({
+                'success': True,
+                'message': 'Forecast文件上傳成功（格式驗證通過）',
+                'rows': len(df),
+                'columns': list(df.columns),
+                'file_size': file_size,
+                'file_count': 1,
+                'saved_filename': filename
+            })
+
+        else:
+            # 多檔案上傳模式
+            # 取得合併選項（預設為合併）
+            merge_files = request.form.get('merge_files', 'true') == 'true'
+            print(f"=== 多檔案上傳模式：收到 {len(files_list)} 個 Forecast 文件，合併模式: {merge_files} ===")
+
+            all_dataframes = []
+            files_info = []
+            total_size = 0
+            validation_errors = []
+
+            # 先儲存所有檔案到暫存位置
+            temp_files = []
+            for idx, file in enumerate(files_list):
+                temp_filename = f'forecast_temp_{idx}.xlsx'
+                temp_filepath = os.path.join(upload_folder, temp_filename)
+                file.save(temp_filepath)
+                temp_files.append((file.filename, temp_filepath))
+                print(f"  暫存文件 {idx + 1}: {file.filename} -> {temp_filepath}")
+
+            # 驗證並讀取每個檔案
+            for original_name, temp_path in temp_files:
+                print(f"驗證 Forecast 文件: {original_name}（用戶: {template_username}）")
+                is_valid, message, details = validate_forecast_format(temp_path, template_username)
+
+                if not is_valid:
+                    validation_errors.append({
+                        'filename': original_name,
+                        'message': message,
+                        'details': details
+                    })
+                    continue
+
+                try:
+                    df = pd.read_excel(temp_path)
+                    file_size = os.path.getsize(temp_path)
+                    total_size += file_size
+
+                    all_dataframes.append(df)
+                    files_info.append({
+                        'name': original_name,
+                        'rows': len(df),
+                        'columns': len(df.columns),
+                        'size': file_size
+                    })
+                    print(f"  ✅ {original_name}: {len(df)} 行, {len(df.columns)} 欄位")
+
+                except Exception as e:
+                    validation_errors.append({
+                        'filename': original_name,
+                        'message': f'讀取失敗: {str(e)}',
+                        'details': []
+                    })
+
+            # 如果有驗證錯誤
+            if validation_errors:
+                # 清理暫存檔案
+                for _, temp_path in temp_files:
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+
+                error_details = []
+                for err in validation_errors:
+                    error_details.append(f"{err['filename']}: {err['message']}")
+                    if err['details']:
+                        error_details.extend([f"  - {d}" for d in err['details']])
+
+                log_activity(user['id'], user['username'], 'upload_forecast_failed',
+                           f"Forecast 多檔案上傳失敗：{len(validation_errors)} 個文件驗證失敗", get_client_ip(), request.headers.get('User-Agent'))
+
+                return jsonify({
+                    'success': False,
+                    'message': f'{len(validation_errors)} 個文件格式驗證失敗',
+                    'details': error_details,
+                    'validation_error': True
+                })
+
+            # 檢查是否有有效檔案
+            if not all_dataframes:
+                return jsonify({'success': False, 'message': '沒有有效的 Forecast 文件'})
+
+            # ========== 根據合併選項處理 ==========
+            if merge_files:
+                # 合併模式：使用 openpyxl 合併 Excel 檔案（保留格式）
+                from openpyxl import load_workbook
+
+                # 以第一個檔案為基礎
+                first_temp_path = temp_files[0][1]
+                merged_wb = load_workbook(first_temp_path)
+                merged_ws = merged_wb.active
+
+                # 找到第一個檔案的最後一行
+                last_row = merged_ws.max_row
+
+                # 從第二個檔案開始合併
+                for idx in range(1, len(temp_files)):
+                    temp_path = temp_files[idx][1]
+                    wb = load_workbook(temp_path)
+                    ws = wb.active
+
+                    # 跳過標題行，從第2行開始複製
+                    for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=1):
+                        last_row += 1
+                        for col_idx, value in enumerate(row, start=1):
+                            merged_ws.cell(row=last_row, column=col_idx, value=value)
+
+                    wb.close()
+
+                # 儲存合併後的檔案
+                final_filename = 'forecast_data.xlsx'
+                final_filepath = os.path.join(upload_folder, final_filename)
+                merged_wb.save(final_filepath)
+                merged_wb.close()
+
+                print(f"=== 多檔案合併完成：{final_filepath} ===")
+
+                # 清理暫存檔案
+                for _, temp_path in temp_files:
+                    if os.path.exists(temp_path) and temp_path != final_filepath:
+                        os.remove(temp_path)
+
+                # 讀取合併後的檔案資訊
+                merged_df = pd.read_excel(final_filepath)
+                merged_size = os.path.getsize(final_filepath)
+
+                # 儲存路徑到 session（單一合併檔案）
+                set_user_file_path('forecast', final_filepath)
+                set_user_file_path('forecast_merge_mode', True)
+                set_user_file_path('forecast_files', None)
+
+                # 記錄日誌
+                filenames_str = ', '.join(original_filenames)
+                log_upload(user['id'], 'forecast', filenames_str, merged_size, len(merged_df), len(merged_df.columns), 'success')
                 log_activity(user['id'], user['username'], 'upload_forecast',
-                           f"Forecast 文件上傳成功：{original_filename} -> {filename}", get_client_ip(), request.headers.get('User-Agent'))
+                           f"Forecast 多檔案上傳成功：{len(files_list)} 個文件已合併", get_client_ip(), request.headers.get('User-Agent'))
 
                 return jsonify({
                     'success': True,
-                    'message': 'Forecast文件上傳成功（格式驗證通過）',
-                    'rows': len(df),
-                    'columns': list(df.columns),
-                    'file_size': file_size,
-                    'saved_filename': filename
+                    'message': f'{len(files_list)} 個 Forecast 文件上傳並合併成功',
+                    'file_count': len(files_list),
+                    'total_rows': len(merged_df),
+                    'total_size': merged_size,
+                    'files': files_info,
+                    'merge_mode': True,
+                    'saved_filename': final_filename
                 })
-            except Exception as e:
-                print(f"Forecast文件讀取失敗: {str(e)}")
-                log_upload(user['id'], 'forecast', original_filename, 0, 0, 0, 'failed', str(e))
-                return jsonify({'success': False, 'message': f'文件讀取失敗: {str(e)}'})
 
-        return jsonify({'success': False, 'message': '不支持的文件格式'})
+            else:
+                # 不合併模式：將暫存檔案重新命名為正式檔案
+                saved_files = []
+                total_rows = 0
+
+                for idx, (original_name, temp_path) in enumerate(temp_files):
+                    # 產生正式檔名：forecast_data_1.xlsx, forecast_data_2.xlsx, ...
+                    final_filename = f'forecast_data_{idx + 1}.xlsx'
+                    final_filepath = os.path.join(upload_folder, final_filename)
+
+                    # 移動暫存檔案到正式位置
+                    import shutil
+                    shutil.move(temp_path, final_filepath)
+
+                    saved_files.append({
+                        'original_name': original_name,
+                        'saved_name': final_filename,
+                        'path': final_filepath,
+                        'rows': files_info[idx]['rows']
+                    })
+                    total_rows += files_info[idx]['rows']
+
+                    print(f"  儲存文件 {idx + 1}: {original_name} -> {final_filename}")
+
+                print(f"=== 多檔案分開儲存完成：{len(saved_files)} 個文件 ===")
+
+                # 儲存多檔案資訊到 session
+                set_user_file_path('forecast', None)  # 不設定單一檔案路徑
+                set_user_file_path('forecast_merge_mode', False)
+                set_user_file_path('forecast_files', saved_files)
+
+                # 記錄日誌
+                filenames_str = ', '.join(original_filenames)
+                log_upload(user['id'], 'forecast', filenames_str, total_size, total_rows, files_info[0]['columns'] if files_info else 0, 'success')
+                log_activity(user['id'], user['username'], 'upload_forecast',
+                           f"Forecast 多檔案上傳成功：{len(files_list)} 個文件（不合併）", get_client_ip(), request.headers.get('User-Agent'))
+
+                return jsonify({
+                    'success': True,
+                    'message': f'{len(files_list)} 個 Forecast 文件上傳成功（不合併）',
+                    'file_count': len(files_list),
+                    'total_rows': total_rows,
+                    'total_size': total_size,
+                    'files': files_info,
+                    'merge_mode': False,
+                    'saved_files': [f['saved_name'] for f in saved_files]
+                })
 
     except Exception as e:
         print(f"Forecast上傳處理錯誤: {str(e)}")

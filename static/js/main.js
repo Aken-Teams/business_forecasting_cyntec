@@ -97,24 +97,47 @@ async function handleErpUpload(event) {
     }
 }
 
-// Forecast文件上傳處理
+// Forecast文件上傳處理（支援多檔案）
 async function handleForecastUpload(event) {
-    const file = event.target.files[0];
-    if (!file) return;
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
 
-    // 檢查文件類型
+    // 檢查所有文件類型
     const allowedTypes = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'];
-    if (!allowedTypes.includes(file.type)) {
-        showError('forecast', '請選擇Excel文件 (.xlsx 或 .xls)');
-        return;
+    for (let i = 0; i < files.length; i++) {
+        // 有些瀏覽器可能不會正確識別 xlsx 類型，所以也檢查副檔名
+        const fileName = files[i].name.toLowerCase();
+        const isValidType = allowedTypes.includes(files[i].type) || fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
+        if (!isValidType) {
+            showError('forecast', `文件 "${files[i].name}" 不是有效的 Excel 文件 (.xlsx 或 .xls)`);
+            return;
+        }
     }
 
+    // 取得合併選項
+    const mergeCheckbox = document.getElementById('merge-forecast-files');
+    const shouldMerge = mergeCheckbox ? mergeCheckbox.checked : true;
+
+    // 顯示多檔案進度
+    showForecastMultiUploadProgress(files);
+
     const formData = new FormData();
-    formData.append('file', file);
+    // 添加所有文件到 FormData
+    for (let i = 0; i < files.length; i++) {
+        formData.append('files', files[i]);
+        console.log(`準備上傳Forecast文件 ${i + 1}:`, files[i].name, '大小:', files[i].size, 'bytes');
+    }
+    // 添加合併選項
+    formData.append('merge_files', shouldMerge ? 'true' : 'false');
 
     try {
-        showLoading('forecast');
-        console.log('開始上傳Forecast文件:', file.name, '大小:', file.size, 'bytes');
+        console.log(`開始上傳 ${files.length} 個 Forecast 文件，合併模式: ${shouldMerge}`);
+
+        // 模擬每個檔案的進度更新
+        for (let i = 0; i < files.length; i++) {
+            updateFileProgress(i, 'uploading', 50);
+            await sleep(200);
+        }
 
         const response = await fetch('/upload_forecast', {
             method: 'POST',
@@ -125,12 +148,23 @@ async function handleForecastUpload(event) {
         console.log('Forecast上傳結果:', result);
 
         if (result.success) {
-            showUploadSuccess('forecast', result);
+            // 更新所有進度為成功
+            for (let i = 0; i < files.length; i++) {
+                updateFileProgress(i, 'success', 100);
+            }
+            await sleep(500);
+
+            showForecastMultiUploadSuccess(result, shouldMerge);
             uploadedFiles.forecast = true;
             checkUploadComplete();
         } else {
             // 檢查是否為格式驗證錯誤
             if (result.validation_error) {
+                // 標記失敗的檔案
+                for (let i = 0; i < files.length; i++) {
+                    updateFileProgress(i, 'error', 100);
+                }
+                await sleep(300);
                 showValidationError('forecast', result.message, result.details);
             } else {
                 showError('forecast', result.message);
@@ -140,6 +174,120 @@ async function handleForecastUpload(event) {
         console.error('Forecast上傳錯誤:', error);
         showError('forecast', '上傳失敗: ' + error.message);
     }
+}
+
+// 顯示多檔案上傳進度
+function showForecastMultiUploadProgress(files) {
+    const uploadBox = document.getElementById('forecast-upload-box');
+    const status = document.getElementById('forecast-status');
+
+    uploadBox.style.display = 'none';
+    status.style.display = 'block';
+
+    let progressHtml = `
+        <div class="status-content" style="flex-direction: column; width: 100%;">
+            <div class="status-text" style="width: 100%; text-align: center; margin-bottom: 15px;">
+                <div class="status-title"><i class="fas fa-cloud-upload-alt"></i> 上傳中...</div>
+                <div class="status-details">正在處理 ${files.length} 個檔案</div>
+            </div>
+            <div class="multi-upload-progress">
+    `;
+
+    for (let i = 0; i < files.length; i++) {
+        const fileName = files[i].name.length > 25 ? files[i].name.substring(0, 22) + '...' : files[i].name;
+        progressHtml += `
+            <div class="file-progress-item" id="file-progress-${i}">
+                <div class="file-progress-header">
+                    <i class="fas fa-file-excel"></i>
+                    <span class="file-progress-name" title="${files[i].name}">${fileName}</span>
+                    <span class="file-progress-status uploading" id="file-status-${i}">等待中</span>
+                </div>
+                <div class="file-progress-bar">
+                    <div class="file-progress-fill" id="file-progress-fill-${i}" style="width: 0%"></div>
+                </div>
+            </div>
+        `;
+    }
+
+    progressHtml += '</div></div>';
+    status.innerHTML = progressHtml;
+}
+
+// 更新單個檔案的進度
+function updateFileProgress(index, status, percentage) {
+    const fillEl = document.getElementById(`file-progress-fill-${index}`);
+    const statusEl = document.getElementById(`file-status-${index}`);
+
+    if (fillEl) {
+        fillEl.style.width = percentage + '%';
+        fillEl.className = 'file-progress-fill';
+        if (status === 'success') fillEl.classList.add('success');
+        if (status === 'error') fillEl.classList.add('error');
+    }
+
+    if (statusEl) {
+        statusEl.className = 'file-progress-status ' + status;
+        const statusText = {
+            'uploading': '上傳中',
+            'validating': '驗證中',
+            'success': '完成',
+            'error': '失敗'
+        };
+        statusEl.textContent = statusText[status] || status;
+    }
+}
+
+// 顯示 Forecast 多檔案上傳成功
+function showForecastMultiUploadSuccess(result, shouldMerge) {
+    const status = document.getElementById('forecast-status');
+    const fileCount = result.file_count || 1;
+    const totalRows = result.total_rows || result.rows || 0;
+    const totalSize = result.total_size ? formatFileSize(result.total_size) : (result.file_size ? formatFileSize(result.file_size) : '');
+
+    let detailsHtml = '';
+    if (fileCount === 1) {
+        // 單檔案顯示
+        const fileSize = result.file_size ? ` (${formatFileSize(result.file_size)})` : '';
+        detailsHtml = `${result.rows} 行數據，${result.columns ? result.columns.length : 0} 個欄位${fileSize}`;
+    } else {
+        // 多檔案顯示
+        detailsHtml = `<strong>${fileCount} 個檔案</strong>，共 ${totalRows} 行數據`;
+        if (totalSize) {
+            detailsHtml += ` (${totalSize})`;
+        }
+        // 顯示合併模式
+        const mergeText = shouldMerge ?
+            '<span style="color: #27ae60;"><i class="fas fa-check-circle"></i> 下載時合併</span>' :
+            '<span style="color: #3498db;"><i class="fas fa-files-o"></i> 下載時分開</span>';
+        detailsHtml += `<div style="margin-top: 5px; font-size: 0.85rem;">${mergeText}</div>`;
+
+        // 顯示每個檔案的詳細資訊
+        if (result.files && result.files.length > 0) {
+            detailsHtml += '<div class="multi-file-details">';
+            result.files.forEach((file, index) => {
+                const shortName = file.name.length > 30 ? file.name.substring(0, 27) + '...' : file.name;
+                detailsHtml += `
+                    <div class="file-item">
+                        <i class="fas fa-file-excel"></i>
+                        <span class="file-name" title="${file.name}">${shortName}</span>
+                        <span class="file-rows">${file.rows} 行</span>
+                    </div>`;
+            });
+            detailsHtml += '</div>';
+        }
+    }
+
+    status.innerHTML = `
+        <div class="status-content" style="flex-direction: column; align-items: flex-start; width: 100%;">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px;">
+                <i class="fas fa-check-circle status-icon success"></i>
+                <div class="status-text">
+                    <div class="status-title">上傳成功</div>
+                </div>
+            </div>
+            <div class="status-details" style="width: 100%;">${detailsHtml}</div>
+        </div>
+    `;
 }
 
 // 在途文件上傳處理

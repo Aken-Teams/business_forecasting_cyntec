@@ -375,6 +375,232 @@ body {
     margin-bottom: 20px;
 }
 
+.upload-box p.upload-hint {
+    color: #27ae60;
+    font-size: 0.85rem;
+    margin-bottom: 15px;
+    background: #e8f5e9;
+    padding: 6px 12px;
+    border-radius: 15px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* Forecast 多檔案上傳區塊 */
+.upload-item.forecast-multi-upload {
+    min-height: 320px;
+}
+
+.upload-item.forecast-multi-upload .upload-box {
+    padding: 25px 20px;
+}
+
+.upload-item.forecast-multi-upload .upload-status {
+    max-height: 320px;
+    overflow-y: auto;
+    align-items: flex-start;
+}
+
+/* 合併選項樣式 */
+.merge-option {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px dashed #d4cbc4;
+    width: 100%;
+}
+
+.merge-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    justify-content: center;
+    font-size: 0.9rem;
+    color: #333;
+}
+
+.merge-checkbox input[type="checkbox"] {
+    display: none;
+}
+
+.merge-checkbox .checkmark {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #bc773e;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.merge-checkbox input[type="checkbox"]:checked + .checkmark {
+    background: #bc773e;
+}
+
+.merge-checkbox input[type="checkbox"]:checked + .checkmark::after {
+    content: '\f00c';
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    color: white;
+    font-size: 12px;
+}
+
+.merge-checkbox .merge-label {
+    font-weight: 500;
+}
+
+.merge-hint {
+    margin-top: 8px;
+    font-size: 0.8rem;
+    color: #888;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+}
+
+.merge-hint i {
+    color: #bc773e;
+}
+
+/* 多檔案上傳成功顯示 */
+.multi-file-details {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed #d4cbc4;
+    text-align: left;
+    font-size: 0.85rem;
+    max-height: 180px;
+    overflow-y: auto;
+}
+
+.multi-file-details .file-item {
+    padding: 8px 10px;
+    color: #333;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    margin-bottom: 6px;
+}
+
+.multi-file-details .file-item:last-child {
+    margin-bottom: 0;
+}
+
+.multi-file-details .file-item i {
+    color: #27ae60;
+    font-size: 1rem;
+    flex-shrink: 0;
+}
+
+.multi-file-details .file-item .file-name {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 500;
+}
+
+.multi-file-details .file-item .file-rows {
+    color: #666;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+}
+
+/* 多檔案上傳進度顯示 */
+.multi-upload-progress {
+    width: 100%;
+    max-height: 220px;
+    overflow-y: auto;
+    padding-right: 5px;
+}
+
+.file-progress-item {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 8px;
+}
+
+.file-progress-item:last-child {
+    margin-bottom: 0;
+}
+
+.file-progress-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.file-progress-header i {
+    color: #bc773e;
+    font-size: 1rem;
+}
+
+.file-progress-name {
+    flex: 1;
+    font-size: 0.85rem;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.file-progress-status {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    flex-shrink: 0;
+}
+
+.file-progress-status.uploading {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.file-progress-status.validating {
+    background: #d1ecf1;
+    color: #0c5460;
+}
+
+.file-progress-status.success {
+    background: #d4edda;
+    color: #155724;
+}
+
+.file-progress-status.error {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.file-progress-bar {
+    height: 6px;
+    background: #e9ecef;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.file-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #bc773e, #d4a574);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.file-progress-fill.success {
+    background: linear-gradient(90deg, #27ae60, #2ecc71);
+}
+
+.file-progress-fill.error {
+    background: linear-gradient(90deg, #e74c3c, #c0392b);
+}
+
 .upload-status {
     position: absolute;
     top: 0;
