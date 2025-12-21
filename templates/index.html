@@ -127,13 +127,14 @@
                                 </div>
                             </div>
 
-                            <!-- Forecast文件上傳 -->
+                            <!-- Forecast文件上傳（支援多檔案） -->
                             <div class="upload-item">
                                 <div class="upload-box" id="forecast-upload-box">
                                     <i class="fas fa-chart-bar upload-icon"></i>
                                     <h3>Forecast文件</h3>
                                     <p>上傳 ForecastDataFile_ALL.xlsx</p>
-                                    <input type="file" id="forecast-file" accept=".xlsx,.xls" style="display: none;">
+                                    <p class="upload-hint">支援上傳多個檔案</p>
+                                    <input type="file" id="forecast-file" accept=".xlsx,.xls" multiple style="display: none;">
                                     <button class="btn btn-primary" onclick="document.getElementById('forecast-file').click()">
                                         <i class="fas fa-plus"></i> 選擇文件
                                     </button>
