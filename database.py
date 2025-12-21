@@ -165,12 +165,13 @@ def init_database():
                     print(f"ℹ️ 唯一索引檢查: {add_error}")
 
             # 建立處理規則表（儲存預測處理的計算規則，依客戶區分）
+            # 類別順序：upload -> cleanup -> mapping -> erp -> transit -> forecast -> output
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS processing_rules (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     user_id INT NOT NULL,
                     rule_name VARCHAR(100) NOT NULL,
-                    rule_category ENUM('upload', 'erp', 'transit', 'forecast', 'mapping', 'cleanup') NOT NULL,
+                    rule_category ENUM('upload', 'cleanup', 'mapping', 'erp', 'transit', 'forecast', 'output') NOT NULL,
                     rule_description TEXT,
                     rule_config JSON,
                     is_active BOOLEAN DEFAULT TRUE,
@@ -254,6 +255,15 @@ def init_default_processing_rules(cursor, user_id):
     """
     初始化預設的處理規則（給指定客戶）
 
+    規則按照實際處理流程排序：
+    1. 上傳階段 (upload) - 上傳 3 個必要檔案
+    2. 清理階段 (cleanup) - 清理 Forecast 舊資料
+    3. 客戶映射 (mapping) - 客戶資料映射規則
+    4. ERP 處理 (erp) - ERP 資料匹配與計算
+    5. Transit 處理 (transit) - 在途資料處理
+    6. Forecast 處理 (forecast) - 定位與填入數值
+    7. 輸出階段 (output) - 產生結果並下載
+
     參數:
         cursor: 資料庫游標
         user_id: 客戶的用戶 ID
@@ -261,11 +271,11 @@ def init_default_processing_rules(cursor, user_id):
     import json
 
     default_rules = [
-        # 上傳文件流程規則
+        # ==================== 階段一：上傳文件 ====================
         {
             'rule_name': '上傳文件流程',
             'rule_category': 'upload',
-            'rule_description': '系統處理文件的標準流程',
+            'rule_description': '上傳系統所需的三個 Excel 檔案，系統會自動驗證檔案格式',
             'rule_config': json.dumps({
                 'upload_steps': [
                     {
@@ -273,40 +283,78 @@ def init_default_processing_rules(cursor, user_id):
                         'name': '上傳 Forecast 檔案',
                         'description': '選擇並上傳客戶提供的 Forecast Excel 檔案',
                         'file_type': 'Excel (.xlsx)',
-                        'required': True
+                        'required': True,
+                        'validation': True
                     },
                     {
                         'step': 2,
                         'name': '上傳 ERP 淨需求檔案',
                         'description': '選擇並上傳 ERP 匯出的淨需求資料',
                         'file_type': 'Excel (.xlsx)',
-                        'required': True
+                        'required': True,
+                        'validation': True
                     },
                     {
                         'step': 3,
                         'name': '上傳在途資料檔案',
                         'description': '選擇並上傳在途貨物清單',
                         'file_type': 'Excel (.xlsx)',
-                        'required': True
+                        'required': True,
+                        'validation': True
                     },
                     {
                         'step': 4,
-                        'name': '系統自動處理',
-                        'description': '系統依據下方規則自動匹配並計算數據',
-                        'auto': True
-                    },
-                    {
-                        'step': 5,
-                        'name': '下載處理結果',
-                        'description': '下載已填入數據的 Forecast 檔案',
-                        'file_type': 'Excel (.xlsx)',
-                        'output': True
+                        'name': '檔案格式驗證',
+                        'description': '系統自動檢查每個檔案的欄位格式是否符合規範，驗證通過後才能進行下一步處理',
+                        'auto': True,
+                        'validation': True
                     }
                 ]
             }, ensure_ascii=False),
             'display_order': 0
         },
-        # ERP 處理規則
+        # ==================== 階段二：清理舊資料 ====================
+        {
+            'rule_name': 'Forecast 清理規則',
+            'rule_category': 'cleanup',
+            'rule_description': '處理前清理 Forecast 的舊資料',
+            'rule_config': json.dumps({
+                'cleanup_rules': [
+                    {
+                        'name': '供應數量清理',
+                        'condition': 'K欄位 = "供應數量"',
+                        'action': '清空 L~AW 欄位（第12~49欄）的數值',
+                        'purpose': '移除舊的預測資料'
+                    },
+                    {
+                        'name': '庫存數量清理',
+                        'condition': 'I欄位 包含 "庫存數量"',
+                        'action': '清空下一行的 I 欄位',
+                        'purpose': '移除庫存標記'
+                    }
+                ]
+            }, ensure_ascii=False),
+            'display_order': 1
+        },
+        # ==================== 階段三：客戶映射 ====================
+        {
+            'rule_name': '客戶映射規則',
+            'rule_category': 'mapping',
+            'rule_description': '客戶資料的映射對應設定',
+            'rule_config': json.dumps({
+                'mapping_fields': {
+                    '客戶簡稱': '匹配原始資料中的客戶名稱',
+                    '客戶廠區': '對應到 Forecast 的 D 欄（客戶需求地區）',
+                    '送貨地點': '送貨目的地資訊',
+                    '排程出貨日期斷點': '決定週期計算的基準日（預設禮拜四）',
+                    'ETD': '預計出發日期',
+                    'ETA': '預計到達日期（用於計算目標週期）'
+                },
+                'unique_key': '用戶ID + 客戶簡稱 + 客戶廠區'
+            }, ensure_ascii=False),
+            'display_order': 2
+        },
+        # ==================== 階段四：ERP 處理 ====================
         {
             'rule_name': 'ERP 資料匹配規則',
             'rule_category': 'erp',
@@ -321,7 +369,7 @@ def init_default_processing_rules(cursor, user_id):
                 },
                 'description': '使用 客戶料號 + 客戶需求地區 作為匹配鍵，在 Forecast 中找到對應的資料區塊'
             }, ensure_ascii=False),
-            'display_order': 1
+            'display_order': 3
         },
         {
             'rule_name': 'ERP 日期計算規則',
@@ -345,7 +393,7 @@ def init_default_processing_rules(cursor, user_id):
                     '下下週X': '兩週後 + 星期X'
                 }
             }, ensure_ascii=False),
-            'display_order': 2
+            'display_order': 4
         },
         {
             'rule_name': 'ERP 數值轉換規則',
@@ -357,9 +405,9 @@ def init_default_processing_rules(cursor, user_id):
                 'description': '淨需求值 × 1000 = 實際填入值',
                 'example': '淨需求 = 5，填入 Forecast = 5000'
             }, ensure_ascii=False),
-            'display_order': 3
+            'display_order': 5
         },
-        # Transit 處理規則
+        # ==================== 階段五：Transit 處理 ====================
         {
             'rule_name': 'Transit 資料匹配規則',
             'rule_category': 'transit',
@@ -374,7 +422,7 @@ def init_default_processing_rules(cursor, user_id):
                 },
                 'description': '使用 客戶需求地區 + Ordered Item 作為匹配鍵'
             }, ensure_ascii=False),
-            'display_order': 4
+            'display_order': 6
         },
         {
             'rule_name': 'Transit 日期處理規則',
@@ -385,7 +433,7 @@ def init_default_processing_rules(cursor, user_id):
                 'date_formats': ['YYYY/MM/DD', 'YYYY-MM-DD', 'YYYYMMDD'],
                 'description': '直接使用 I 欄位的 ETA 日期作為目標日期，找到 Forecast 對應的週期欄位'
             }, ensure_ascii=False),
-            'display_order': 5
+            'display_order': 7
         },
         {
             'rule_name': 'Transit 數值轉換規則',
@@ -397,9 +445,9 @@ def init_default_processing_rules(cursor, user_id):
                 'description': 'Qty 值 × 1000 = 實際填入值',
                 'example': 'Qty = 3，填入 Forecast = 3000'
             }, ensure_ascii=False),
-            'display_order': 6
+            'display_order': 8
         },
-        # Forecast 處理規則
+        # ==================== 階段六：Forecast 處理 ====================
         {
             'rule_name': 'Forecast 資料區塊識別規則',
             'rule_category': 'forecast',
@@ -417,7 +465,7 @@ def init_default_processing_rules(cursor, user_id):
                     'target_row_marker': '供應數量'
                 }
             }, ensure_ascii=False),
-            'display_order': 7
+            'display_order': 9
         },
         {
             'rule_name': 'Forecast 目標欄位定位規則',
@@ -435,7 +483,7 @@ def init_default_processing_rules(cursor, user_id):
                     'description': '找到標記為「供應數量」的行作為填入位置'
                 }
             }, ensure_ascii=False),
-            'display_order': 8
+            'display_order': 10
         },
         {
             'rule_name': 'Forecast 數值累加規則',
@@ -452,48 +500,37 @@ def init_default_processing_rules(cursor, user_id):
                     'description': '如果 ERP 和 Transit 都有數值要填入同一個格子，會將兩者相加'
                 }
             }, ensure_ascii=False),
-            'display_order': 9
+            'display_order': 11
         },
-        # Mapping 規則
+        # ==================== 階段七：輸出結果 ====================
         {
-            'rule_name': '客戶映射規則',
-            'rule_category': 'mapping',
-            'rule_description': '客戶資料的映射對應',
+            'rule_name': '輸出與下載',
+            'rule_category': 'output',
+            'rule_description': '處理完成後的輸出流程',
             'rule_config': json.dumps({
-                'mapping_fields': {
-                    '客戶簡稱': '匹配原始資料中的客戶名稱',
-                    '客戶廠區': '對應到 Forecast 的 D 欄（客戶需求地區）',
-                    '送貨地點': '送貨目的地資訊',
-                    '排程出貨日期斷點': '決定週期計算的基準日（預設禮拜四）',
-                    'ETD': '預計出發日期',
-                    'ETA': '預計到達日期（用於計算目標週期）'
-                },
-                'unique_key': '用戶ID + 客戶簡稱 + 客戶廠區'
-            }, ensure_ascii=False),
-            'display_order': 10
-        },
-        # Cleanup 規則
-        {
-            'rule_name': 'Forecast 清理規則',
-            'rule_category': 'cleanup',
-            'rule_description': '處理前清理 Forecast 的舊資料',
-            'rule_config': json.dumps({
-                'cleanup_rules': [
+                'output_steps': [
                     {
-                        'name': '供應數量清理',
-                        'condition': 'K欄位 = "供應數量"',
-                        'action': '清空 L~AW 欄位（第12~49欄）的數值',
-                        'purpose': '移除舊的預測資料'
+                        'step': 1,
+                        'name': '驗證處理結果',
+                        'description': '系統自動檢查所有資料是否正確填入',
+                        'auto': True
                     },
                     {
-                        'name': '庫存數量清理',
-                        'condition': 'I欄位 包含 "庫存數量"',
-                        'action': '清空下一行的 I 欄位',
-                        'purpose': '移除庫存標記'
+                        'step': 2,
+                        'name': '產生處理報告',
+                        'description': '統計成功匹配筆數、失敗筆數等資訊',
+                        'auto': True
+                    },
+                    {
+                        'step': 3,
+                        'name': '下載處理結果',
+                        'description': '下載已填入數據的 Forecast Excel 檔案',
+                        'file_type': 'Excel (.xlsx)',
+                        'output': True
                     }
                 ]
             }, ensure_ascii=False),
-            'display_order': 11
+            'display_order': 12
         }
     ]
 
@@ -508,20 +545,24 @@ def init_default_processing_rules(cursor, user_id):
 
 
 def update_processing_rules_enum():
-    """更新 processing_rules 表的 rule_category ENUM，新增 upload 類別"""
+    """
+    更新 processing_rules 表的 rule_category ENUM
+    新增 output 類別，並按照實際處理流程排序
+    順序：upload -> cleanup -> mapping -> erp -> transit -> forecast -> output
+    """
     connection = get_db_connection()
     if not connection:
         return False
 
     try:
         with connection.cursor() as cursor:
-            # 更新 ENUM 類型
+            # 更新 ENUM 類型，按照實際處理流程排序
             cursor.execute("""
                 ALTER TABLE processing_rules
-                MODIFY COLUMN rule_category ENUM('upload', 'erp', 'transit', 'forecast', 'mapping', 'cleanup') NOT NULL
+                MODIFY COLUMN rule_category ENUM('upload', 'cleanup', 'mapping', 'erp', 'transit', 'forecast', 'output') NOT NULL
             """)
             connection.commit()
-            print("✅ processing_rules ENUM 更新完成（新增 upload）")
+            print("✅ processing_rules ENUM 更新完成（按流程排序，新增 output）")
             return True
     except Exception as e:
         print(f"❌ 更新 processing_rules ENUM 失敗: {e}")
@@ -531,7 +572,7 @@ def update_processing_rules_enum():
 
 
 def add_upload_rule_to_user(user_id):
-    """為指定用戶新增上傳文件流程規則"""
+    """為指定用戶新增上傳文件流程規則（包含上傳步驟與格式驗證）"""
     import json
     connection = get_db_connection()
     if not connection:
@@ -547,7 +588,7 @@ def add_upload_rule_to_user(user_id):
             if cursor.fetchone():
                 return True, "上傳流程規則已存在"
 
-            # 新增上傳流程規則
+            # 新增上傳流程規則（包含上傳步驟與格式驗證）
             rule_config = json.dumps({
                 'upload_steps': [
                     {
@@ -555,34 +596,31 @@ def add_upload_rule_to_user(user_id):
                         'name': '上傳 Forecast 檔案',
                         'description': '選擇並上傳客戶提供的 Forecast Excel 檔案',
                         'file_type': 'Excel (.xlsx)',
-                        'required': True
+                        'required': True,
+                        'validation': True
                     },
                     {
                         'step': 2,
                         'name': '上傳 ERP 淨需求檔案',
                         'description': '選擇並上傳 ERP 匯出的淨需求資料',
                         'file_type': 'Excel (.xlsx)',
-                        'required': True
+                        'required': True,
+                        'validation': True
                     },
                     {
                         'step': 3,
                         'name': '上傳在途資料檔案',
                         'description': '選擇並上傳在途貨物清單',
                         'file_type': 'Excel (.xlsx)',
-                        'required': True
+                        'required': True,
+                        'validation': True
                     },
                     {
                         'step': 4,
-                        'name': '系統自動處理',
-                        'description': '系統依據下方規則自動匹配並計算數據',
-                        'auto': True
-                    },
-                    {
-                        'step': 5,
-                        'name': '下載處理結果',
-                        'description': '下載已填入數據的 Forecast 檔案',
-                        'file_type': 'Excel (.xlsx)',
-                        'output': True
+                        'name': '檔案格式驗證',
+                        'description': '系統自動檢查每個檔案的欄位格式是否符合規範，驗證通過後才能進行下一步處理',
+                        'auto': True,
+                        'validation': True
                     }
                 ]
             }, ensure_ascii=False)
@@ -590,7 +628,7 @@ def add_upload_rule_to_user(user_id):
             cursor.execute("""
                 INSERT INTO processing_rules (user_id, rule_name, rule_category, rule_description, rule_config, display_order)
                 VALUES (%s, %s, %s, %s, %s, %s)
-            """, (user_id, '上傳文件流程', 'upload', '系統處理文件的標準流程', rule_config, 0))
+            """, (user_id, '上傳文件流程', 'upload', '上傳系統所需的三個 Excel 檔案，系統會自動驗證檔案格式', rule_config, 0))
             connection.commit()
 
             return True, "上傳流程規則新增成功"
@@ -620,6 +658,86 @@ def add_upload_rule_to_all_users():
         return True
     except Exception as e:
         print(f"❌ 批次新增上傳流程規則失敗: {e}")
+        return False
+    finally:
+        connection.close()
+
+
+def add_output_rule_to_user(user_id):
+    """為指定用戶新增輸出與下載規則"""
+    import json
+    connection = get_db_connection()
+    if not connection:
+        return False, "資料庫連線失敗"
+
+    try:
+        with connection.cursor() as cursor:
+            # 檢查是否已有此規則
+            cursor.execute("""
+                SELECT id FROM processing_rules
+                WHERE user_id = %s AND rule_category = 'output'
+            """, (user_id,))
+            if cursor.fetchone():
+                return True, "輸出規則已存在"
+
+            # 新增輸出與下載規則
+            rule_config = json.dumps({
+                'output_steps': [
+                    {
+                        'step': 1,
+                        'name': '驗證處理結果',
+                        'description': '系統自動檢查所有資料是否正確填入',
+                        'auto': True
+                    },
+                    {
+                        'step': 2,
+                        'name': '產生處理報告',
+                        'description': '統計成功匹配筆數、失敗筆數等資訊',
+                        'auto': True
+                    },
+                    {
+                        'step': 3,
+                        'name': '下載處理結果',
+                        'description': '下載已填入數據的 Forecast Excel 檔案',
+                        'file_type': 'Excel (.xlsx)',
+                        'output': True
+                    }
+                ]
+            }, ensure_ascii=False)
+
+            cursor.execute("""
+                INSERT INTO processing_rules (user_id, rule_name, rule_category, rule_description, rule_config, display_order)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (user_id, '輸出與下載', 'output', '處理完成後的輸出流程', rule_config, 12))
+            connection.commit()
+
+            return True, "輸出規則新增成功"
+    except Exception as e:
+        print(f"❌ 新增輸出規則失敗: {e}")
+        return False, str(e)
+    finally:
+        connection.close()
+
+
+def add_output_rule_to_all_users():
+    """為所有一般用戶新增輸出與下載規則"""
+    connection = get_db_connection()
+    if not connection:
+        return False
+
+    try:
+        with connection.cursor() as cursor:
+            # 取得所有一般用戶
+            cursor.execute("SELECT id, username FROM users WHERE role = 'user'")
+            users = cursor.fetchall()
+
+        for user in users:
+            success, msg = add_output_rule_to_user(user['id'])
+            print(f"  - {user['username']}: {msg}")
+
+        return True
+    except Exception as e:
+        print(f"❌ 批次新增輸出規則失敗: {e}")
         return False
     finally:
         connection.close()
@@ -2004,11 +2122,14 @@ if __name__ == "__main__":
         print("\n更新 activity_logs ENUM...")
         update_activity_logs_enum()
 
-        print("\n更新 processing_rules ENUM（新增 upload）...")
+        print("\n更新 processing_rules ENUM（按流程排序，新增 output）...")
         update_processing_rules_enum()
 
         print("\n為現有用戶新增上傳流程規則...")
         add_upload_rule_to_all_users()
+
+        print("\n為現有用戶新增輸出與下載規則...")
+        add_output_rule_to_all_users()
 
         print("\n建立預設帳號...")
         create_default_users()

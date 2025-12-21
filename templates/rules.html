@@ -360,12 +360,14 @@
             font-size: 1rem;
         }
 
+        /* 類別圖標顏色 - 按處理流程順序 */
         .category-icon.upload { background: linear-gradient(135deg, #17a2b8 0%, #138496 100%); }
+        .category-icon.cleanup { background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%); }
+        .category-icon.mapping { background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%); }
         .category-icon.erp { background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); }
         .category-icon.transit { background: linear-gradient(135deg, #27ae60 0%, #1e8449 100%); }
         .category-icon.forecast { background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); }
-        .category-icon.mapping { background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%); }
-        .category-icon.cleanup { background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%); }
+        .category-icon.output { background: linear-gradient(135deg, #6f42c1 0%, #5a32a3 100%); }
 
         .category-title {
             font-size: 1.1rem;
@@ -651,6 +653,11 @@
         .upload-step-tag.output {
             background: #d1ecf1;
             color: #0c5460;
+        }
+
+        .upload-step-tag.validation {
+            background: #e8f5e9;
+            color: #2e7d32;
         }
 
         /* 規則說明區塊 */
@@ -978,14 +985,16 @@
                     return;
                 }
 
-                // 按類別分組規則（順序決定顯示順序）
+                // 按類別分組規則（按實際處理流程順序）
+                // 1. 上傳 -> 2. 清理 -> 3. 映射 -> 4. ERP -> 5. Transit -> 6. Forecast -> 7. 輸出
                 const categories = {
-                    'upload': { name: '上傳文件流程', icon: 'cloud-upload-alt', rules: [] },
-                    'erp': { name: 'ERP 淨需求處理', icon: 'database', rules: [] },
-                    'transit': { name: '在途資料處理', icon: 'shipping-fast', rules: [] },
-                    'forecast': { name: 'Forecast 處理', icon: 'chart-line', rules: [] },
-                    'mapping': { name: '客戶映射規則', icon: 'project-diagram', rules: [] },
-                    'cleanup': { name: '資料清理規則', icon: 'broom', rules: [] }
+                    'upload': { name: '階段一：上傳文件', icon: 'cloud-upload-alt', rules: [] },
+                    'cleanup': { name: '階段二：資料清理', icon: 'broom', rules: [] },
+                    'mapping': { name: '階段三：客戶映射', icon: 'project-diagram', rules: [] },
+                    'erp': { name: '階段四：ERP 淨需求處理', icon: 'database', rules: [] },
+                    'transit': { name: '階段五：在途資料處理', icon: 'shipping-fast', rules: [] },
+                    'forecast': { name: '階段六：Forecast 處理', icon: 'chart-line', rules: [] },
+                    'output': { name: '階段七：輸出與下載', icon: 'download', rules: [] }
                 };
 
                 customerRules.forEach(rule => {
@@ -1075,7 +1084,12 @@
 
             // 特別處理上傳步驟
             if (config.upload_steps && Array.isArray(config.upload_steps)) {
-                return renderUploadSteps(config.upload_steps);
+                return renderUploadSteps(config.upload_steps, 'upload');
+            }
+
+            // 特別處理輸出步驟
+            if (config.output_steps && Array.isArray(config.output_steps)) {
+                return renderUploadSteps(config.output_steps, 'output');
             }
 
             let html = '<table class="rule-config-table">';
@@ -1089,8 +1103,15 @@
             return html;
         }
 
-        // 渲染上傳步驟（專用格式）
-        function renderUploadSteps(steps) {
+        // 渲染步驟列表（支援 upload 和 output 類型）
+        function renderUploadSteps(steps, type = 'upload') {
+            // 根據類型決定步驟數字的顏色
+            const numberColorMap = {
+                'upload': 'linear-gradient(135deg, #17a2b8 0%, #138496 100%)',
+                'output': 'linear-gradient(135deg, #6f42c1 0%, #5a32a3 100%)'
+            };
+            const numberBg = numberColorMap[type] || numberColorMap['upload'];
+
             let html = '<div class="upload-steps-list">';
             steps.forEach(step => {
                 const stepNum = step.step || '';
@@ -1105,6 +1126,9 @@
                 if (step.required) {
                     tags += `<span class="upload-step-tag required"><i class="fas fa-asterisk"></i> 必要</span>`;
                 }
+                if (step.validation && !step.auto) {
+                    tags += `<span class="upload-step-tag validation"><i class="fas fa-check-circle"></i> 格式驗證</span>`;
+                }
                 if (step.auto) {
                     tags += `<span class="upload-step-tag auto"><i class="fas fa-magic"></i> 自動執行</span>`;
                 }
@@ -1114,7 +1138,7 @@
 
                 html += `
                     <div class="upload-step-item">
-                        <div class="upload-step-number">${stepNum}</div>
+                        <div class="upload-step-number" style="background: ${numberBg};">${stepNum}</div>
                         <div class="upload-step-content">
                             <div class="upload-step-name">${escapeHtml(name)}</div>
                             <div class="upload-step-desc">${escapeHtml(desc)}</div>
@@ -1181,6 +1205,8 @@
                 'required': '必要',
                 'auto': '自動執行',
                 'output': '輸出檔案',
+                // 輸出流程相關
+                'output_steps': '輸出步驟',
                 // 其他
                 'erp_fill': 'ERP 填入',
                 'transit_fill': '在途填入',
