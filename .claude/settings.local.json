@@ -5,7 +5,8 @@
       "Bash(dir /b \"d:\\\\github\\\\business_forecasting\\\\compare\")",
       "Bash(python:*)",
       "Bash(cat:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(tree:*)"
     ]
   }
 }

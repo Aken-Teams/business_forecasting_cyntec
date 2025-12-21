@@ -193,7 +193,12 @@ def get_template_columns(template_type, username=None):
             template_file = os.path.join(COMPARE_FOLDER, f'{template_type}.xlsx')
 
         if not os.path.exists(template_file):
-            return None, f'範本文件不存在: {template_file}'
+            # 提供更清楚的錯誤訊息
+            if username:
+                expected_path = f'compare\\{username}\\{template_type}.xlsx'
+            else:
+                expected_path = f'compare\\{template_type}.xlsx'
+            return None, f'範本文件不存在: {expected_path}'
 
         if template_type == 'forecast':
             # Forecast 使用 header=None 讀取原始結構
@@ -2896,6 +2901,26 @@ def api_get_users_list():
         return jsonify({'success': True, 'users': user_list})
     except Exception as e:
         print(f"❌ 取得用戶列表失敗: {e}")
+        return jsonify({'success': False, 'message': str(e)})
+
+
+@app.route('/api/customers/login-options')
+def api_get_login_customers():
+    """取得登入頁面的客戶選項列表（公開 API，不需登入）"""
+    try:
+        users = get_users_with_company()
+        # 只返回必要的資訊：username（用於登入）、display_name（顯示名稱）、company（公司）
+        customer_list = [
+            {
+                'username': u['username'],
+                'display_name': u['display_name'],
+                'company': u['company'] or u['display_name']
+            }
+            for u in users
+        ]
+        return jsonify({'success': True, 'customers': customer_list})
+    except Exception as e:
+        print(f"❌ 取得登入客戶列表失敗: {e}")
         return jsonify({'success': False, 'message': str(e)})
 
 

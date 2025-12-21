@@ -438,7 +438,7 @@
                     </label>
                     <select id="customer" name="customer" class="form-select" onchange="selectCustomer()">
                         <option value="">請選擇客戶</option>
-                        <option value="quanta">廣達電腦</option>
+                        <!-- 動態載入客戶列表 -->
                     </select>
                 </div>
 
@@ -584,15 +584,50 @@
     </div>
 
     <script>
-        // 帳號對應表
-        const accountMap = {
+        // 固定帳號對應表（管理者和 IT 人員）
+        const fixedAccountMap = {
             'admin': { username: 'admin', displayName: '系統管理員' },
-            'it': { username: 'it_user', displayName: 'IT 管理人員' },
-            'quanta': { username: 'quanta', displayName: '廣達用戶' }
+            'it': { username: 'it_user', displayName: 'IT 管理人員' }
         };
 
+        // 動態客戶列表（從 API 載入）
+        let customerList = [];
         let selectedRole = '';
         let selectedCustomer = '';
+
+        // 頁面載入時取得客戶列表
+        document.addEventListener('DOMContentLoaded', function() {
+            loadCustomerList();
+        });
+
+        // 載入客戶列表
+        async function loadCustomerList() {
+            try {
+                const response = await fetch('/api/customers/login-options');
+                const result = await response.json();
+
+                if (result.success && result.customers) {
+                    customerList = result.customers;
+                    renderCustomerOptions();
+                }
+            } catch (error) {
+                console.error('載入客戶列表失敗:', error);
+            }
+        }
+
+        // 渲染客戶選項
+        function renderCustomerOptions() {
+            const select = document.getElementById('customer');
+            // 保留第一個選項
+            select.innerHTML = '<option value="">請選擇客戶</option>';
+
+            customerList.forEach(customer => {
+                const option = document.createElement('option');
+                option.value = customer.username;
+                option.textContent = customer.company || customer.display_name;
+                select.appendChild(option);
+            });
+        }
 
         // 選擇角色
         function selectRole(role) {
@@ -628,7 +663,7 @@
             } else {
                 // 管理者或 IT 人員直接顯示帳號
                 customerGroup.classList.remove('show');
-                const account = accountMap[role];
+                const account = fixedAccountMap[role];
                 document.getElementById('username').value = account.username;
                 document.getElementById('username-text').textContent = account.username;
                 usernameDisplay.classList.add('show');
@@ -645,27 +680,30 @@
 
         // 選擇客戶
         function selectCustomer() {
-            const customer = document.getElementById('customer').value;
-            selectedCustomer = customer;
+            const customerUsername = document.getElementById('customer').value;
+            selectedCustomer = customerUsername;
 
             const usernameDisplay = document.getElementById('username-display');
             const passwordGroup = document.getElementById('password-group');
             const hintMessage = document.getElementById('hint-message');
             const loginBtn = document.getElementById('login-btn');
 
-            if (customer) {
-                const account = accountMap[customer];
-                document.getElementById('username').value = account.username;
-                document.getElementById('username-text').textContent = account.username;
-                usernameDisplay.classList.add('show');
-                passwordGroup.style.display = 'block';
-                hintMessage.style.display = 'none';
-                loginBtn.disabled = false;
+            if (customerUsername) {
+                // 從動態載入的客戶列表中找到選中的客戶
+                const customer = customerList.find(c => c.username === customerUsername);
+                if (customer) {
+                    document.getElementById('username').value = customer.username;
+                    document.getElementById('username-text').textContent = customer.username;
+                    usernameDisplay.classList.add('show');
+                    passwordGroup.style.display = 'block';
+                    hintMessage.style.display = 'none';
+                    loginBtn.disabled = false;
 
-                // 聚焦密碼欄位
-                setTimeout(() => {
-                    document.getElementById('password').focus();
-                }, 100);
+                    // 聚焦密碼欄位
+                    setTimeout(() => {
+                        document.getElementById('password').focus();
+                    }, 100);
+                }
             } else {
                 usernameDisplay.classList.remove('show');
                 passwordGroup.style.display = 'none';
