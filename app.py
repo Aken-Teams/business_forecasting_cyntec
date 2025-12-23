@@ -418,16 +418,81 @@ def get_or_create_session_folder(user_id, folder_type='uploads'):
 
     所有上傳和處理的檔案都使用同一個 session 時間戳，
     確保同一次操作的檔案都在同一個資料夾中。
+
+    如果 session 過期但用戶已有部分上傳的檔案，會自動找到最近的資料夾繼續使用。
     """
     # 使用統一的 session 時間戳 key（不區分 uploads/processed）
     session_key = 'current_session_timestamp'
     session_timestamp = session.get(session_key)
 
-    # 如果沒有 session 時間戳，建立新的
+    # 如果沒有 session 時間戳，嘗試找到用戶最近的未完成 session
+    # 時間限制：只找最近 3 分鐘內的 session，避免誤判到很久以前的資料夾
+    SESSION_RECOVERY_MINUTES = 3
+
     if not session_timestamp:
-        session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        session[session_key] = session_timestamp
-        print(f"📁 建立新的 session 時間戳: {session_timestamp}")
+        # 檢查用戶的 uploads 資料夾，找最近的 session
+        user_upload_folder = os.path.join(UPLOAD_FOLDER, str(user_id))
+        if os.path.exists(user_upload_folder):
+            # 取得所有 session 資料夾，按時間戳排序（最新的在前）
+            session_folders = []
+            now = datetime.now()
+            for folder_name in os.listdir(user_upload_folder):
+                folder_path = os.path.join(user_upload_folder, folder_name)
+                if os.path.isdir(folder_path):
+                    # 檢查資料夾名稱格式是否為時間戳（YYYYMMDD_HHMMSS）
+                    try:
+                        folder_time = datetime.strptime(folder_name, '%Y%m%d_%H%M%S')
+                        # 計算時間差（分鐘）
+                        time_diff_minutes = (now - folder_time).total_seconds() / 60
+                        # 只考慮最近 N 分鐘內的資料夾
+                        if time_diff_minutes <= SESSION_RECOVERY_MINUTES:
+                            session_folders.append((folder_name, folder_time, time_diff_minutes))
+                    except ValueError:
+                        continue
+
+            if session_folders:
+                # 按時間戳排序，取最新的
+                session_folders.sort(key=lambda x: x[1], reverse=True)
+                latest_folder, folder_time, time_diff = session_folders[0]
+                latest_folder_path = os.path.join(user_upload_folder, latest_folder)
+
+                # 檢查這個資料夾是否有部分上傳的檔案（ERP 或 Forecast 存在，但缺少其他檔案）
+                has_erp = os.path.exists(os.path.join(latest_folder_path, 'erp_data.xlsx'))
+                has_transit = os.path.exists(os.path.join(latest_folder_path, 'transit_data.xlsx'))
+                # Forecast 可能是單檔或多檔
+                has_forecast = any(f.startswith('forecast_data') and f.endswith('.xlsx')
+                                   for f in os.listdir(latest_folder_path) if os.path.isfile(os.path.join(latest_folder_path, f)))
+
+                # 如果有至少一個檔案但不是全部都有，使用這個資料夾
+                file_count = sum([has_erp, has_forecast, has_transit])
+                if 0 < file_count < 3:
+                    session_timestamp = latest_folder
+                    session[session_key] = session_timestamp
+                    print(f"📁 恢復未完成的 session 時間戳: {session_timestamp} (已有 {file_count} 個檔案，{time_diff:.1f} 分鐘前)")
+
+                    # 同時恢復檔案路徑到 session
+                    if has_erp and 'current_erp_file' not in session:
+                        session['current_erp_file'] = os.path.join(latest_folder_path, 'erp_data.xlsx')
+                        print(f"   ✅ 恢復 ERP 檔案路徑")
+                    if has_transit and 'current_transit_file' not in session:
+                        session['current_transit_file'] = os.path.join(latest_folder_path, 'transit_data.xlsx')
+                        print(f"   ✅ 恢復 Transit 檔案路徑")
+                    if has_forecast and 'current_forecast_file' not in session:
+                        # 找到 forecast 檔案
+                        forecast_files = [f for f in os.listdir(latest_folder_path)
+                                          if f.startswith('forecast_data') and f.endswith('.xlsx')]
+                        if forecast_files:
+                            # 如果只有一個檔案，使用該檔案；如果有多個，使用第一個
+                            session['current_forecast_file'] = os.path.join(latest_folder_path, forecast_files[0])
+                            if len(forecast_files) > 1:
+                                session['current_forecast_files'] = [os.path.join(latest_folder_path, f) for f in forecast_files]
+                            print(f"   ✅ 恢復 Forecast 檔案路徑 ({len(forecast_files)} 個)")
+
+        # 如果還是沒有找到，建立新的
+        if not session_timestamp:
+            session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            session[session_key] = session_timestamp
+            print(f"📁 建立新的 session 時間戳: {session_timestamp}")
     else:
         print(f"📁 使用現有 session 時間戳: {session_timestamp}")
 
@@ -1753,8 +1818,8 @@ def process_erp_mapping():
     user = get_current_user()
     start_time = time.time()
     try:
-        # 檢查是否為測試模式
-        data = request.get_json() or {}
+        # 檢查是否為測試模式（silent=True 避免沒有 JSON body 時報錯）
+        data = request.get_json(silent=True) or {}
         test_mode = data.get('test_mode', False)
         test_customer_id = data.get('customer_id')
 
@@ -1987,8 +2052,8 @@ def run_forecast():
     user = get_current_user()
     start_time = time.time()
     try:
-        # 檢查是否為測試模式
-        data = request.get_json() or {}
+        # 檢查是否為測試模式（silent=True 避免沒有 JSON body 時報錯）
+        data = request.get_json(silent=True) or {}
         test_mode = data.get('test_mode', False)
 
         # 記錄開始處理
