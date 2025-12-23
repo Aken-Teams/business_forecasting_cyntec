@@ -31,43 +31,63 @@ class UltraFastForecastProcessor:
         """載入並預處理數據"""
         try:
             print("=== 載入數據 ===")
-            
+
             # 載入ERP數據
             self.erp_df = pd.read_excel(self.erp_file)
-            
+
             # 載入Forecast數據
             self.forecast_df = pd.read_excel(self.forecast_file)
-            
+
             print(f"✅ ERP文件: {len(self.erp_df)} 行")
             print(f"✅ Forecast文件: {len(self.forecast_df)} 行")
-            
+
             # 預處理：建立ERP索引以提高查找速度
             self.erp_df['match_key'] = self.erp_df['客戶料號'].astype(str) + '_' + self.erp_df['客戶需求地區'].astype(str)
+
+            # 檢查「已分配」欄位是否存在（從映射整合階段新增）
+            if '已分配' not in self.erp_df.columns:
+                self.erp_df['已分配'] = ''
+                print("⚠️ ERP 檔案缺少「已分配」欄位，已自動新增")
+            else:
+                # 統計已分配的數量
+                already_allocated = (self.erp_df['已分配'] == '✓').sum()
+                print(f"📋 ERP 已分配筆數: {already_allocated}/{len(self.erp_df)}")
+
             self.erp_index = self.erp_df.set_index('match_key')
-            
+
             # 載入Transit數據（如果有）
             if self.transit_file and pd.notna(self.transit_file):
                 try:
                     self.transit_df = pd.read_excel(self.transit_file)
                     print(f"✅ Transit文件: {len(self.transit_df)} 行, {len(self.transit_df.columns)} 欄")
-                    
+
                     # 建立Transit索引：M欄位(索引12) + F欄位(索引5)
-                    if len(self.transit_df.columns) >= 16:
+                    if len(self.transit_df.columns) >= 13:
                         print(f"🔍 Transit欄位調試:")
                         print(f"   F欄位名稱(索引5): {self.transit_df.columns[5]}")
                         print(f"   H欄位名稱(索引7): {self.transit_df.columns[7]}")
                         print(f"   I欄位名稱(索引8): {self.transit_df.columns[8]}")
                         print(f"   M欄位名稱(索引12): {self.transit_df.columns[12]}")
-                        
+
                         self.transit_df['match_key'] = self.transit_df.iloc[:, 12].astype(str) + '_' + self.transit_df.iloc[:, 5].astype(str)
+
+                        # 檢查「已分配」欄位是否存在（從映射整合階段新增）
+                        if '已分配' not in self.transit_df.columns:
+                            self.transit_df['已分配'] = ''
+                            print("⚠️ Transit 檔案缺少「已分配」欄位，已自動新增")
+                        else:
+                            # 統計已分配的數量
+                            already_allocated = (self.transit_df['已分配'] == '✓').sum()
+                            print(f"📋 Transit 已分配筆數: {already_allocated}/{len(self.transit_df)}")
+
                         self.transit_index = self.transit_df.set_index('match_key')
                         print(f"✅ Transit索引建立完成，共 {len(self.transit_index)} 個唯一鍵")
-                        
+
                         # 顯示前幾個 match_key 作為範例
                         sample_keys = list(self.transit_index.index[:3])
                         print(f"   範例鍵: {sample_keys}")
                     else:
-                        print(f"⚠️ Transit文件欄位不足，需要至少16欄，實際: {len(self.transit_df.columns)}")
+                        print(f"⚠️ Transit文件欄位不足，需要至少13欄，實際: {len(self.transit_df.columns)}")
                         self.transit_df = None
                         self.transit_index = None
                 except Exception as e:
@@ -77,15 +97,15 @@ class UltraFastForecastProcessor:
             else:
                 self.transit_df = None
                 self.transit_index = None
-            
+
             # 一次性載入Excel文件到內存
             print("📁 載入Excel文件到內存...")
             self.wb = load_workbook(self.forecast_file)
             self.ws = self.wb.active
             print("✅ Excel文件已載入內存")
-            
+
             return True
-            
+
         except Exception as e:
             print(f"❌ 數據載入失敗: {e}")
             return False
@@ -447,99 +467,166 @@ class UltraFastForecastProcessor:
             import traceback
             traceback.print_exc()
             return False
-    
+
+    def save_allocation_status(self):
+        """儲存更新後的 ERP/Transit 檔案（包含已分配狀態）"""
+        try:
+            import os
+
+            print("\n💾 儲存分配狀態到 ERP/Transit 檔案...")
+
+            # 儲存 ERP 檔案（覆蓋原檔案，更新已分配欄位）
+            # 移除暫時的 match_key 欄位後再儲存
+            erp_save_df = self.erp_df.drop(columns=['match_key'], errors='ignore')
+            erp_save_df.to_excel(self.erp_file, index=False)
+            erp_allocated = (self.erp_df['已分配'] == '✓').sum()
+            print(f"✅ ERP 檔案已更新: {self.erp_file}")
+            print(f"   已分配筆數: {erp_allocated}/{len(self.erp_df)}")
+
+            # 儲存 Transit 檔案（如果有）
+            if self.transit_df is not None and self.transit_file:
+                # 移除暫時的 match_key 欄位後再儲存
+                transit_save_df = self.transit_df.drop(columns=['match_key'], errors='ignore')
+                transit_save_df.to_excel(self.transit_file, index=False)
+                transit_allocated = (self.transit_df['已分配'] == '✓').sum()
+                print(f"✅ Transit 檔案已更新: {self.transit_file}")
+                print(f"   已分配筆數: {transit_allocated}/{len(self.transit_df)}")
+
+            return True
+
+        except Exception as e:
+            print(f"❌ 儲存分配狀態失敗: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
     def process_single_block(self, block):
-        """處理單個數據塊（批量模式）"""
+        """處理單個數據塊（批量模式，支援1對1分配邏輯）"""
         try:
             customer_part = block['customer_part']
             customer_region = block['customer_region']
             start_row = block['start_row']
             end_row = block['end_row']
-            
+
             # 獲取ERP記錄
             erp_records = self.get_erp_records(customer_part, customer_region)
-            
+
             if len(erp_records) == 0:
                 return 0, 0
-            
+
             filled_count = 0
             skipped_count = 0
-            
+
             # 處理每筆ERP記錄
-            for _, erp_record in erp_records.iterrows():
+            for idx, erp_record in erp_records.iterrows():
+                # 檢查該筆ERP記錄是否已被分配（1對1邏輯）
+                # 由於使用索引，需要在原始 DataFrame 中查找
+                original_idx = self.erp_df[
+                    (self.erp_df['match_key'] == f"{customer_part}_{customer_region}") &
+                    (self.erp_df['排程出貨日期'] == erp_record['排程出貨日期']) &
+                    (self.erp_df['淨需求'] == erp_record['淨需求'])
+                ].index
+
+                if len(original_idx) > 0:
+                    first_idx = original_idx[0]
+                    # 檢查是否已分配（使用 '✓' 標記）
+                    current_status = self.erp_df.at[first_idx, '已分配']
+                    if current_status == '✓':
+                        skipped_count += 1
+                        continue
+
                 # 計算目標信息
                 target_date_str, converted_demand = self.calculate_target_info(erp_record)
-                
+
                 if target_date_str is None or converted_demand is None:
                     skipped_count += 1
                     continue
-                
+
                 # 找到填寫位置
                 col_idx, row_idx = self.find_target_position(target_date_str, start_row, end_row)
-                
+
                 if col_idx is None or row_idx is None:
                     skipped_count += 1
                     continue
-                
+
                 # 添加到批量處理列表（不立即執行）
                 success = self.add_change_to_batch(col_idx, row_idx, converted_demand)
-                
+
                 if success:
                     filled_count += 1
+                    # 標記該筆ERP記錄為已分配（使用 '✓' 標記）
+                    if len(original_idx) > 0:
+                        self.erp_df.at[first_idx, '已分配'] = '✓'
                 else:
                     skipped_count += 1
-            
+
             return filled_count, skipped_count
-            
+
         except Exception as e:
             print(f"  ❌ 數據塊處理失敗: {e}")
             return 0, 1
     
     def process_transit_for_block(self, block):
-        """處理單個數據塊的Transit數據"""
+        """處理單個數據塊的Transit數據（支援1對1分配邏輯）"""
         try:
             if self.transit_df is None or self.transit_index is None:
                 return 0, 0
-            
+
             customer_part = block['customer_part']  # forecast A欄位
             customer_region = block['customer_region']  # forecast D欄位
             start_row = block['start_row']
             end_row = block['end_row']
-            
+
             # 建立匹配鍵：customer_region(forecast D) + customer_part(forecast A)
             # 對應 transit M欄位(索引12) + F欄位(索引5)
             match_key = f"{customer_region}_{customer_part}"
-            
+
             # 第一次匹配時顯示調試信息
             if not hasattr(self, '_transit_debug_shown'):
                 print(f"\n🔍 Transit匹配調試（首次）:")
                 print(f"   Forecast D欄位 + A欄位: {match_key}")
                 print(f"   查找Transit索引中是否存在...")
                 self._transit_debug_shown = True
-            
+
             # 查找匹配的Transit記錄
             if match_key not in self.transit_index.index:
                 return 0, 0
-            
+
             # 找到匹配時顯示信息
             if not hasattr(self, '_transit_match_found'):
                 print(f"   ✅ 找到匹配的Transit記錄！")
                 self._transit_match_found = True
-            
+
             transit_records = self.transit_index.loc[match_key]
             if isinstance(transit_records, pd.Series):
                 transit_records = pd.DataFrame([transit_records])
-            
+
             filled_count = 0
             skipped_count = 0
-            
+
             # 處理每筆Transit記錄
             for idx, transit_record in transit_records.iterrows():
                 try:
                     # 獲取 H 欄位數據（索引7）和 I 欄位 ETA（索引8）
                     h_value = transit_record.iloc[7] if len(transit_record) > 7 else None
                     eta_value = transit_record.iloc[8] if len(transit_record) > 8 else None
-                    
+
+                    # 檢查該筆Transit記錄是否已被分配（1對1邏輯）
+                    # 由於使用索引，需要在原始 DataFrame 中查找
+                    original_idx = self.transit_df[
+                        (self.transit_df['match_key'] == match_key) &
+                        (self.transit_df.iloc[:, 7] == h_value) &
+                        (self.transit_df.iloc[:, 8] == eta_value)
+                    ].index
+
+                    if len(original_idx) > 0:
+                        first_idx = original_idx[0]
+                        # 檢查是否已分配（使用 '✓' 標記）
+                        current_status = self.transit_df.at[first_idx, '已分配']
+                        if current_status == '✓':
+                            skipped_count += 1
+                            continue
+
                     # 調試信息
                     if filled_count == 0 and skipped_count == 0:
                         print(f"    🔍 Transit記錄調試:")
@@ -547,45 +634,48 @@ class UltraFastForecastProcessor:
                         print(f"       F欄位(5): {transit_record.iloc[5] if len(transit_record) > 5 else 'N/A'}")
                         print(f"       H欄位(7): {h_value}")
                         print(f"       I欄位(8): {eta_value}")
-                    
+
                     if pd.isna(h_value) or pd.isna(eta_value) or h_value == 0:
                         skipped_count += 1
                         continue
-                    
+
                     # 轉換單位：K -> 需要 *1000
                     converted_value = float(h_value) * 1000
-                    
+
                     # 直接使用 I欄位的ETA日期（新版邏輯）
                     target_date = self.parse_eta_date(eta_value)
-                    
+
                     if target_date is None:
                         skipped_count += 1
                         continue
-                    
+
                     target_date_str = target_date.strftime("%Y%m%d")
-                    
+
                     # 找到填寫位置
                     col_idx, row_idx = self.find_target_position(target_date_str, start_row, end_row)
-                    
+
                     if col_idx is None or row_idx is None:
                         skipped_count += 1
                         continue
-                    
+
                     # 添加到批量處理列表
                     success = self.add_change_to_batch(col_idx, row_idx, converted_value)
-                    
+
                     if success:
                         filled_count += 1
+                        # 標記該筆Transit記錄為已分配（使用 '✓' 標記）
+                        if len(original_idx) > 0:
+                            self.transit_df.at[first_idx, '已分配'] = '✓'
                     else:
                         skipped_count += 1
-                        
+
                 except Exception as e:
                     print(f"    ⚠️ Transit記錄處理失敗: {e}")
                     skipped_count += 1
                     continue
-            
+
             return filled_count, skipped_count
-            
+
         except Exception as e:
             print(f"  ❌ Transit數據塊處理失敗: {e}")
             return 0, 0
@@ -659,13 +749,16 @@ class UltraFastForecastProcessor:
             if len(self.pending_changes) > 0:
                 if not self.apply_all_changes():
                     return False
-                
-                # 保存文件
+
+                # 保存 Forecast 結果文件
                 if not self.save_file():
                     return False
             else:
                 print("⚠️ 沒有需要修改的數據")
-            
+
+            # 儲存更新後的 ERP/Transit 檔案（包含已分配狀態）
+            self.save_allocation_status()
+
             # 輸出最終結果
             print("\n" + "="*60)
             print("超高速批量處理完成")
@@ -674,24 +767,40 @@ class UltraFastForecastProcessor:
             print(f"\n📊 ERP 數據填寫結果：")
             print(f"  - 成功填寫: {self.total_filled}")
             print(f"  - 跳過記錄: {self.total_skipped}")
-            
+
             total_processed = self.total_filled + self.total_skipped
             if total_processed > 0:
                 print(f"  - 處理率: {self.total_filled/total_processed*100:.1f}%")
             else:
                 print(f"  - 處理率: 0%")
-            
+
+            # 顯示 ERP 分配統計（1對1邏輯，使用 '✓' 標記計算）
+            erp_allocated = (self.erp_df['已分配'] == '✓').sum()
+            erp_total = len(self.erp_df)
+            print(f"\n📋 ERP 1對1分配統計：")
+            print(f"  - 總筆數: {erp_total}")
+            print(f"  - 已分配: {erp_allocated}")
+            print(f"  - 未分配: {erp_total - erp_allocated}")
+
             if self.transit_df is not None:
                 print(f"\n🚚 Transit 數據填寫結果：")
                 print(f"  - 成功填寫: {self.total_transit_filled}")
                 print(f"  - 跳過記錄: {self.total_transit_skipped}")
-                
+
                 transit_total_processed = self.total_transit_filled + self.total_transit_skipped
                 if transit_total_processed > 0:
                     print(f"  - 處理率: {self.total_transit_filled/transit_total_processed*100:.1f}%")
                 else:
                     print(f"  - 處理率: 0%")
-            
+
+                # 顯示 Transit 分配統計（1對1邏輯，使用 '✓' 標記計算）
+                transit_allocated = (self.transit_df['已分配'] == '✓').sum()
+                transit_total = len(self.transit_df)
+                print(f"\n📋 Transit 1對1分配統計：")
+                print(f"  - 總筆數: {transit_total}")
+                print(f"  - 已分配: {transit_allocated}")
+                print(f"  - 未分配: {transit_total - transit_allocated}")
+
             return True
             
         except Exception as e:

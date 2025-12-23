@@ -2063,6 +2063,10 @@ def process_erp_mapping():
         if '排程出貨日期' in erp_df.columns:
             erp_df = erp_df.sort_values('排程出貨日期')
 
+        # 新增「已分配」欄位（用於 1 對 1 分配邏輯追蹤）
+        erp_df['已分配'] = ''
+        print(f"📋 ERP 新增「已分配」欄位，目前欄位數: {len(erp_df.columns)}，欄位列表: {list(erp_df.columns)}")
+
         # 使用資料夾管理結構：processed/{user_id}/{session_timestamp}/integrated_erp.xlsx
         processed_folder, session_timestamp = get_or_create_session_folder(user['id'], 'processed')
 
@@ -2145,12 +2149,17 @@ def process_erp_mapping():
             print(f"   索引{i}: {col}")
         print(f"   整合後總欄位數: {len(transit_df.columns)}")
         
-        # 注意：整合後的結構（總共16個欄位，索引0-15）
+        # 新增「已分配」欄位（用於 1 對 1 分配邏輯追蹤）
+        transit_df['已分配'] = ''
+        print(f"📋 Transit 新增「已分配」欄位，目前欄位數: {len(transit_df.columns)}，最後 3 欄: {list(transit_df.columns[-3:])}")
+
+        # 注意：整合後的結構（總共17個欄位，索引0-16）
         # 索引8: ETA (原始文件中的ETA)
         # 索引12: 客戶需求地區 (整合後新增)
         # 索引13: 排程出貨日期斷點 (整合後新增)
         # 索引14: ETD (整合後新增)
         # 索引15: ETA_mapping (整合後新增，來自mapping表)
+        # 索引16: 已分配 (整合後新增，用於1對1分配追蹤)
 
         # 保存整合後的 Transit 文件（使用同一個 session 資料夾）
         integrated_transit_file = os.path.join(processed_folder, 'integrated_transit.xlsx')

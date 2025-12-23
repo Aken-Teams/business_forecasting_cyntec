@@ -6,7 +6,9 @@
       "Bash(python:*)",
       "Bash(cat:*)",
       "Bash(cd:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(ls:*)",
+      "Bash(xargs ls:*)"
     ]
   }
 }
