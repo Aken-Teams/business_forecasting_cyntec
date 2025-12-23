@@ -6,6 +6,37 @@ let uploadedFiles = {
     transit: false
 };
 
+// 上傳 Session ID - 前端產生，確保同一批上傳的檔案都在同一個資料夾
+let uploadSessionId = null;
+
+// 產生新的上傳 Session ID（格式：YYYYMMDD_HHMMSS）
+function generateUploadSessionId() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    return `${year}${month}${day}_${hours}${minutes}${seconds}`;
+}
+
+// 獲取當前上傳 Session ID（如果不存在則產生新的）
+function getUploadSessionId() {
+    if (!uploadSessionId) {
+        uploadSessionId = generateUploadSessionId();
+        console.log('📁 產生新的上傳 Session ID:', uploadSessionId);
+    }
+    return uploadSessionId;
+}
+
+// 重置上傳 Session ID（開始新的上傳流程時使用）
+function resetUploadSessionId() {
+    uploadSessionId = generateUploadSessionId();
+    console.log('🔄 重置上傳 Session ID:', uploadSessionId);
+    return uploadSessionId;
+}
+
 // DOM元素
 const progressSteps = document.querySelectorAll('.step');
 const sections = {
@@ -18,25 +49,12 @@ const sections = {
 
 // 初始化
 document.addEventListener('DOMContentLoaded', async function() {
-    // 頁面載入時自動重置 session，確保每次新的工作階段都使用新的時間戳資料夾
-    await resetSessionOnPageLoad();
+    // 頁面載入時產生新的上傳 Session ID
+    resetUploadSessionId();
 
     initializeEventListeners();
     updateProgress();
 });
-
-// 頁面載入時重置 session（確保每次新的工作階段使用新資料夾）
-async function resetSessionOnPageLoad() {
-    try {
-        const response = await fetch('/api/reset_session', { method: 'POST' });
-        const result = await response.json();
-        if (result.success) {
-            console.log('✅ Session 已重置，將使用新的時間戳資料夾');
-        }
-    } catch (error) {
-        console.error('重置 session 失敗:', error);
-    }
-}
 
 // 事件監聽器
 function initializeEventListeners() {
@@ -66,10 +84,12 @@ async function handleErpUpload(event) {
 
     const formData = new FormData();
     formData.append('file', file);
+    // 傳遞前端產生的 upload session id，確保檔案存到同一個資料夾
+    formData.append('upload_session_id', getUploadSessionId());
 
     try {
         showLoading('erp');
-        console.log('開始上傳ERP文件:', file.name, '大小:', file.size, 'bytes');
+        console.log('開始上傳ERP文件:', file.name, '大小:', file.size, 'bytes', 'sessionId:', getUploadSessionId());
 
         const response = await fetch('/upload_erp', {
             method: 'POST',
@@ -129,9 +149,11 @@ async function handleForecastUpload(event) {
     }
     // 添加合併選項
     formData.append('merge_files', shouldMerge ? 'true' : 'false');
+    // 傳遞前端產生的 upload session id，確保檔案存到同一個資料夾
+    formData.append('upload_session_id', getUploadSessionId());
 
     try {
-        console.log(`開始上傳 ${files.length} 個 Forecast 文件，合併模式: ${shouldMerge}`);
+        console.log(`開始上傳 ${files.length} 個 Forecast 文件，合併模式: ${shouldMerge}, sessionId: ${getUploadSessionId()}`);
 
         // 模擬每個檔案的進度更新
         for (let i = 0; i < files.length; i++) {
@@ -308,10 +330,12 @@ async function handleTransitUpload(event) {
 
     const formData = new FormData();
     formData.append('file', file);
+    // 傳遞前端產生的 upload session id，確保檔案存到同一個資料夾
+    formData.append('upload_session_id', getUploadSessionId());
 
     try {
         showLoading('transit');
-        console.log('開始上傳在途文件:', file.name, '大小:', file.size, 'bytes');
+        console.log('開始上傳在途文件:', file.name, '大小:', file.size, 'bytes', 'sessionId:', getUploadSessionId());
 
         const response = await fetch('/upload_transit', {
             method: 'POST',
@@ -738,29 +762,94 @@ modalCloseStyle.textContent = `
 `;
 document.head.appendChild(modalCloseStyle);
 
-// 檢查上傳完成
+// 檢查上傳完成（更新 checklist 和下一步按鈕狀態）
 function checkUploadComplete() {
-    // 必須上傳全部 3 個文件才能繼續
-    if (uploadedFiles.erp && uploadedFiles.forecast && uploadedFiles.transit) {
-        // 更新進度
-        currentStep = 2;
-        updateProgress();
-        
-        // 顯示清理區域
-        showSection('cleanup');
-        
-        showNotification('所有文件上傳完成，可以開始數據清理', 'success');
+    // 更新 checklist 狀態
+    updateUploadChecklist();
+
+    // 檢查是否全部上傳完成
+    const allUploaded = uploadedFiles.erp && uploadedFiles.forecast && uploadedFiles.transit;
+
+    // 更新下一步按鈕狀態
+    const nextBtn = document.getElementById('upload-next-btn');
+    if (nextBtn) {
+        nextBtn.disabled = !allUploaded;
+    }
+
+    // 顯示提示訊息
+    if (allUploaded) {
+        showNotification('所有文件上傳完成，請點擊「下一步」繼續', 'success');
     } else {
         // 顯示還需要上傳哪些文件
         const missing = [];
         if (!uploadedFiles.erp) missing.push('ERP淨需求文件');
         if (!uploadedFiles.forecast) missing.push('Forecast文件');
         if (!uploadedFiles.transit) missing.push('在途文件');
-        
+
         if (missing.length > 0 && (uploadedFiles.erp || uploadedFiles.forecast || uploadedFiles.transit)) {
             showNotification(`還需要上傳：${missing.join('、')}`, 'info');
         }
     }
+}
+
+// 更新上傳 checklist 狀態
+function updateUploadChecklist() {
+    const checkErp = document.getElementById('check-erp');
+    const checkForecast = document.getElementById('check-forecast');
+    const checkTransit = document.getElementById('check-transit');
+
+    if (checkErp) {
+        if (uploadedFiles.erp) {
+            checkErp.classList.add('completed');
+            checkErp.querySelector('i').className = 'fas fa-check-circle';
+        } else {
+            checkErp.classList.remove('completed');
+            checkErp.querySelector('i').className = 'fas fa-circle';
+        }
+    }
+
+    if (checkForecast) {
+        if (uploadedFiles.forecast) {
+            checkForecast.classList.add('completed');
+            checkForecast.querySelector('i').className = 'fas fa-check-circle';
+        } else {
+            checkForecast.classList.remove('completed');
+            checkForecast.querySelector('i').className = 'fas fa-circle';
+        }
+    }
+
+    if (checkTransit) {
+        if (uploadedFiles.transit) {
+            checkTransit.classList.add('completed');
+            checkTransit.querySelector('i').className = 'fas fa-check-circle';
+        } else {
+            checkTransit.classList.remove('completed');
+            checkTransit.querySelector('i').className = 'fas fa-circle';
+        }
+    }
+}
+
+// 下一步：進入數據清理
+function goToNextStep() {
+    // 再次檢查是否全部上傳完成
+    if (!uploadedFiles.erp || !uploadedFiles.forecast || !uploadedFiles.transit) {
+        const missing = [];
+        if (!uploadedFiles.erp) missing.push('ERP淨需求文件');
+        if (!uploadedFiles.forecast) missing.push('Forecast文件');
+        if (!uploadedFiles.transit) missing.push('在途文件');
+
+        showNotification(`請先完成上傳：${missing.join('、')}`, 'error');
+        return;
+    }
+
+    // 更新進度
+    currentStep = 2;
+    updateProgress();
+
+    // 顯示清理區域
+    showSection('cleanup');
+
+    showNotification('進入數據清理階段', 'success');
 }
 
 // 數據清理處理（支援多檔案）
@@ -783,7 +872,13 @@ async function handleCleanup() {
         await sleep(500);
 
         const response = await fetch('/process_forecast_cleanup', {
-            method: 'POST'
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                upload_session_id: getUploadSessionId()
+            })
         });
 
         const result = await response.json();
@@ -912,7 +1007,13 @@ async function handleMappingProcess() {
         await sleep(500);
         
         const response = await fetch('/process_erp_mapping', {
-            method: 'POST'
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                upload_session_id: getUploadSessionId()
+            })
         });
         
         const result = await response.json();
@@ -972,7 +1073,13 @@ async function handleForecast() {
         await sleep(500);
         
         const response = await fetch('/run_forecast', {
-            method: 'POST'
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                upload_session_id: getUploadSessionId()
+            })
         });
         
         const result = await response.json();
@@ -983,28 +1090,66 @@ async function handleForecast() {
         hideProgress('forecast-progress');
         
         if (result.success) {
-            let detailMessage = `
-                <div style="margin-top: 10px;">
-                    <div style="font-weight: 600; margin-bottom: 8px;">📊 ERP 數據填寫結果：</div>
-                    <div style="margin-left: 20px;">
-                        <div>✅ 成功填寫：${result.erp_filled} 筆</div>
-                        <div>⏭️  跳過記錄：${result.erp_skipped} 筆</div>
-                    </div>
-            `;
-            
-            // 如果有 Transit 數據
-            if (result.transit_filled !== undefined) {
-                detailMessage += `
-                    <div style="font-weight: 600; margin-top: 12px; margin-bottom: 8px;">🚚 Transit 數據填寫結果：</div>
-                    <div style="margin-left: 20px;">
-                        <div>✅ 成功填寫：${result.transit_filled} 筆</div>
-                        <div>⏭️  跳過記錄：${result.transit_skipped} 筆</div>
-                    </div>
+            let detailMessage = '';
+
+            if (result.multi_file) {
+                // 多檔案模式
+                detailMessage = `
+                    <div style="margin-top: 10px;">
+                        <div style="font-weight: 600; margin-bottom: 8px;">📁 多檔案處理結果：</div>
+                        <div style="margin-left: 20px;">
+                            <div>📊 處理檔案數：${result.success_count}/${result.file_count} 個成功</div>
+                        </div>
+                        <div style="font-weight: 600; margin-top: 12px; margin-bottom: 8px;">📊 ERP 數據填寫結果（合計）：</div>
+                        <div style="margin-left: 20px;">
+                            <div>✅ 成功填寫：${result.total_erp_filled} 筆</div>
+                            <div>⏭️  跳過記錄：${result.total_erp_skipped} 筆</div>
+                        </div>
                 `;
+
+                // 如果有 Transit 數據
+                if (result.total_transit_filled !== undefined) {
+                    detailMessage += `
+                        <div style="font-weight: 600; margin-top: 12px; margin-bottom: 8px;">🚚 Transit 數據填寫結果（合計）：</div>
+                        <div style="margin-left: 20px;">
+                            <div>✅ 成功填寫：${result.total_transit_filled} 筆</div>
+                            <div>⏭️  跳過記錄：${result.total_transit_skipped} 筆</div>
+                        </div>
+                    `;
+                }
+
+                detailMessage += '</div>';
+
+                // 更新下載區域為多檔案模式
+                updateDownloadSectionMultiFile(result.files);
+            } else {
+                // 單檔案模式（合併模式）
+                detailMessage = `
+                    <div style="margin-top: 10px;">
+                        <div style="font-weight: 600; margin-bottom: 8px;">📊 ERP 數據填寫結果：</div>
+                        <div style="margin-left: 20px;">
+                            <div>✅ 成功填寫：${result.erp_filled} 筆</div>
+                            <div>⏭️  跳過記錄：${result.erp_skipped} 筆</div>
+                        </div>
+                `;
+
+                // 如果有 Transit 數據
+                if (result.transit_filled !== undefined) {
+                    detailMessage += `
+                        <div style="font-weight: 600; margin-top: 12px; margin-bottom: 8px;">🚚 Transit 數據填寫結果：</div>
+                        <div style="margin-left: 20px;">
+                            <div>✅ 成功填寫：${result.transit_filled} 筆</div>
+                            <div>⏭️  跳過記錄：${result.transit_skipped} 筆</div>
+                        </div>
+                    `;
+                }
+
+                detailMessage += '</div>';
+
+                // 更新下載區域為單檔案模式
+                updateDownloadSectionSingleFile();
             }
-            
-            detailMessage += '</div>';
-            
+
             showProcessResult('forecast-result', result.message + detailMessage, 'success');
 
             // 更新完成資訊（日期和時間）
@@ -1026,6 +1171,102 @@ async function handleForecast() {
 // 下載文件
 function downloadFile(filename) {
     window.open(`/download/${filename}`, '_blank');
+}
+
+// 更新下載區域為單檔案模式
+function updateDownloadSectionSingleFile() {
+    const downloadContainer = document.querySelector('.download-single');
+    if (downloadContainer) {
+        // 移除多檔案模式的 class
+        downloadContainer.classList.remove('multi-file-mode');
+
+        downloadContainer.innerHTML = `
+            <div class="download-item">
+                <i class="fas fa-file-excel"></i>
+                <div class="download-info">
+                    <div class="download-title">FORECAST處理結果</div>
+                    <div class="download-desc">forecast_result.xlsx</div>
+                </div>
+                <button class="btn btn-primary" onclick="downloadFile('forecast_result.xlsx')">
+                    <i class="fas fa-download"></i> 下載
+                </button>
+            </div>
+        `;
+    }
+}
+
+// 更新下載區域為多檔案模式
+function updateDownloadSectionMultiFile(files) {
+    const downloadContainer = document.querySelector('.download-single');
+    if (downloadContainer && files && files.length > 0) {
+        // 添加多檔案模式的 class，啟用垂直排列樣式
+        downloadContainer.classList.add('multi-file-mode');
+
+        // 儲存檔案列表供批量下載使用
+        window.multiFileDownloadList = files.map(f => f.output);
+
+        // 批量下載按鈕（放在最上方）
+        let downloadAllBtnHtml = '';
+        if (files.length > 1) {
+            downloadAllBtnHtml = `
+                <div class="download-all-section">
+                    <button class="btn btn-download-all" onclick="downloadAllFiles()">
+                        <i class="fas fa-cloud-download-alt"></i>
+                        批量下載全部檔案（共 ${files.length} 個）
+                    </button>
+                </div>
+            `;
+        }
+
+        // 檔案列表（垂直排列，可捲動）
+        let filesListHtml = '<div class="download-files-list">';
+        files.forEach((file, index) => {
+            filesListHtml += `
+                <div class="download-file-row">
+                    <div class="download-file-info">
+                        <i class="fas fa-file-excel file-icon"></i>
+                        <div class="file-details">
+                            <div class="file-name">${file.output}</div>
+                            <div class="file-stats">ERP: ${file.erp_filled} 筆 | Transit: ${file.transit_filled} 筆</div>
+                        </div>
+                    </div>
+                    <button class="btn btn-outline-primary btn-sm" onclick="downloadFile('${file.output}')">
+                        <i class="fas fa-download"></i> 下載
+                    </button>
+                </div>
+            `;
+        });
+        filesListHtml += '</div>';
+
+        downloadContainer.innerHTML = downloadAllBtnHtml + filesListHtml;
+    }
+}
+
+// 批量下載所有檔案
+function downloadAllFiles() {
+    const filenames = window.multiFileDownloadList || [];
+    if (filenames.length === 0) {
+        showNotification('沒有可下載的檔案', 'error');
+        return;
+    }
+
+    showNotification(`開始下載 ${filenames.length} 個檔案...`, 'info');
+
+    filenames.forEach((filename, index) => {
+        // 延遲下載避免瀏覽器阻擋
+        setTimeout(() => {
+            // 使用 iframe 方式下載，避免開啟多個分頁
+            const iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            iframe.src = `/download/${filename}`;
+            document.body.appendChild(iframe);
+
+            // 5秒後移除 iframe
+            setTimeout(() => {
+                document.body.removeChild(iframe);
+            }, 5000);
+        }, index * 800);  // 每個檔案間隔 800ms
+    });
 }
 
 // 更新完成資訊（日期和時間）
@@ -1549,13 +1790,9 @@ function executeGoBack(fromStep) {
 
 // 返回步驟1：文件上傳
 async function goToStep1() {
-    // 重置後端 session（建立新的時間戳資料夾）
-    try {
-        await fetch('/api/reset_session', { method: 'POST' });
-        console.log('Session 已重置，下次上傳將使用新的資料夾');
-    } catch (error) {
-        console.error('重置 session 失敗:', error);
-    }
+    // 重置前端的上傳 Session ID（產生新的資料夾 ID）
+    resetUploadSessionId();
+    console.log('上傳 Session ID 已重置，下次上傳將使用新的資料夾');
 
     // 重置上傳狀態
     uploadedFiles = {
@@ -1564,7 +1801,7 @@ async function goToStep1() {
         transit: false
     };
 
-    // 重置UI
+    // 重置UI - 上傳區域
     ['erp', 'forecast', 'transit'].forEach(type => {
         const uploadBox = document.getElementById(`${type}-upload-box`);
         const status = document.getElementById(`${type}-status`);
@@ -1574,6 +1811,15 @@ async function goToStep1() {
         if (status) status.style.display = 'none';
         if (fileInput) fileInput.value = '';
     });
+
+    // 重置 checklist 狀態
+    updateUploadChecklist();
+
+    // 重置下一步按鈕狀態
+    const nextBtn = document.getElementById('upload-next-btn');
+    if (nextBtn) {
+        nextBtn.disabled = true;
+    }
 
     // 隱藏處理結果
     hideAllResults();

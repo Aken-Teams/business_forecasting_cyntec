@@ -184,6 +184,28 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- 上傳狀態摘要和下一步按鈕 -->
+                        <div class="upload-summary" id="upload-summary">
+                            <div class="upload-checklist">
+                                <div class="checklist-item" id="check-erp">
+                                    <i class="fas fa-circle"></i>
+                                    <span>ERP淨需求文件</span>
+                                </div>
+                                <div class="checklist-item" id="check-forecast">
+                                    <i class="fas fa-circle"></i>
+                                    <span>Forecast文件</span>
+                                </div>
+                                <div class="checklist-item" id="check-transit">
+                                    <i class="fas fa-circle"></i>
+                                    <span>在途文件</span>
+                                </div>
+                            </div>
+                            <button class="btn btn-next" id="upload-next-btn" onclick="goToNextStep()" disabled>
+                                <span>下一步：數據清理</span>
+                                <i class="fas fa-arrow-right"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </section>

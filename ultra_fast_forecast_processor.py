@@ -11,11 +11,12 @@ class UltraFastForecastProcessor:
     使用批量openpyxl操作，大幅提升性能
     """
     
-    def __init__(self, forecast_file, erp_file, transit_file=None, output_folder=None):
+    def __init__(self, forecast_file, erp_file, transit_file=None, output_folder=None, output_filename=None):
         self.forecast_file = forecast_file
         self.erp_file = erp_file
         self.transit_file = transit_file
         self.output_folder = output_folder  # 輸出資料夾路徑
+        self.output_filename = output_filename or "forecast_result.xlsx"  # 輸出檔名（支援多檔案模式）
         self.total_filled = 0
         self.total_skipped = 0
         self.total_transit_filled = 0
@@ -435,7 +436,7 @@ class UltraFastForecastProcessor:
             else:
                 processed_dir = "processed"
             os.makedirs(processed_dir, exist_ok=True)
-            output_file = os.path.join(processed_dir, "forecast_result.xlsx")
+            output_file = os.path.join(processed_dir, self.output_filename)
             self.wb.save(output_file)
             print(f"✅ 文件已保存為: {output_file}")
             print(f"✅ D欄位空白單元格已填入空格，Excel篩選功能正常")

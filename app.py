@@ -411,90 +411,41 @@ os.makedirs('static/js', exist_ok=True)
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def get_or_create_session_folder(user_id, folder_type='uploads'):
+def get_or_create_session_folder(user_id, folder_type='uploads', upload_session_id=None):
     """
     獲取或建立用戶的 session 資料夾
     資料夾結構: {folder_type}/{user_id}/{YYYYMMDD_HHMMSS}/
 
-    所有上傳和處理的檔案都使用同一個 session 時間戳，
-    確保同一次操作的檔案都在同一個資料夾中。
+    優先使用前端傳來的 upload_session_id，確保同一批上傳的檔案都在同一個資料夾。
+    這樣不再依賴 Flask session cookie，避免 cookie 大小限制或跨請求丟失的問題。
 
-    如果 session 過期但用戶已有部分上傳的檔案，會自動找到最近的資料夾繼續使用。
+    參數:
+        user_id: 用戶 ID
+        folder_type: 'uploads' 或 'processed'
+        upload_session_id: 前端傳來的上傳 session ID（優先使用）
     """
-    # 使用統一的 session 時間戳 key（不區分 uploads/processed）
-    session_key = 'current_session_timestamp'
-    session_timestamp = session.get(session_key)
+    # 優先使用前端傳來的 upload_session_id
+    if upload_session_id:
+        session_timestamp = upload_session_id
+        # 同步更新到 Flask session（供後續處理步驟使用）
+        session['current_session_timestamp'] = session_timestamp
+        session.modified = True
+        print(f"📁 使用前端傳來的 session ID: {session_timestamp}")
+    else:
+        # 如果沒有前端傳來的 ID，嘗試從 Flask session 獲取
+        session_key = 'current_session_timestamp'
+        session_timestamp = session.get(session_key)
 
-    # 如果沒有 session 時間戳，嘗試找到用戶最近的未完成 session
-    # 時間限制：只找最近 3 分鐘內的 session，避免誤判到很久以前的資料夾
-    SESSION_RECOVERY_MINUTES = 3
-
-    if not session_timestamp:
-        # 檢查用戶的 uploads 資料夾，找最近的 session
-        user_upload_folder = os.path.join(UPLOAD_FOLDER, str(user_id))
-        if os.path.exists(user_upload_folder):
-            # 取得所有 session 資料夾，按時間戳排序（最新的在前）
-            session_folders = []
-            now = datetime.now()
-            for folder_name in os.listdir(user_upload_folder):
-                folder_path = os.path.join(user_upload_folder, folder_name)
-                if os.path.isdir(folder_path):
-                    # 檢查資料夾名稱格式是否為時間戳（YYYYMMDD_HHMMSS）
-                    try:
-                        folder_time = datetime.strptime(folder_name, '%Y%m%d_%H%M%S')
-                        # 計算時間差（分鐘）
-                        time_diff_minutes = (now - folder_time).total_seconds() / 60
-                        # 只考慮最近 N 分鐘內的資料夾
-                        if time_diff_minutes <= SESSION_RECOVERY_MINUTES:
-                            session_folders.append((folder_name, folder_time, time_diff_minutes))
-                    except ValueError:
-                        continue
-
-            if session_folders:
-                # 按時間戳排序，取最新的
-                session_folders.sort(key=lambda x: x[1], reverse=True)
-                latest_folder, folder_time, time_diff = session_folders[0]
-                latest_folder_path = os.path.join(user_upload_folder, latest_folder)
-
-                # 檢查這個資料夾是否有部分上傳的檔案（ERP 或 Forecast 存在，但缺少其他檔案）
-                has_erp = os.path.exists(os.path.join(latest_folder_path, 'erp_data.xlsx'))
-                has_transit = os.path.exists(os.path.join(latest_folder_path, 'transit_data.xlsx'))
-                # Forecast 可能是單檔或多檔
-                has_forecast = any(f.startswith('forecast_data') and f.endswith('.xlsx')
-                                   for f in os.listdir(latest_folder_path) if os.path.isfile(os.path.join(latest_folder_path, f)))
-
-                # 如果有至少一個檔案但不是全部都有，使用這個資料夾
-                file_count = sum([has_erp, has_forecast, has_transit])
-                if 0 < file_count < 3:
-                    session_timestamp = latest_folder
-                    session[session_key] = session_timestamp
-                    print(f"📁 恢復未完成的 session 時間戳: {session_timestamp} (已有 {file_count} 個檔案，{time_diff:.1f} 分鐘前)")
-
-                    # 同時恢復檔案路徑到 session
-                    if has_erp and 'current_erp_file' not in session:
-                        session['current_erp_file'] = os.path.join(latest_folder_path, 'erp_data.xlsx')
-                        print(f"   ✅ 恢復 ERP 檔案路徑")
-                    if has_transit and 'current_transit_file' not in session:
-                        session['current_transit_file'] = os.path.join(latest_folder_path, 'transit_data.xlsx')
-                        print(f"   ✅ 恢復 Transit 檔案路徑")
-                    if has_forecast and 'current_forecast_file' not in session:
-                        # 找到 forecast 檔案
-                        forecast_files = [f for f in os.listdir(latest_folder_path)
-                                          if f.startswith('forecast_data') and f.endswith('.xlsx')]
-                        if forecast_files:
-                            # 如果只有一個檔案，使用該檔案；如果有多個，使用第一個
-                            session['current_forecast_file'] = os.path.join(latest_folder_path, forecast_files[0])
-                            if len(forecast_files) > 1:
-                                session['current_forecast_files'] = [os.path.join(latest_folder_path, f) for f in forecast_files]
-                            print(f"   ✅ 恢復 Forecast 檔案路徑 ({len(forecast_files)} 個)")
-
-        # 如果還是沒有找到，建立新的
         if not session_timestamp:
+            # 建立新的 session 時間戳（後備方案）
             session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             session[session_key] = session_timestamp
-            print(f"📁 建立新的 session 時間戳: {session_timestamp}")
-    else:
-        print(f"📁 使用現有 session 時間戳: {session_timestamp}")
+            session.modified = True
+            print(f"📁 建立新的 session 時間戳（後備）: {session_timestamp}")
+        else:
+            print(f"📁 使用 Flask session 時間戳: {session_timestamp}")
+
+    print(f"🔍 get_or_create_session_folder: user_id={user_id}, folder_type={folder_type}, session_id={session_timestamp}")
 
     # 建立資料夾路徑
     if folder_type == 'uploads':
@@ -505,20 +456,44 @@ def get_or_create_session_folder(user_id, folder_type='uploads'):
     # 確保資料夾存在
     os.makedirs(folder_path, exist_ok=True)
 
+    print(f"   folder_path: {folder_path}")
+
     return folder_path, session_timestamp
 
 def reset_session_folder():
     """
     重置 session 資料夾時間戳
-    當用戶重新開始流程時調用此函數
+    當用戶進入上傳頁面或重新開始流程時調用此函數
+    確保每次新的工作流程使用新的資料夾
     """
-    if 'current_session_timestamp' in session:
-        old_timestamp = session.pop('current_session_timestamp')
-        print(f"🔄 已重置 session 時間戳 (舊: {old_timestamp})")
-    # 同時清除檔案路徑
-    for key in ['current_erp_file', 'current_forecast_file', 'current_transit_file', 'current_processed_folder']:
+    old_timestamp = session.get('current_session_timestamp')
+    keys_to_clear = [
+        'current_session_timestamp',
+        # 舊格式（完整路徑）- 保留向下相容
+        'current_erp_file',
+        'current_forecast_file',
+        'current_forecast_files',
+        'current_transit_file',
+        'current_processed_folder',
+        # 新格式（上傳標記）
+        'uploaded_erp',
+        'uploaded_forecast',
+        'uploaded_transit',
+        'forecast_merge_mode',
+        'forecast_file_count'
+    ]
+
+    cleared = []
+    for key in keys_to_clear:
         if key in session:
             session.pop(key)
+            cleared.append(key)
+
+    if cleared:
+        session.modified = True
+        print(f"🔄 已重置 session (舊 timestamp: {old_timestamp})")
+        print(f"   清除的 keys: {cleared}")
+        print(f"   session size after reset: {len(str(dict(session)))} bytes")
 
 def get_session_folder_path(user_id, folder_type='uploads'):
     """
@@ -595,14 +570,114 @@ def cleanup_old_folders():
         return 0
 
 def get_user_file_path(file_type):
-    """從 session 獲取當前用戶的檔案路徑"""
-    key = f'current_{file_type}_file'
-    return session.get(key)
+    """
+    從 session 動態計算當前用戶的檔案路徑
+    不再直接存儲完整路徑，而是根據 session timestamp 和檔案類型來計算
+    這樣可以避免 session cookie 超過 4KB 限制
+
+    注意：由於 Flask session cookie 可能遺失，此函數會直接檢查檔案是否存在，
+    而不再依賴 session 中的 uploaded_* 標記。
+    """
+    user = get_current_user()
+    if not user:
+        print(f"⚠️ get_user_file_path({file_type}): 用戶未登入")
+        return None
+
+    session_timestamp = session.get('current_session_timestamp')
+    if not session_timestamp:
+        print(f"⚠️ get_user_file_path({file_type}): session_timestamp 不存在")
+        return None
+
+    print(f"🔍 get_user_file_path({file_type}): session_timestamp={session_timestamp}, user_id={user['id']}")
+
+    # 不再依賴 uploaded_* 標記（因為 session cookie 可能遺失）
+    # 直接根據 session_timestamp 計算路徑並檢查檔案是否存在
+
+    # 根據檔案類型決定可能的檔名
+    possible_filenames = []
+    if file_type == 'erp':
+        possible_filenames = ['erp_data.xlsx']
+    elif file_type == 'forecast':
+        # 檢查是否為合併模式
+        if session.get('forecast_merge_mode', True):
+            possible_filenames = ['forecast_data.xlsx', 'forecast_data_1.xlsx']
+        else:
+            # 非合併模式，返回第一個檔案
+            possible_filenames = ['forecast_data_1.xlsx', 'forecast_data.xlsx']
+    elif file_type == 'transit':
+        possible_filenames = ['transit_data.xlsx']
+    else:
+        return None
+
+    # 嘗試每個可能的檔名
+    upload_folder = os.path.join(UPLOAD_FOLDER, str(user['id']), session_timestamp)
+    for filename in possible_filenames:
+        filepath = os.path.join(upload_folder, filename)
+        if os.path.exists(filepath):
+            print(f"✅ get_user_file_path({file_type}): 找到檔案 {filepath}")
+            return filepath
+
+    print(f"❌ get_user_file_path({file_type}): 在 {upload_folder} 中找不到檔案")
+    return None
 
 def set_user_file_path(file_type, filepath):
-    """設置當前用戶的檔案路徑到 session"""
-    key = f'current_{file_type}_file'
-    session[key] = filepath
+    """
+    設置檔案上傳標記到 session（不存儲完整路徑）
+    只存儲上傳標記，路徑由 get_user_file_path 動態計算
+    """
+    # 設置上傳標記
+    uploaded_key = f'uploaded_{file_type}'
+    session[uploaded_key] = True
+    session.modified = True
+    print(f"📝 set_user_file_path: {uploaded_key} = True (filepath: {filepath})")
+    print(f"   session keys after set: {list(session.keys())}")
+    print(f"   session size estimate: {len(str(dict(session)))} bytes")
+
+def get_forecast_files():
+    """
+    獲取 Forecast 檔案列表（支援多檔案模式）
+    根據 session timestamp 動態計算檔案路徑
+
+    注意：由於 Flask session cookie 可能遺失，此函數會直接掃描資料夾，
+    而不再依賴 session 中的 uploaded_forecast 標記。
+    """
+    user = get_current_user()
+    if not user:
+        return []
+
+    session_timestamp = session.get('current_session_timestamp')
+    if not session_timestamp:
+        return []
+
+    upload_folder = os.path.join(UPLOAD_FOLDER, str(user['id']), session_timestamp)
+    print(f"🔍 get_forecast_files: 掃描資料夾 {upload_folder}")
+
+    # 不再依賴 uploaded_forecast 標記，直接掃描資料夾
+    if not os.path.exists(upload_folder):
+        print(f"❌ get_forecast_files: 資料夾不存在")
+        return []
+
+    # 先檢查合併模式的單一檔案
+    single_file = os.path.join(upload_folder, 'forecast_data.xlsx')
+    if os.path.exists(single_file):
+        print(f"✅ get_forecast_files: 找到合併檔案 {single_file}")
+        return [single_file]
+
+    # 再檢查多檔案模式（forecast_data_1.xlsx, forecast_data_2.xlsx, ...）
+    files = []
+    for i in range(1, 100):  # 最多支援 99 個檔案
+        filepath = os.path.join(upload_folder, f'forecast_data_{i}.xlsx')
+        if os.path.exists(filepath):
+            files.append(filepath)
+        else:
+            break  # 遇到不存在的編號就停止
+
+    if files:
+        print(f"✅ get_forecast_files: 找到 {len(files)} 個多檔案")
+        return files
+
+    print(f"❌ get_forecast_files: 在資料夾中找不到 Forecast 檔案")
+    return []
 
 def get_user_processed_folder():
     """獲取當前用戶的 processed 資料夾路徑"""
@@ -842,9 +917,13 @@ def upload_erp():
 
         original_filename = file.filename
 
+        # 獲取前端傳來的 upload_session_id
+        upload_session_id = request.form.get('upload_session_id')
+        print(f"📥 ERP 上傳 - 前端傳來的 session_id: {upload_session_id}")
+
         if file and allowed_file(file.filename):
             # 使用資料夾管理結構：uploads/{user_id}/{session_timestamp}/erp_data.xlsx
-            upload_folder, session_timestamp = get_or_create_session_folder(user['id'], 'uploads')
+            upload_folder, session_timestamp = get_or_create_session_folder(user['id'], 'uploads', upload_session_id)
             filename = 'erp_data.xlsx'
             filepath = os.path.join(upload_folder, filename)
 
@@ -966,8 +1045,12 @@ def upload_forecast():
                 return jsonify({'success': False, 'message': f'不支持的文件格式: {file.filename}'})
             original_filenames.append(file.filename)
 
+        # 獲取前端傳來的 upload_session_id
+        upload_session_id = request.form.get('upload_session_id')
+        print(f"📥 Forecast 上傳 - 前端傳來的 session_id: {upload_session_id}")
+
         # 使用資料夾管理結構
-        upload_folder, session_timestamp = get_or_create_session_folder(user['id'], 'uploads')
+        upload_folder, session_timestamp = get_or_create_session_folder(user['id'], 'uploads', upload_session_id)
 
         # 取得測試模式參數
         test_mode = request.form.get('test_mode') == 'true'
@@ -1240,10 +1323,10 @@ def upload_forecast():
                 # 取得合併後的檔案大小
                 merged_size = os.path.getsize(final_filepath)
 
-                # 儲存路徑到 session（單一合併檔案）
+                # 儲存上傳標記到 session（不存儲完整路徑，避免 cookie 超過 4KB）
                 set_user_file_path('forecast', final_filepath)
-                set_user_file_path('forecast_merge_mode', True)
-                set_user_file_path('forecast_files', None)
+                session['forecast_merge_mode'] = True
+                session.modified = True
 
                 # 記錄日誌
                 filenames_str = ', '.join(original_filenames)
@@ -1290,10 +1373,11 @@ def upload_forecast():
 
                 print(f"=== 多檔案分開儲存完成：{len(saved_files)} 個文件 ===")
 
-                # 儲存多檔案資訊到 session
-                set_user_file_path('forecast', None)  # 不設定單一檔案路徑
-                set_user_file_path('forecast_merge_mode', False)
-                set_user_file_path('forecast_files', saved_files)
+                # 儲存上傳標記到 session（只存儲檔案數量，不存儲完整路徑列表）
+                set_user_file_path('forecast', saved_files[0]['path'] if saved_files else None)
+                session['forecast_merge_mode'] = False
+                session['forecast_file_count'] = len(saved_files)
+                session.modified = True
 
                 # 記錄日誌
                 filenames_str = ', '.join(original_filenames)
@@ -1333,9 +1417,13 @@ def upload_transit():
 
         original_filename = file.filename
 
+        # 獲取前端傳來的 upload_session_id
+        upload_session_id = request.form.get('upload_session_id')
+        print(f"📥 Transit 上傳 - 前端傳來的 session_id: {upload_session_id}")
+
         if file and allowed_file(file.filename):
             # 使用資料夾管理結構：uploads/{user_id}/{session_timestamp}/transit_data.xlsx
-            upload_folder, session_timestamp = get_or_create_session_folder(user['id'], 'uploads')
+            upload_folder, session_timestamp = get_or_create_session_folder(user['id'], 'uploads', upload_session_id)
             filename = 'transit_data.xlsx'
             filepath = os.path.join(upload_folder, filename)
 
@@ -1642,31 +1730,72 @@ def process_forecast_cleanup():
             pass
         test_mode = data.get('test_mode', False)
 
+        # 獲取前端傳來的 upload_session_id
+        upload_session_id = data.get('upload_session_id')
+        print(f"📥 Cleanup - 前端傳來的 session_id: {upload_session_id}")
+
+        # 如果有前端傳來的 session_id，先同步到 Flask session
+        if upload_session_id:
+            session['current_session_timestamp'] = upload_session_id
+            session.modified = True
+            print(f"📁 已同步 session_id 到 Flask session: {upload_session_id}")
+
         # 記錄開始處理
         log_activity(user['id'], user['username'], 'cleanup_start',
                    f"開始 Forecast 數據清理{' (測試模式)' if test_mode else ''}", get_client_ip(), request.headers.get('User-Agent'))
 
-        # 檢查是否為多檔案模式
-        merge_mode = get_user_file_path('forecast_merge_mode')
-        forecast_files = get_user_file_path('forecast_files')  # 多檔案列表
-        forecast_file = get_user_file_path('forecast')  # 單一檔案（合併模式）
-
-        # 使用資料夾管理結構
-        processed_folder, session_timestamp = get_or_create_session_folder(user['id'], 'processed')
+        # 使用資料夾管理結構（傳遞 upload_session_id）
+        processed_folder, session_timestamp = get_or_create_session_folder(user['id'], 'processed', upload_session_id)
 
         # 存儲 processed 資料夾路徑到 session
         session['current_processed_folder'] = processed_folder
 
+        # 根據實際上傳的檔案來判斷是否為多檔案模式（不依賴 session 標記）
+        # 掃描上傳資料夾，檢查是否有多個 forecast_data_*.xlsx 檔案
+        upload_folder = os.path.join(UPLOAD_FOLDER, str(user['id']), session_timestamp)
+        print(f"🔍 Cleanup - 掃描上傳資料夾: {upload_folder}")
+
+        # 檢查是否有編號的多檔案 (forecast_data_1.xlsx, forecast_data_2.xlsx, ...)
+        multi_files = []
+        for i in range(1, 100):
+            filepath = os.path.join(upload_folder, f'forecast_data_{i}.xlsx')
+            if os.path.exists(filepath):
+                multi_files.append(filepath)
+            else:
+                break
+
+        # 檢查是否有單一合併檔案
+        single_file = os.path.join(upload_folder, 'forecast_data.xlsx')
+        has_single_file = os.path.exists(single_file)
+
+        print(f"📁 多檔案數量: {len(multi_files)}, 單一檔案存在: {has_single_file}")
+
+        # 判斷模式：如果有多個編號檔案，就是多檔案分開模式
+        is_multi_file_mode = len(multi_files) > 1
+
+        if is_multi_file_mode:
+            forecast_files_list = multi_files
+            print(f"=== 多檔案清理模式：{len(forecast_files_list)} 個檔案 ===")
+        elif len(multi_files) == 1:
+            # 只有一個編號檔案，當作單檔案處理
+            forecast_file = multi_files[0]
+            print(f"=== 單檔案清理模式（編號檔案）：{forecast_file} ===")
+        elif has_single_file:
+            forecast_file = single_file
+            print(f"=== 單檔案清理模式（合併檔案）：{forecast_file} ===")
+        else:
+            log_process(user['id'], 'cleanup', 'failed', '請先上傳Forecast文件')
+            return jsonify({'success': False, 'message': '請先上傳Forecast文件'})
+
         # 多檔案分開模式
-        if merge_mode is False and forecast_files and len(forecast_files) > 0:
-            print(f"=== 多檔案清理模式：{len(forecast_files)} 個檔案 ===")
+        if is_multi_file_mode:
+            print(f"=== 多檔案清理模式：{len(forecast_files_list)} 個檔案 ===")
 
             total_cleaned_count = 0
             cleaned_files_info = []
 
-            for idx, file_info in enumerate(forecast_files):
-                file_path = file_info.get('path')
-                original_name = file_info.get('original_name') or file_info.get('name', f'forecast_{idx + 1}.xlsx')
+            for idx, file_path in enumerate(forecast_files_list):
+                original_name = os.path.basename(file_path)
 
                 if not file_path or not os.path.exists(file_path):
                     print(f"  ⚠️ 檔案不存在: {file_path}")
@@ -1678,7 +1807,7 @@ def process_forecast_cleanup():
                     })
                     continue
 
-                print(f"  清理檔案 {idx + 1}/{len(forecast_files)}: {original_name}")
+                print(f"  清理檔案 {idx + 1}/{len(forecast_files_list)}: {original_name}")
 
                 try:
                     # 使用openpyxl保持格式
@@ -1730,9 +1859,8 @@ def process_forecast_cleanup():
                         'message': str(file_error)
                     })
 
-            # 更新 session 中的清理後檔案路徑
+            # 統計成功清理的檔案數量（不存儲完整路徑到 session，避免 cookie 超限）
             cleaned_paths = [f for f in cleaned_files_info if f['status'] == 'success']
-            set_user_file_path('cleaned_forecast_files', cleaned_paths)
 
             duration = time.time() - start_time
             print(f"=== 多檔案清理完成：共清理 {total_cleaned_count} 個單元格 ===")
@@ -1822,6 +1950,16 @@ def process_erp_mapping():
         data = request.get_json(silent=True) or {}
         test_mode = data.get('test_mode', False)
         test_customer_id = data.get('customer_id')
+
+        # 獲取前端傳來的 upload_session_id
+        upload_session_id = data.get('upload_session_id')
+        print(f"📥 Mapping - 前端傳來的 session_id: {upload_session_id}")
+
+        # 如果有前端傳來的 session_id，先同步到 Flask session
+        if upload_session_id:
+            session['current_session_timestamp'] = upload_session_id
+            session.modified = True
+            print(f"📁 已同步 session_id 到 Flask session: {upload_session_id}")
 
         # 決定使用哪個用戶的 mapping 資料
         mapping_user_id = user['id']
@@ -2056,6 +2194,16 @@ def run_forecast():
         data = request.get_json(silent=True) or {}
         test_mode = data.get('test_mode', False)
 
+        # 獲取前端傳來的 upload_session_id
+        upload_session_id = data.get('upload_session_id')
+        print(f"📥 Forecast - 前端傳來的 session_id: {upload_session_id}")
+
+        # 如果有前端傳來的 session_id，先同步到 Flask session
+        if upload_session_id:
+            session['current_session_timestamp'] = upload_session_id
+            session.modified = True
+            print(f"📁 已同步 session_id 到 Flask session: {upload_session_id}")
+
         # 記錄開始處理
         log_activity(user['id'], user['username'], 'forecast_start',
                    f"開始 FORECAST 處理{' (測試模式)' if test_mode else ''}", get_client_ip(), request.headers.get('User-Agent'))
@@ -2063,90 +2211,236 @@ def run_forecast():
         # 從 session 獲取當前的 processed 資料夾
         processed_folder = session.get('current_processed_folder')
         if not processed_folder:
-            # 嘗試使用 session 資料夾路徑
-            processed_folder, _ = get_session_folder_path(user['id'], 'processed')
+            # 如果有前端傳來的 session_id，直接計算路徑
+            if upload_session_id:
+                processed_folder = os.path.join(PROCESSED_FOLDER, str(user['id']), upload_session_id)
+            else:
+                # 嘗試使用 session 資料夾路徑
+                processed_folder, _ = get_session_folder_path(user['id'], 'processed')
 
         if not processed_folder or not os.path.exists(processed_folder):
             log_process(user['id'], 'forecast', 'failed', '請先完成數據清理和整合')
             return jsonify({'success': False, 'message': '請先完成數據清理和整合'})
 
         # 檢查必要文件是否存在
-        cleaned_forecast = os.path.join(processed_folder, 'cleaned_forecast.xlsx')
         integrated_erp = os.path.join(processed_folder, 'integrated_erp.xlsx')
         integrated_transit = os.path.join(processed_folder, 'integrated_transit.xlsx')
-
-        if not os.path.exists(cleaned_forecast):
-            log_process(user['id'], 'forecast', 'failed', '請先完成Forecast數據清理')
-            return jsonify({'success': False, 'message': '請先完成Forecast數據清理'})
 
         if not os.path.exists(integrated_erp):
             log_process(user['id'], 'forecast', 'failed', '請先完成ERP數據整合')
             return jsonify({'success': False, 'message': '請先完成ERP數據整合'})
 
-        print("開始FORECAST處理...")
-        print(f"清理後的Forecast文件: {cleaned_forecast}")
-        print(f"整合後的ERP文件: {integrated_erp}")
-
         # 檢查是否有 Transit 文件
         has_transit = os.path.exists(integrated_transit)
-        if has_transit:
-            print(f"整合後的Transit文件: {integrated_transit}")
-        else:
-            print("⚠️ 未找到Transit文件，將跳過Transit數據處理")
+
+        # 根據 processed 資料夾中的檔案來判斷是否為多檔案模式（不依賴 session 標記）
+        # 掃描 cleaned_forecast_*.xlsx 檔案
+        print(f"🔍 Forecast - 掃描 processed 資料夾: {processed_folder}")
+
+        multi_cleaned_files = []
+        for i in range(1, 100):
+            filepath = os.path.join(processed_folder, f'cleaned_forecast_{i}.xlsx')
+            if os.path.exists(filepath):
+                multi_cleaned_files.append(filepath)
+            else:
+                break
+
+        single_cleaned_file = os.path.join(processed_folder, 'cleaned_forecast.xlsx')
+        has_single_cleaned = os.path.exists(single_cleaned_file)
+
+        print(f"📁 多檔案數量: {len(multi_cleaned_files)}, 單一清理檔案存在: {has_single_cleaned}")
+
+        # 判斷模式：如果有多個 cleaned_forecast_*.xlsx，就是多檔案模式
+        is_multi_file_mode = len(multi_cleaned_files) > 1
 
         # 執行FORECAST處理
         from ultra_fast_forecast_processor import UltraFastForecastProcessor
 
-        processor = UltraFastForecastProcessor(
-            forecast_file=cleaned_forecast,
-            erp_file=integrated_erp,
-            transit_file=integrated_transit if has_transit else None,
-            output_folder=processed_folder  # 傳遞輸出資料夾路徑
-        )
+        if not is_multi_file_mode:
+            # ===== 單檔案模式：處理單一 cleaned_forecast.xlsx 或 cleaned_forecast_1.xlsx =====
+            # 先檢查合併檔案，再檢查編號檔案
+            cleaned_forecast = os.path.join(processed_folder, 'cleaned_forecast.xlsx')
+            if not os.path.exists(cleaned_forecast):
+                # 嘗試找 cleaned_forecast_1.xlsx（只有一個檔案的分開模式）
+                cleaned_forecast = os.path.join(processed_folder, 'cleaned_forecast_1.xlsx')
 
-        success = processor.process_all_blocks()
+            if not os.path.exists(cleaned_forecast):
+                log_process(user['id'], 'forecast', 'failed', '請先完成Forecast數據清理')
+                return jsonify({'success': False, 'message': '請先完成Forecast數據清理'})
 
-        if success:
-            # 檢查結果文件是否真的生成了
-            result_file = os.path.join(processed_folder, 'forecast_result.xlsx')
-            if os.path.exists(result_file):
-                file_size = os.path.getsize(result_file)
+            print("開始FORECAST處理（單檔案模式）...")
+            print(f"清理後的Forecast文件: {cleaned_forecast}")
+            print(f"整合後的ERP文件: {integrated_erp}")
+            if has_transit:
+                print(f"整合後的Transit文件: {integrated_transit}")
+            else:
+                print("⚠️ 未找到Transit文件，將跳過Transit數據處理")
+
+            processor = UltraFastForecastProcessor(
+                forecast_file=cleaned_forecast,
+                erp_file=integrated_erp,
+                transit_file=integrated_transit if has_transit else None,
+                output_folder=processed_folder
+            )
+
+            success = processor.process_all_blocks()
+
+            if success:
+                result_file = os.path.join(processed_folder, 'forecast_result.xlsx')
+                if os.path.exists(result_file):
+                    file_size = os.path.getsize(result_file)
+                    duration = time.time() - start_time
+                    print(f"FORECAST處理完成，結果文件: {result_file} (大小: {file_size} bytes)")
+
+                    log_process(user['id'], 'forecast', 'success',
+                              f'ERP填入: {processor.total_filled}, Transit填入: {processor.total_transit_filled if has_transit else 0}', duration)
+                    log_activity(user['id'], user['username'], 'forecast_success',
+                               f"FORECAST 處理成功", get_client_ip(), request.headers.get('User-Agent'))
+
+                    result_data = {
+                        'success': True,
+                        'message': 'FORECAST處理完成',
+                        'file': 'forecast_result.xlsx',
+                        'erp_filled': processor.total_filled,
+                        'erp_skipped': processor.total_skipped,
+                        'file_size': file_size
+                    }
+
+                    if has_transit:
+                        result_data['transit_filled'] = processor.total_transit_filled
+                        result_data['transit_skipped'] = processor.total_transit_skipped
+
+                    return jsonify(result_data)
+                else:
+                    duration = time.time() - start_time
+                    print("錯誤：結果文件未生成")
+                    log_process(user['id'], 'forecast', 'failed', '結果文件未生成', duration)
+                    return jsonify({'success': False, 'message': 'FORECAST處理完成但結果文件未生成'})
+            else:
                 duration = time.time() - start_time
-                print(f"FORECAST處理完成，結果文件: {result_file} (大小: {file_size} bytes)")
+                print("FORECAST處理失敗")
+                log_process(user['id'], 'forecast', 'failed', '處理失敗', duration)
+                log_activity(user['id'], user['username'], 'forecast_failed',
+                           "FORECAST 處理失敗", get_client_ip(), request.headers.get('User-Agent'))
+                return jsonify({'success': False, 'message': 'FORECAST處理失敗'})
 
-                # 記錄處理成功
-                log_process(user['id'], 'forecast', 'success',
-                          f'ERP填入: {processor.total_filled}, Transit填入: {processor.total_transit_filled if has_transit else 0}', duration)
+        else:
+            # ===== 多檔案模式：分別處理每個 cleaned_forecast_N.xlsx =====
+            import glob
+
+            # 尋找所有 cleaned_forecast_*.xlsx 檔案
+            forecast_pattern = os.path.join(processed_folder, 'cleaned_forecast_*.xlsx')
+            forecast_files = sorted(glob.glob(forecast_pattern))
+
+            if not forecast_files:
+                log_process(user['id'], 'forecast', 'failed', '請先完成Forecast數據清理（未找到清理後的Forecast檔案）')
+                return jsonify({'success': False, 'message': '請先完成Forecast數據清理（未找到清理後的Forecast檔案）'})
+
+            print(f"開始FORECAST處理（多檔案模式）... 共 {len(forecast_files)} 個檔案")
+            print(f"整合後的ERP文件: {integrated_erp}")
+            if has_transit:
+                print(f"整合後的Transit文件: {integrated_transit}")
+            else:
+                print("⚠️ 未找到Transit文件，將跳過Transit數據處理")
+
+            # 統計資料
+            total_erp_filled = 0
+            total_erp_skipped = 0
+            total_transit_filled = 0
+            total_transit_skipped = 0
+            processed_files = []
+            failed_files = []
+
+            for idx, forecast_file in enumerate(forecast_files, 1):
+                # 從檔名提取編號，例如 cleaned_forecast_1.xlsx -> 1
+                file_basename = os.path.basename(forecast_file)
+                # 提取數字部分
+                import re
+                match = re.search(r'cleaned_forecast_(\d+)\.xlsx', file_basename)
+                if match:
+                    file_num = match.group(1)
+                else:
+                    file_num = str(idx)
+
+                output_filename = f'forecast_result_{file_num}.xlsx'
+
+                print(f"\n處理檔案 {idx}/{len(forecast_files)}: {file_basename}")
+
+                processor = UltraFastForecastProcessor(
+                    forecast_file=forecast_file,
+                    erp_file=integrated_erp,
+                    transit_file=integrated_transit if has_transit else None,
+                    output_folder=processed_folder,
+                    output_filename=output_filename  # 指定輸出檔名
+                )
+
+                success = processor.process_all_blocks()
+
+                if success:
+                    result_file = os.path.join(processed_folder, output_filename)
+                    if os.path.exists(result_file):
+                        file_size = os.path.getsize(result_file)
+                        print(f"✓ 檔案 {file_basename} 處理完成 (大小: {file_size} bytes)")
+
+                        # 累加統計
+                        total_erp_filled += processor.total_filled
+                        total_erp_skipped += processor.total_skipped
+                        if has_transit:
+                            total_transit_filled += processor.total_transit_filled
+                            total_transit_skipped += processor.total_transit_skipped
+
+                        processed_files.append({
+                            'input': file_basename,
+                            'output': output_filename,
+                            'erp_filled': processor.total_filled,
+                            'erp_skipped': processor.total_skipped,
+                            'transit_filled': processor.total_transit_filled if has_transit else 0,
+                            'transit_skipped': processor.total_transit_skipped if has_transit else 0,
+                            'file_size': file_size
+                        })
+                    else:
+                        print(f"✗ 檔案 {file_basename} 結果未生成")
+                        failed_files.append(file_basename)
+                else:
+                    print(f"✗ 檔案 {file_basename} 處理失敗")
+                    failed_files.append(file_basename)
+
+            duration = time.time() - start_time
+
+            if processed_files:
+                # 至少有一個檔案處理成功
+                success_count = len(processed_files)
+                fail_count = len(failed_files)
+
+                log_message = f'多檔案模式: {success_count}/{len(forecast_files)} 成功, ERP填入: {total_erp_filled}, Transit填入: {total_transit_filled}'
+                log_process(user['id'], 'forecast', 'success', log_message, duration)
                 log_activity(user['id'], user['username'], 'forecast_success',
-                           f"FORECAST 處理成功", get_client_ip(), request.headers.get('User-Agent'))
+                           f"FORECAST 多檔案處理成功 ({success_count}/{len(forecast_files)})", get_client_ip(), request.headers.get('User-Agent'))
 
                 result_data = {
                     'success': True,
-                    'message': 'FORECAST處理完成',
-                    'file': 'forecast_result.xlsx',
-                    'erp_filled': processor.total_filled,
-                    'erp_skipped': processor.total_skipped,
-                    'file_size': file_size
+                    'message': f'FORECAST處理完成（{success_count}/{len(forecast_files)} 個檔案成功）',
+                    'multi_file': True,
+                    'files': processed_files,
+                    'failed_files': failed_files,
+                    'total_erp_filled': total_erp_filled,
+                    'total_erp_skipped': total_erp_skipped,
+                    'file_count': len(forecast_files),
+                    'success_count': success_count,
+                    'fail_count': fail_count
                 }
 
-                # 如果有 Transit 數據，也返回 Transit 統計
                 if has_transit:
-                    result_data['transit_filled'] = processor.total_transit_filled
-                    result_data['transit_skipped'] = processor.total_transit_skipped
+                    result_data['total_transit_filled'] = total_transit_filled
+                    result_data['total_transit_skipped'] = total_transit_skipped
 
                 return jsonify(result_data)
             else:
-                duration = time.time() - start_time
-                print("錯誤：結果文件未生成")
-                log_process(user['id'], 'forecast', 'failed', '結果文件未生成', duration)
-                return jsonify({'success': False, 'message': 'FORECAST處理完成但結果文件未生成'})
-        else:
-            duration = time.time() - start_time
-            print("FORECAST處理失敗")
-            log_process(user['id'], 'forecast', 'failed', '處理失敗', duration)
-            log_activity(user['id'], user['username'], 'forecast_failed',
-                       "FORECAST 處理失敗", get_client_ip(), request.headers.get('User-Agent'))
-            return jsonify({'success': False, 'message': 'FORECAST處理失敗'})
+                # 所有檔案都處理失敗
+                log_process(user['id'], 'forecast', 'failed', f'多檔案模式: 全部 {len(forecast_files)} 個檔案處理失敗', duration)
+                log_activity(user['id'], user['username'], 'forecast_failed',
+                           "FORECAST 多檔案處理全部失敗", get_client_ip(), request.headers.get('User-Agent'))
+                return jsonify({'success': False, 'message': 'FORECAST處理失敗：所有檔案都處理失敗'})
 
     except Exception as e:
         duration = time.time() - start_time
