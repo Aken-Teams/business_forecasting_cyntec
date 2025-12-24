@@ -2575,7 +2575,74 @@ def run_forecast():
         # 執行FORECAST處理
         from ultra_fast_forecast_processor import UltraFastForecastProcessor
 
-        if not is_multi_file_mode:
+        # Pegatron (user_id=5) 使用專用處理器
+        is_pegatron = user['id'] == 5
+
+        if is_pegatron:
+            # ===== Pegatron 專用處理：使用 PegatronForecastProcessor =====
+            from pegatron_forecast_processor import PegatronForecastProcessor
+
+            cleaned_forecast = find_file_with_extensions(processed_folder, 'cleaned_forecast')
+            if not cleaned_forecast:
+                cleaned_forecast = find_file_with_extensions(processed_folder, 'cleaned_forecast_1')
+
+            if not cleaned_forecast:
+                log_process(user['id'], 'forecast', 'failed', '請先完成Forecast數據清理')
+                return jsonify({'success': False, 'message': '請先完成Forecast數據清理'})
+
+            # 決定輸出檔名（保持 .xls 格式）
+            input_ext = os.path.splitext(cleaned_forecast)[1].lower()
+            output_filename = 'forecast_result.xls' if input_ext == '.xls' else 'forecast_result.xlsx'
+
+            print("開始 Pegatron FORECAST 處理...")
+            print(f"清理後的Forecast文件: {cleaned_forecast}")
+            print(f"整合後的ERP文件: {integrated_erp}")
+            if has_transit:
+                print(f"整合後的Transit文件: {integrated_transit}")
+
+            processor = PegatronForecastProcessor(
+                forecast_file=cleaned_forecast,
+                erp_file=integrated_erp,
+                transit_file=integrated_transit if has_transit else None,
+                output_folder=processed_folder,
+                output_filename=output_filename
+            )
+
+            success = processor.process_all_blocks()
+
+            if success:
+                result_file = os.path.join(processed_folder, output_filename)
+                if os.path.exists(result_file):
+                    file_size = os.path.getsize(result_file)
+                    duration = time.time() - start_time
+                    print(f"Pegatron FORECAST處理完成，結果文件: {result_file} (大小: {file_size} bytes)")
+
+                    log_process(user['id'], 'forecast', 'success',
+                              f'ERP填入: {processor.total_filled}, Transit填入: {processor.total_transit_filled}', duration)
+                    log_activity(user['id'], user['username'], 'forecast_success',
+                               f"Pegatron FORECAST 處理成功", get_client_ip(), request.headers.get('User-Agent'))
+
+                    result_data = {
+                        'success': True,
+                        'message': 'FORECAST處理完成',
+                        'file': output_filename,
+                        'erp_filled': processor.total_filled,
+                        'erp_skipped': processor.total_skipped,
+                        'transit_filled': processor.total_transit_filled,
+                        'transit_skipped': processor.total_transit_skipped,
+                        'file_size': file_size
+                    }
+                    return jsonify(result_data)
+                else:
+                    duration = time.time() - start_time
+                    log_process(user['id'], 'forecast', 'failed', '結果文件未生成', duration)
+                    return jsonify({'success': False, 'message': 'FORECAST處理完成但結果文件未生成'})
+            else:
+                duration = time.time() - start_time
+                log_process(user['id'], 'forecast', 'failed', '處理失敗', duration)
+                return jsonify({'success': False, 'message': 'FORECAST處理失敗'})
+
+        elif not is_multi_file_mode:
             # ===== 單檔案模式：處理單一 cleaned_forecast.xlsx/.xls 或 cleaned_forecast_1.xlsx/.xls =====
             # 先檢查合併檔案，再檢查編號檔案（支援 .xlsx 和 .xls）
             cleaned_forecast = find_file_with_extensions(processed_folder, 'cleaned_forecast')

@@ -1,0 +1,391 @@
+# -*- coding: utf-8 -*-
+"""
+Pegatron Forecast Processor
+專門處理 Pegatron 的 Transit + ERP -> Forecast 邏輯
+使用 pywin32 COM 保留 .xls 格式和公式
+"""
+import pandas as pd
+import os
+import shutil
+import pythoncom
+from win32com import client as win32
+from datetime import datetime, timedelta
+
+
+class PegatronForecastProcessor:
+    """
+    Pegatron 專用 Forecast 處理器
+    - Transit 和 ERP 都填入 ETA QTY 行
+    - 使用 pywin32 COM 保留格式和公式
+    - 支援累加邏輯
+    """
+
+    def __init__(self, forecast_file, erp_file, transit_file=None, output_folder=None, output_filename=None):
+        self.forecast_file = forecast_file
+        self.erp_file = erp_file
+        self.transit_file = transit_file
+        self.output_folder = output_folder
+        self.output_filename = output_filename or "forecast_result.xls"
+
+        # 統計資料
+        self.total_filled = 0
+        self.total_skipped = 0
+        self.total_transit_filled = 0
+        self.total_transit_skipped = 0
+
+    def get_week_end_by_breakpoint(self, schedule_date, breakpoint_text):
+        """
+        根據排程出貨日期和斷點計算該斷點週的結束日
+        斷點就是週的結束日
+        """
+        breakpoint_map = {
+            '週一': 0, '週二': 1, '週三': 2, '週四': 3,
+            '週五': 4, '週六': 5, '週日': 6,
+            '禮拜一': 0, '禮拜二': 1, '禮拜三': 2, '禮拜四': 3,
+            '禮拜五': 4, '禮拜六': 5, '禮拜日': 6,
+        }
+
+        breakpoint_weekday = breakpoint_map.get(breakpoint_text, 2)  # 預設週三
+        current_weekday = schedule_date.weekday()
+
+        if current_weekday <= breakpoint_weekday:
+            days_to_breakpoint = breakpoint_weekday - current_weekday
+        else:
+            days_to_breakpoint = 7 - (current_weekday - breakpoint_weekday)
+
+        week_end = schedule_date + timedelta(days=days_to_breakpoint)
+        return week_end
+
+    def calculate_erp_eta_target_date(self, week_end, eta_text):
+        """
+        根據 ETA 文字和斷點週結束日計算目標日期
+        ETA 格式: 本週X, 下週X, 下下週X
+        """
+        eta_weekday_map = {
+            '一': 0, '二': 1, '三': 2, '四': 3,
+            '五': 4, '六': 5, '日': 6, '天': 6,
+        }
+
+        if not eta_text or pd.isna(eta_text):
+            return None
+
+        eta_text = str(eta_text).strip()
+
+        if '下下週' in eta_text or '下下周' in eta_text:
+            weeks_offset = 2
+            weekday_char = eta_text.replace('下下週', '').replace('下下周', '').strip()
+        elif '下週' in eta_text or '下周' in eta_text:
+            weeks_offset = 1
+            weekday_char = eta_text.replace('下週', '').replace('下周', '').strip()
+        elif '本週' in eta_text or '本周' in eta_text:
+            weeks_offset = 0
+            weekday_char = eta_text.replace('本週', '').replace('本周', '').strip()
+        else:
+            return None
+
+        target_weekday = eta_weekday_map.get(weekday_char, 1)  # 預設週二
+        week_end_weekday = week_end.weekday()
+
+        days_diff = target_weekday - week_end_weekday
+        target_date = week_end + timedelta(days=7 * weeks_offset + days_diff)
+
+        return target_date
+
+    def find_week_column(self, target_date, date_columns):
+        """
+        找到目標日期所在週的欄位
+        Forecast 日期已經是週一
+        """
+        if isinstance(target_date, datetime):
+            target_date = target_date.date()
+
+        days_since_monday = target_date.weekday()
+        week_monday = target_date - timedelta(days=days_since_monday)
+
+        if week_monday in date_columns:
+            return date_columns[week_monday]
+
+        for week_start, col_idx in date_columns.items():
+            week_end = week_start + timedelta(days=6)
+            if week_start <= target_date <= week_end:
+                return col_idx
+
+        return None
+
+    def process_all_blocks(self):
+        """主處理函數"""
+        try:
+            print("=" * 70)
+            print("Pegatron Forecast Processor - Transit + ERP -> ETA QTY")
+            print("=" * 70)
+
+            # 1. 讀取資料
+            # 根據檔案格式選擇引擎
+            forecast_ext = os.path.splitext(self.forecast_file)[1].lower()
+            if forecast_ext == '.xls':
+                forecast_df = pd.read_excel(self.forecast_file, header=None, engine='xlrd')
+            else:
+                forecast_df = pd.read_excel(self.forecast_file, header=None)
+            print(f"Forecast 行數: {len(forecast_df)}, 欄數: {len(forecast_df.columns)}")
+
+            erp_df = pd.read_excel(self.erp_file)
+            print(f"ERP 行數: {len(erp_df)}")
+
+            transit_df = None
+            if self.transit_file and os.path.exists(self.transit_file):
+                transit_df = pd.read_excel(self.transit_file)
+                print(f"Transit 行數: {len(transit_df)}")
+
+            # 2. 建立 Forecast 區塊結構
+            # F+G 欄位 = Line 客戶採購單號, I 欄位 (row+1) = Ordered Item
+            forecast_blocks = []
+            row_idx = 2
+            while row_idx < len(forecast_df):
+                m_val = forecast_df.iloc[row_idx, 12] if pd.notna(forecast_df.iloc[row_idx, 12]) else ''
+                if m_val == 'WEEK#':
+                    f_val = str(forecast_df.iloc[row_idx, 5]).strip() if pd.notna(forecast_df.iloc[row_idx, 5]) else ''
+                    g_val = str(forecast_df.iloc[row_idx, 6]).strip() if pd.notna(forecast_df.iloc[row_idx, 6]) else ''
+                    line_po = f"{f_val}-{g_val}" if f_val and g_val else ''
+
+                    ordered_item = ''
+                    if row_idx + 1 < len(forecast_df):
+                        ordered_item = str(forecast_df.iloc[row_idx + 1, 8]).strip() if pd.notna(forecast_df.iloc[row_idx + 1, 8]) else ''
+
+                    eta_qty_row = row_idx + 4  # ETA QTY 行
+
+                    forecast_blocks.append({
+                        'start_row': row_idx,
+                        'line_po': line_po,
+                        'ordered_item': ordered_item,
+                        'eta_qty_row': eta_qty_row + 1,  # Excel 1-based
+                    })
+                    row_idx += 8
+                else:
+                    row_idx += 1
+
+            print(f"\n找到 {len(forecast_blocks)} 個 Forecast 區塊")
+
+            # 3. 取得日期欄位對應
+            date_columns = {}
+            for col_idx in range(14, len(forecast_df.columns)):
+                date_val = forecast_df.iloc[1, col_idx]
+                if pd.notna(date_val):
+                    if isinstance(date_val, str):
+                        try:
+                            date_obj = pd.to_datetime(date_val)
+                            date_columns[date_obj.date()] = col_idx + 1
+                        except:
+                            pass
+                    elif isinstance(date_val, (datetime, pd.Timestamp)):
+                        date_columns[date_val.date()] = col_idx + 1
+
+            print(f"日期欄位對應: {len(date_columns)} 個日期")
+
+            all_updates = []
+
+            # 4. 處理 Transit 資料
+            if transit_df is not None:
+                print("\n=== 處理 Transit 資料 ===")
+                transit_updates = self._process_transit(transit_df, forecast_blocks, date_columns)
+                all_updates.extend(transit_updates)
+                self.total_transit_filled = len(transit_updates)
+                print(f"Transit 更新筆數: {self.total_transit_filled}")
+
+            # 5. 處理 ERP 資料
+            print("\n=== 處理 ERP 資料 ===")
+            erp_updates = self._process_erp(erp_df, forecast_blocks, date_columns)
+            all_updates.extend(erp_updates)
+            self.total_filled = len(erp_updates)
+            print(f"ERP 更新筆數: {self.total_filled}")
+
+            if not all_updates:
+                print("\n沒有需要更新的資料")
+                return True
+
+            # 6. 使用 COM 寫入 Excel
+            print(f"\n=== 使用 COM 更新 {len(all_updates)} 個儲存格 ===")
+            success = self._write_to_excel(all_updates)
+
+            if success:
+                print("\n" + "=" * 50)
+                print("處理完成")
+                print("=" * 50)
+                print(f"Transit 更新: {self.total_transit_filled} 筆")
+                print(f"ERP 更新: {self.total_filled} 筆")
+
+            return success
+
+        except Exception as e:
+            print(f"處理失敗: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def _process_transit(self, transit_df, forecast_blocks, date_columns):
+        """處理 Transit 資料"""
+        updates = []
+
+        # 檢查必要欄位
+        if 'Line 客戶採購單號' not in transit_df.columns:
+            print("Transit 缺少 'Line 客戶採購單號' 欄位")
+            return updates
+
+        transit_with_line = transit_df[transit_df['Line 客戶採購單號'].notna()]
+        print(f"有 Line 客戶採購單號 的在途記錄: {len(transit_with_line)}")
+
+        for idx, transit_row in transit_with_line.iterrows():
+            transit_line_po = str(transit_row['Line 客戶採購單號']).strip()
+            transit_ordered_item = str(transit_row['Ordered Item']).strip() if 'Ordered Item' in transit_row and pd.notna(transit_row['Ordered Item']) else ''
+            transit_qty = transit_row['Qty'] if 'Qty' in transit_row and pd.notna(transit_row['Qty']) else 0
+            transit_eta = transit_row['ETA'] if 'ETA' in transit_row else None
+
+            if not transit_line_po or not transit_ordered_item or transit_qty == 0:
+                continue
+
+            # 找到匹配的 Forecast 區塊
+            matched_block = None
+            for block in forecast_blocks:
+                if block['line_po'] == transit_line_po and block['ordered_item'] == transit_ordered_item:
+                    matched_block = block
+                    break
+
+            if matched_block and pd.notna(transit_eta):
+                eta_date = pd.to_datetime(transit_eta).date()
+                days_since_monday = eta_date.weekday()
+                week_start = eta_date - timedelta(days=days_since_monday)
+
+                if week_start in date_columns:
+                    excel_col = date_columns[week_start]
+                    eta_qty_value = transit_qty * 1000
+
+                    print(f"  Transit: {transit_line_po}, {transit_ordered_item} -> Row {matched_block['eta_qty_row']}, Col {excel_col}, 值={eta_qty_value}")
+                    updates.append((matched_block['eta_qty_row'], excel_col, eta_qty_value))
+
+        return updates
+
+    def _process_erp(self, erp_df, forecast_blocks, date_columns):
+        """處理 ERP 資料"""
+        updates = []
+
+        # 檢查必要欄位
+        required_cols = ['客戶需求地區', 'Line 客戶採購單號', '客戶料號', '淨需求', '排程出貨日期', '排程出貨日期斷點', 'ETA']
+        missing_cols = [c for c in required_cols if c not in erp_df.columns]
+        if missing_cols:
+            print(f"ERP 缺少欄位: {missing_cols}")
+            return updates
+
+        erp_with_mapping = erp_df[erp_df['客戶需求地區'].notna() & (erp_df['客戶需求地區'] != '')]
+        print(f"有 mapping 的 ERP 記錄: {len(erp_with_mapping)}")
+
+        for idx, erp_row in erp_with_mapping.iterrows():
+            erp_line_po = str(erp_row['Line 客戶採購單號']).strip() if pd.notna(erp_row['Line 客戶採購單號']) else ''
+            erp_pn = str(erp_row['客戶料號']).strip() if pd.notna(erp_row['客戶料號']) else ''
+            erp_qty = erp_row['淨需求'] if pd.notna(erp_row['淨需求']) else 0
+            erp_schedule_date = erp_row['排程出貨日期']
+            erp_breakpoint = str(erp_row['排程出貨日期斷點']).strip() if pd.notna(erp_row['排程出貨日期斷點']) else ''
+            erp_eta = str(erp_row['ETA']).strip() if pd.notna(erp_row['ETA']) else ''
+
+            if not erp_line_po or not erp_pn or erp_qty == 0:
+                continue
+
+            # 找到匹配的 Forecast 區塊
+            matched_block = None
+            for block in forecast_blocks:
+                if block['line_po'] == erp_line_po and block['ordered_item'] == erp_pn:
+                    matched_block = block
+                    break
+
+            if not matched_block:
+                continue
+
+            if pd.isna(erp_schedule_date) or not erp_breakpoint or not erp_eta:
+                continue
+
+            schedule_date = pd.to_datetime(erp_schedule_date)
+            week_end = self.get_week_end_by_breakpoint(schedule_date, erp_breakpoint)
+            target_date = self.calculate_erp_eta_target_date(week_end, erp_eta)
+
+            if target_date is None:
+                continue
+
+            excel_col = self.find_week_column(target_date, date_columns)
+
+            if excel_col is None:
+                continue
+
+            forecast_value = erp_qty * 1000
+
+            print(f"  ERP: {erp_line_po}, {erp_pn} -> Row {matched_block['eta_qty_row']}, Col {excel_col}, 值={forecast_value}")
+            updates.append((matched_block['eta_qty_row'], excel_col, forecast_value))
+
+        return updates
+
+    def _write_to_excel(self, updates):
+        """使用 COM 寫入 Excel，保留格式和公式"""
+        # 決定輸出路徑
+        if self.output_folder:
+            output_path = os.path.join(self.output_folder, self.output_filename)
+        else:
+            output_path = self.output_filename
+
+        # 複製原始檔案
+        shutil.copy2(self.forecast_file, output_path)
+        abs_path = os.path.abspath(output_path)
+
+        pythoncom.CoInitialize()
+        excel = None
+        wb = None
+
+        try:
+            excel = win32.DispatchEx('Excel.Application')
+            excel.Visible = False
+            excel.DisplayAlerts = False
+            excel.ScreenUpdating = False
+
+            wb = excel.Workbooks.Open(abs_path)
+            ws = wb.Sheets(1)
+
+            # 合併相同位置的值（累加）
+            update_dict = {}
+            for row, col, value in updates:
+                key = (row, col)
+                if key in update_dict:
+                    update_dict[key] += value
+                else:
+                    update_dict[key] = value
+
+            # 更新儲存格
+            for (row, col), value in update_dict.items():
+                current_val = ws.Cells(row, col).Value
+                if current_val is None or current_val == '' or current_val == 0:
+                    ws.Cells(row, col).Value = value
+                else:
+                    ws.Cells(row, col).Value = float(current_val) + value
+                print(f"  更新 Row {row}, Col {col} = {ws.Cells(row, col).Value}")
+
+            # 保存
+            wb.SaveCopyAs(abs_path + ".tmp")
+            wb.Close(SaveChanges=False)
+            wb = None
+
+            if os.path.exists(abs_path):
+                os.remove(abs_path)
+            os.rename(abs_path + ".tmp", abs_path)
+
+            print(f"\n已輸出到: {output_path}")
+            return True
+
+        except Exception as e:
+            print(f"寫入 Excel 失敗: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+        finally:
+            try:
+                if wb:
+                    wb.Close(SaveChanges=False)
+                if excel:
+                    excel.Quit()
+            except:
+                pass
+            pythoncom.CoUninitialize()
