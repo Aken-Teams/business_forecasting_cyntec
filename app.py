@@ -310,7 +310,7 @@ def validate_transit_format(uploaded_file_path, username=None):
 def validate_forecast_format(uploaded_file_path, username=None):
     """
     驗證 Forecast 文件格式
-    檢查整體結構是否與範本一致（不比對具體數據和日期）
+    只檢查欄位數量是否與範本一致（不比對具體數據內容，因為資料會變動）
     username: 用戶名稱，用於指定客戶專屬模板目錄
     """
     try:
@@ -322,61 +322,13 @@ def validate_forecast_format(uploaded_file_path, username=None):
         # 讀取上傳的文件（不使用 header）
         uploaded_df = pd.read_excel(uploaded_file_path, nrows=20, header=None)
 
-        # 1. 檢查欄位數量是否一致
+        # 只檢查欄位數量是否一致（不比對資料內容，因為資料會變動）
         if len(uploaded_df.columns) != len(template_df.columns):
             return False, f'欄位數量不符：預期 {len(template_df.columns)} 個欄位，實際 {len(uploaded_df.columns)} 個欄位', []
 
-        # 2. 檢查固定位置的標識符
-        structure_checks = []
-
-        # 檢查 A1 是否為 "筆數"
-        a1_template = str(template_df.iloc[0, 0]).strip() if pd.notna(template_df.iloc[0, 0]) else ''
-        a1_uploaded = str(uploaded_df.iloc[0, 0]).strip() if pd.notna(uploaded_df.iloc[0, 0]) else ''
-        if a1_template != a1_uploaded:
-            structure_checks.append(f"A1 欄位: 預期「{a1_template}」，實際「{a1_uploaded}」")
-
-        # 檢查 A2 是否為 "需求週數"
-        a2_template = str(template_df.iloc[1, 0]).strip() if pd.notna(template_df.iloc[1, 0]) else ''
-        a2_uploaded = str(uploaded_df.iloc[1, 0]).strip() if pd.notna(uploaded_df.iloc[1, 0]) else ''
-        if a2_template != a2_uploaded:
-            structure_checks.append(f"A2 欄位: 預期「{a2_template}」，實際「{a2_uploaded}」")
-
-        # 檢查 A3 是否為 "客戶名稱"
-        a3_template = str(template_df.iloc[2, 0]).strip() if pd.notna(template_df.iloc[2, 0]) else ''
-        a3_uploaded = str(uploaded_df.iloc[2, 0]).strip() if pd.notna(uploaded_df.iloc[2, 0]) else ''
-        if a3_template != a3_uploaded:
-            structure_checks.append(f"A3 欄位: 預期「{a3_template}」，實際「{a3_uploaded}」")
-
-        # 檢查 A4 是否為 "客戶料號"
-        a4_template = str(template_df.iloc[3, 0]).strip() if pd.notna(template_df.iloc[3, 0]) else ''
-        a4_uploaded = str(uploaded_df.iloc[3, 0]).strip() if pd.notna(uploaded_df.iloc[3, 0]) else ''
-        if a4_template != a4_uploaded:
-            structure_checks.append(f"A4 欄位: 預期「{a4_template}」，實際「{a4_uploaded}」")
-
-        # 檢查 C1 是否為 "Web"
-        c1_template = str(template_df.iloc[0, 2]).strip() if pd.notna(template_df.iloc[0, 2]) else ''
-        c1_uploaded = str(uploaded_df.iloc[0, 2]).strip() if pd.notna(uploaded_df.iloc[0, 2]) else ''
-        if c1_template != c1_uploaded:
-            structure_checks.append(f"C1 欄位: 預期「{c1_template}」，實際「{c1_uploaded}」")
-
-        # 檢查第4行的標題結構（B4, C4, D4）
-        b4_template = str(template_df.iloc[3, 1]).strip() if pd.notna(template_df.iloc[3, 1]) else ''
-        b4_uploaded = str(uploaded_df.iloc[3, 1]).strip() if pd.notna(uploaded_df.iloc[3, 1]) else ''
-        if b4_template != b4_uploaded:
-            structure_checks.append(f"B4 欄位: 預期「{b4_template}」，實際「{b4_uploaded}」")
-
-        c4_template = str(template_df.iloc[3, 2]).strip() if pd.notna(template_df.iloc[3, 2]) else ''
-        c4_uploaded = str(uploaded_df.iloc[3, 2]).strip() if pd.notna(uploaded_df.iloc[3, 2]) else ''
-        if c4_template != c4_uploaded:
-            structure_checks.append(f"C4 欄位: 預期「{c4_template}」，實際「{c4_uploaded}」")
-
-        d4_template = str(template_df.iloc[3, 3]).strip() if pd.notna(template_df.iloc[3, 3]) else ''
-        d4_uploaded = str(uploaded_df.iloc[3, 3]).strip() if pd.notna(uploaded_df.iloc[3, 3]) else ''
-        if d4_template != d4_uploaded:
-            structure_checks.append(f"D4 欄位: 預期「{d4_template}」，實際「{d4_uploaded}」")
-
-        if structure_checks:
-            return False, 'Forecast 文件結構不符', structure_checks
+        # 檢查列數是否足夠（至少要有基本的資料結構）
+        if len(uploaded_df) < 4:
+            return False, f'資料列數不足：至少需要 4 列，實際只有 {len(uploaded_df)} 列', []
 
         return True, 'Forecast 文件格式驗證通過', []
 

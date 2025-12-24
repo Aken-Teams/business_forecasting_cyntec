@@ -8,7 +8,8 @@
       "Bash(cd:*)",
       "Bash(tree:*)",
       "Bash(ls:*)",
-      "Bash(xargs ls:*)"
+      "Bash(xargs ls:*)",
+      "Bash(git -C \"d:\\\\github\\\\business_forecasting_pc\" log --oneline -30)"
     ]
   }
 }

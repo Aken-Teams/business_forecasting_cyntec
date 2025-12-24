@@ -89,7 +89,7 @@ def init_database():
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     user_id INT,
                     file_type ENUM('erp', 'forecast', 'transit') NOT NULL,
-                    original_filename VARCHAR(255),
+                    original_filename VARCHAR(2000),
                     file_size BIGINT,
                     row_count INT,
                     column_count INT,
@@ -239,6 +239,17 @@ def init_database():
                 quanta_user = cursor.fetchone()
                 if quanta_user:
                     init_default_processing_rules(cursor, quanta_user['id'])
+
+            # 升級 upload_records.original_filename 欄位長度（支援多檔案上傳）
+            try:
+                cursor.execute("""
+                    ALTER TABLE upload_records
+                    MODIFY COLUMN original_filename VARCHAR(2000)
+                """)
+                print("✅ 已升級 upload_records.original_filename 欄位長度")
+            except Exception as alter_error:
+                # 可能已經是正確長度，忽略錯誤
+                pass
 
             connection.commit()
             print("✅ 資料庫表格初始化完成")
