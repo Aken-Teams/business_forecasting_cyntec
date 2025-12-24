@@ -19,7 +19,7 @@ load_dotenv()
 from database import (
     get_db_connection, init_database, create_default_users,
     verify_user, log_activity, log_upload, log_process, get_user_by_id,
-    get_customer_mappings, save_customer_mappings, has_customer_mappings,
+    get_customer_mappings, get_customer_mappings_raw, save_customer_mappings, has_customer_mappings,
     # IT/Admin 管理介面函數
     get_upload_records, get_process_records, get_activity_logs_filtered,
     get_all_customer_mappings, get_users_with_company, get_all_users,
@@ -2202,23 +2202,107 @@ def process_erp_mapping():
                 print(f"   - 範例日期: {sample_dates}")
 
             print("✅ 排程出貨日期欄位已標準化")
-        
+
         # 找到客戶簡稱欄位
         customer_col = None
         for col in erp_df.columns:
             if '客戶' in str(col) and '簡稱' in str(col):
                 customer_col = col
                 break
-        
+
         if customer_col is None:
             return jsonify({'success': False, 'message': 'ERP文件找不到客戶簡稱欄位'})
-        
-        # 應用映射到 ERP
-        erp_df['客戶需求地區'] = erp_df[customer_col].map(mapping_data.get('regions', {}))
-        erp_df['排程出貨日期斷點'] = erp_df[customer_col].map(mapping_data.get('schedule_breakpoints', {}))
-        erp_df['ETD'] = erp_df[customer_col].map(mapping_data.get('etd', {}))
-        erp_df['ETA'] = erp_df[customer_col].map(mapping_data.get('eta', {}))
-        
+
+        # 判斷是否為 pegatron 用戶（使用不同的映射邏輯）
+        is_pegatron = user['username'].lower() == 'pegatron'
+
+        if is_pegatron:
+            # === Pegatron 專用映射邏輯 ===
+            # ERP 匹配規則: D欄(客戶簡稱) + M欄(Line 客戶採購單號)前4字 + AG欄(送貨地點)
+            print("🔧 使用 Pegatron 專用映射邏輯...")
+
+            # 取得原始 mapping 記錄
+            mapping_records = get_customer_mappings_raw(mapping_user_id)
+            print(f"   取得 {len(mapping_records)} 筆 mapping 記錄")
+
+            # 建立兩種 lookup:
+            # 1. 完整匹配: (customer_name, region, delivery_location) -> mapping values
+            # 2. 簡化匹配: (customer_name, region) -> mapping values (當 delivery_location 為空時)
+            pegatron_mapping_lookup = {}  # 完整 3 欄位匹配
+            pegatron_mapping_lookup_simple = {}  # 簡化 2 欄位匹配（不需要送貨地點）
+            for m in mapping_records:
+                customer_name = str(m['customer_name']).strip() if m['customer_name'] else ''
+                region = str(m['region']).strip() if m['region'] else ''
+                delivery_location = str(m['delivery_location']).strip() if m['delivery_location'] else ''
+
+                mapping_values = {
+                    'region': region,
+                    'schedule_breakpoint': str(m['schedule_breakpoint']).strip() if m['schedule_breakpoint'] else '',
+                    'etd': str(m['etd']).strip() if m['etd'] else '',
+                    'eta': str(m['eta']).strip() if m['eta'] else ''
+                }
+
+                if delivery_location:
+                    # 有送貨地點的用完整 3 欄位匹配
+                    key = (customer_name, region, delivery_location)
+                    pegatron_mapping_lookup[key] = mapping_values
+                else:
+                    # 沒有送貨地點的用簡化 2 欄位匹配
+                    key = (customer_name, region)
+                    pegatron_mapping_lookup_simple[key] = mapping_values
+
+            print(f"   建立 {len(pegatron_mapping_lookup)} 筆完整匹配 + {len(pegatron_mapping_lookup_simple)} 筆簡化匹配")
+
+            # 找到必要欄位
+            # D欄(索引3): 客戶簡稱 - 已找到
+            # M欄(索引12): Line 客戶採購單號
+            # AG欄(索引32): 送貨地點
+            line_po_col = erp_df.columns[12] if len(erp_df.columns) > 12 else None
+            delivery_col = erp_df.columns[32] if len(erp_df.columns) > 32 else None
+
+            print(f"   客戶簡稱欄位: {customer_col}")
+            print(f"   Line 客戶採購單號欄位: {line_po_col}")
+            print(f"   送貨地點欄位: {delivery_col}")
+
+            if not line_po_col or not delivery_col:
+                return jsonify({'success': False, 'message': 'Pegatron ERP文件欄位不足，需要 M 欄和 AG 欄'})
+
+            # 應用 Pegatron 映射
+            def get_pegatron_mapping(row, field):
+                customer = str(row[customer_col]).strip() if pd.notna(row[customer_col]) else ''
+                line_po = str(row[line_po_col]).strip() if pd.notna(row[line_po_col]) else ''
+                delivery = str(row[delivery_col]).strip() if pd.notna(row[delivery_col]) else ''
+
+                # 取 Line 客戶採購單號的前 4 字作為 region key
+                region_key = line_po[:4] if len(line_po) >= 4 else line_po
+
+                # 先嘗試完整 3 欄位匹配
+                key_full = (customer, region_key, delivery)
+                mapping = pegatron_mapping_lookup.get(key_full)
+
+                # 如果完整匹配失敗，嘗試簡化 2 欄位匹配（不需要送貨地點）
+                if not mapping:
+                    key_simple = (customer, region_key)
+                    mapping = pegatron_mapping_lookup_simple.get(key_simple, {})
+
+                return mapping.get(field, '') if mapping else ''
+
+            erp_df['客戶需求地區'] = erp_df.apply(lambda row: get_pegatron_mapping(row, 'region'), axis=1)
+            erp_df['排程出貨日期斷點'] = erp_df.apply(lambda row: get_pegatron_mapping(row, 'schedule_breakpoint'), axis=1)
+            erp_df['ETD'] = erp_df.apply(lambda row: get_pegatron_mapping(row, 'etd'), axis=1)
+            erp_df['ETA'] = erp_df.apply(lambda row: get_pegatron_mapping(row, 'eta'), axis=1)
+
+            # 統計匹配結果
+            matched_count = (erp_df['客戶需求地區'] != '').sum()
+            print(f"   ✅ Pegatron ERP 映射完成: {matched_count}/{len(erp_df)} 行匹配成功")
+        else:
+            # === 原有映射邏輯（Quanta 等其他客戶）===
+            # 應用映射到 ERP（使用客戶簡稱單欄位匹配）
+            erp_df['客戶需求地區'] = erp_df[customer_col].map(mapping_data.get('regions', {}))
+            erp_df['排程出貨日期斷點'] = erp_df[customer_col].map(mapping_data.get('schedule_breakpoints', {}))
+            erp_df['ETD'] = erp_df[customer_col].map(mapping_data.get('etd', {}))
+            erp_df['ETA'] = erp_df[customer_col].map(mapping_data.get('eta', {}))
+
         # 按排程出貨日期排序
         if '排程出貨日期' in erp_df.columns:
             erp_df = erp_df.sort_values('排程出貨日期')
@@ -2239,70 +2323,136 @@ def process_erp_mapping():
         print("開始整合在途數據...")
         transit_df = pd.read_excel(transit_file)
 
-        # 建立 mapping 字典（從 mapping_data 轉換格式）
-        mapping_dict = {}
-        if mapping_data:
-            # 從資料庫格式的 mapping_data 建立字典
-            all_customers = set()
-            all_customers.update(mapping_data.get('regions', {}).keys())
-            all_customers.update(mapping_data.get('schedule_breakpoints', {}).keys())
-            all_customers.update(mapping_data.get('etd', {}).keys())
-            all_customers.update(mapping_data.get('eta', {}).keys())
+        if is_pegatron:
+            # === Pegatron 專用 Transit 映射邏輯 ===
+            # Transit 匹配規則: L欄(Line 客戶採購單號) + E欄(Ordered Item) 匹配 ERP 的 M欄 + N欄
+            print("🔧 使用 Pegatron 專用 Transit 映射邏輯...")
 
-            for customer in all_customers:
-                mapping_dict[customer] = {
-                    'region': mapping_data.get('regions', {}).get(customer, ''),
-                    'schedule_breakpoint': mapping_data.get('schedule_breakpoints', {}).get(customer, ''),
-                    'etd': mapping_data.get('etd', {}).get(customer, ''),
-                    'eta': mapping_data.get('eta', {}).get(customer, '')
-                }
-            print(f"從資料庫/JSON 建立 mapping 字典，共 {len(mapping_dict)} 個客戶")
-        elif os.path.exists(mapping_excel_file):
-            # 向後相容：從 Excel 讀取 mapping
-            mapping_excel_df = pd.read_excel(mapping_excel_file)
+            # 找到 Transit 必要欄位
+            # E欄(索引4): Ordered Item
+            # L欄(索引11): Line 客戶採購單號
+            transit_ordered_item_col = transit_df.columns[4] if len(transit_df.columns) > 4 else None
+            transit_line_po_col = transit_df.columns[11] if len(transit_df.columns) > 11 else None
 
-            # mapping 表的欄位結構
-            mapping_customer_col = mapping_excel_df.columns[0]  # A欄位
-            mapping_region_col = mapping_excel_df.columns[1] if len(mapping_excel_df.columns) > 1 else None
-            mapping_schedule_col = mapping_excel_df.columns[3] if len(mapping_excel_df.columns) > 3 else None
-            mapping_etd_col = mapping_excel_df.columns[4] if len(mapping_excel_df.columns) > 4 else None
-            mapping_eta_col = mapping_excel_df.columns[5] if len(mapping_excel_df.columns) > 5 else None
+            print(f"   Transit Ordered Item 欄位: {transit_ordered_item_col}")
+            print(f"   Transit Line 客戶採購單號欄位: {transit_line_po_col}")
 
-            for idx, row in mapping_excel_df.iterrows():
-                customer = str(row[mapping_customer_col])
-                mapping_dict[customer] = {
-                    'region': str(row[mapping_region_col]) if mapping_region_col and pd.notna(row[mapping_region_col]) else '',
-                    'schedule_breakpoint': str(row[mapping_schedule_col]) if mapping_schedule_col and pd.notna(row[mapping_schedule_col]) else '',
-                    'etd': str(row[mapping_etd_col]) if mapping_etd_col and pd.notna(row[mapping_etd_col]) else '',
-                    'eta': str(row[mapping_eta_col]) if mapping_eta_col and pd.notna(row[mapping_eta_col]) else ''
-                }
-            print(f"從 Excel 建立 mapping 字典，共 {len(mapping_dict)} 個客戶")
-        
-        # transit_data 的 E 欄位（索引4）與 mapping 表 A 欄位比對
-        if len(transit_df.columns) < 5:
-            return jsonify({'success': False, 'message': '在途文件欄位不足，需要至少 E 欄位'})
-        
-        transit_customer_col = transit_df.columns[4]  # E欄位
-        print(f"在途文件 E 欄位名稱: {transit_customer_col}")
-        
-        # 新版在途文件結構（12欄位）：
-        # 索引0-11: Tw, Ship Number, Invoice Date, Location, 客戶簡稱, Ordered Item, Pj Item, Qty, ETA, Stauts, 集團客戶, 週別
-        # 整合後會新增4個欄位到末尾，變成索引12-15：客戶需求地區, 排程出貨日期斷點, ETD, ETA
-        
-        # 應用映射到 Transit（新增到文件末尾）
-        transit_df['客戶需求地區'] = transit_df[transit_customer_col].apply(
-            lambda x: mapping_dict.get(str(x), {}).get('region', '') if pd.notna(x) else ''
-        )
-        transit_df['排程出貨日期斷點'] = transit_df[transit_customer_col].apply(
-            lambda x: mapping_dict.get(str(x), {}).get('schedule_breakpoint', '') if pd.notna(x) else ''
-        )
-        transit_df['ETD'] = transit_df[transit_customer_col].apply(
-            lambda x: mapping_dict.get(str(x), {}).get('etd', '') if pd.notna(x) else ''
-        )
-        transit_df['ETA_mapping'] = transit_df[transit_customer_col].apply(
-            lambda x: mapping_dict.get(str(x), {}).get('eta', '') if pd.notna(x) else ''
-        )
-        
+            # ERP 欄位
+            # M欄(索引12): Line 客戶採購單號
+            # N欄(索引13): 客戶料號
+            erp_line_po_col = erp_df.columns[12] if len(erp_df.columns) > 12 else None
+            erp_pn_col = erp_df.columns[13] if len(erp_df.columns) > 13 else None
+
+            print(f"   ERP Line 客戶採購單號欄位: {erp_line_po_col}")
+            print(f"   ERP 客戶料號欄位: {erp_pn_col}")
+
+            if not transit_ordered_item_col or not transit_line_po_col:
+                return jsonify({'success': False, 'message': 'Pegatron Transit 文件欄位不足，需要 E 欄和 L 欄'})
+
+            if not erp_line_po_col or not erp_pn_col:
+                return jsonify({'success': False, 'message': 'Pegatron ERP 文件欄位不足，需要 M 欄和 N 欄'})
+
+            # 建立 ERP lookup: (Line 客戶採購單號, 客戶料號) -> mapping values
+            erp_lookup = {}
+            for idx, row in erp_df.iterrows():
+                line_po = str(row[erp_line_po_col]).strip() if pd.notna(row[erp_line_po_col]) else ''
+                pn = str(row[erp_pn_col]).strip() if pd.notna(row[erp_pn_col]) else ''
+
+                if line_po and pn:
+                    key = (line_po, pn)
+                    if key not in erp_lookup:  # 保留第一筆匹配
+                        erp_lookup[key] = {
+                            'region': str(row.get('客戶需求地區', '')).strip() if pd.notna(row.get('客戶需求地區', '')) else '',
+                            'schedule_breakpoint': str(row.get('排程出貨日期斷點', '')).strip() if pd.notna(row.get('排程出貨日期斷點', '')) else '',
+                            'etd': str(row.get('ETD', '')).strip() if pd.notna(row.get('ETD', '')) else '',
+                            'eta': str(row.get('ETA', '')).strip() if pd.notna(row.get('ETA', '')) else ''
+                        }
+
+            print(f"   建立 ERP lookup: {len(erp_lookup)} 筆")
+
+            # 應用 Transit 映射
+            def get_pegatron_transit_mapping(row, field):
+                line_po = str(row[transit_line_po_col]).strip() if pd.notna(row[transit_line_po_col]) else ''
+                ordered_item = str(row[transit_ordered_item_col]).strip() if pd.notna(row[transit_ordered_item_col]) else ''
+
+                key = (line_po, ordered_item)
+                mapping = erp_lookup.get(key, {})
+                return mapping.get(field, '')
+
+            transit_df['客戶需求地區'] = transit_df.apply(lambda row: get_pegatron_transit_mapping(row, 'region'), axis=1)
+            transit_df['排程出貨日期斷點'] = transit_df.apply(lambda row: get_pegatron_transit_mapping(row, 'schedule_breakpoint'), axis=1)
+            transit_df['ETD'] = transit_df.apply(lambda row: get_pegatron_transit_mapping(row, 'etd'), axis=1)
+            transit_df['ETA_mapping'] = transit_df.apply(lambda row: get_pegatron_transit_mapping(row, 'eta'), axis=1)
+
+            # 統計匹配結果
+            matched_count = (transit_df['客戶需求地區'] != '').sum()
+            print(f"   ✅ Pegatron Transit 映射完成: {matched_count}/{len(transit_df)} 行匹配成功")
+        else:
+            # === 原有 Transit 映射邏輯（Quanta 等其他客戶）===
+            # 建立 mapping 字典（從 mapping_data 轉換格式）
+            mapping_dict = {}
+            if mapping_data:
+                # 從資料庫格式的 mapping_data 建立字典
+                all_customers = set()
+                all_customers.update(mapping_data.get('regions', {}).keys())
+                all_customers.update(mapping_data.get('schedule_breakpoints', {}).keys())
+                all_customers.update(mapping_data.get('etd', {}).keys())
+                all_customers.update(mapping_data.get('eta', {}).keys())
+
+                for customer in all_customers:
+                    mapping_dict[customer] = {
+                        'region': mapping_data.get('regions', {}).get(customer, ''),
+                        'schedule_breakpoint': mapping_data.get('schedule_breakpoints', {}).get(customer, ''),
+                        'etd': mapping_data.get('etd', {}).get(customer, ''),
+                        'eta': mapping_data.get('eta', {}).get(customer, '')
+                    }
+                print(f"從資料庫/JSON 建立 mapping 字典，共 {len(mapping_dict)} 個客戶")
+            elif os.path.exists(mapping_excel_file):
+                # 向後相容：從 Excel 讀取 mapping
+                mapping_excel_df = pd.read_excel(mapping_excel_file)
+
+                # mapping 表的欄位結構
+                mapping_customer_col = mapping_excel_df.columns[0]  # A欄位
+                mapping_region_col = mapping_excel_df.columns[1] if len(mapping_excel_df.columns) > 1 else None
+                mapping_schedule_col = mapping_excel_df.columns[3] if len(mapping_excel_df.columns) > 3 else None
+                mapping_etd_col = mapping_excel_df.columns[4] if len(mapping_excel_df.columns) > 4 else None
+                mapping_eta_col = mapping_excel_df.columns[5] if len(mapping_excel_df.columns) > 5 else None
+
+                for idx, row in mapping_excel_df.iterrows():
+                    customer = str(row[mapping_customer_col])
+                    mapping_dict[customer] = {
+                        'region': str(row[mapping_region_col]) if mapping_region_col and pd.notna(row[mapping_region_col]) else '',
+                        'schedule_breakpoint': str(row[mapping_schedule_col]) if mapping_schedule_col and pd.notna(row[mapping_schedule_col]) else '',
+                        'etd': str(row[mapping_etd_col]) if mapping_etd_col and pd.notna(row[mapping_etd_col]) else '',
+                        'eta': str(row[mapping_eta_col]) if mapping_eta_col and pd.notna(row[mapping_eta_col]) else ''
+                    }
+                print(f"從 Excel 建立 mapping 字典，共 {len(mapping_dict)} 個客戶")
+
+            # transit_data 的 E 欄位（索引4）與 mapping 表 A 欄位比對
+            if len(transit_df.columns) < 5:
+                return jsonify({'success': False, 'message': '在途文件欄位不足，需要至少 E 欄位'})
+
+            transit_customer_col = transit_df.columns[4]  # E欄位
+            print(f"在途文件 E 欄位名稱: {transit_customer_col}")
+
+            # 新版在途文件結構（12欄位）：
+            # 索引0-11: Tw, Ship Number, Invoice Date, Location, 客戶簡稱, Ordered Item, Pj Item, Qty, ETA, Stauts, 集團客戶, 週別
+            # 整合後會新增4個欄位到末尾，變成索引12-15：客戶需求地區, 排程出貨日期斷點, ETD, ETA
+
+            # 應用映射到 Transit（新增到文件末尾）
+            transit_df['客戶需求地區'] = transit_df[transit_customer_col].apply(
+                lambda x: mapping_dict.get(str(x), {}).get('region', '') if pd.notna(x) else ''
+            )
+            transit_df['排程出貨日期斷點'] = transit_df[transit_customer_col].apply(
+                lambda x: mapping_dict.get(str(x), {}).get('schedule_breakpoint', '') if pd.notna(x) else ''
+            )
+            transit_df['ETD'] = transit_df[transit_customer_col].apply(
+                lambda x: mapping_dict.get(str(x), {}).get('etd', '') if pd.notna(x) else ''
+            )
+            transit_df['ETA_mapping'] = transit_df[transit_customer_col].apply(
+                lambda x: mapping_dict.get(str(x), {}).get('eta', '') if pd.notna(x) else ''
+            )
+
         # 顯示整合後的欄位結構
         print(f"✅ 在途數據整合完成，欄位結構:")
         for i, col in enumerate(transit_df.columns):

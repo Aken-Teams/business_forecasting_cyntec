@@ -1077,6 +1077,31 @@ def get_customer_mappings(user_id):
     finally:
         connection.close()
 
+def get_customer_mappings_raw(user_id):
+    """
+    取得指定用戶的所有客戶映射資料（原始格式）
+    返回完整的記錄列表，每筆記錄包含 customer_name, delivery_location, region 等
+    用於 Pegatron 等需要多欄位匹配的客戶
+    """
+    connection = get_db_connection()
+    if not connection:
+        return []
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT customer_name, delivery_location, region, schedule_breakpoint, etd, eta
+                FROM customer_mappings
+                WHERE user_id = %s
+            """, (user_id,))
+            return cursor.fetchall()
+
+    except Exception as e:
+        print(f"❌ 取得客戶映射資料（原始格式）失敗: {e}")
+        return []
+    finally:
+        connection.close()
+
 def save_customer_mappings(user_id, mapping_data):
     """
     儲存用戶的客戶映射資料（完整替換模式）
