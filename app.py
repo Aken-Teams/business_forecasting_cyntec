@@ -1512,6 +1512,155 @@ def upload_forecast():
             log_upload(user['id'], 'forecast', original_filename, 0, 0, 0, 'failed', str(e))
         return jsonify({'success': False, 'message': f'上傳處理失敗: {str(e)}'})
 
+
+@app.route('/merge_forecast_files', methods=['POST'])
+@login_required
+def merge_forecast_files():
+    """
+    合併多個 Forecast 檔案
+    當用戶在確認對話框勾選「合併」但上傳時沒有合併時，呼叫此 API
+    """
+    user = get_current_user()
+    try:
+        data = request.get_json() or {}
+        upload_session_id = data.get('upload_session_id')
+
+        if not upload_session_id:
+            return jsonify({'success': False, 'message': '缺少 upload_session_id'})
+
+        # 取得上傳資料夾
+        upload_folder = os.path.join(UPLOAD_FOLDER, str(user['id']), upload_session_id)
+        if not os.path.exists(upload_folder):
+            return jsonify({'success': False, 'message': '找不到上傳資料夾'})
+
+        print(f"=== 開始合併 Forecast 檔案 (session: {upload_session_id}) ===")
+
+        # 檢查是否有多個分開的檔案
+        multi_files = []
+        first_file_ext = None
+        for i in range(1, 100):
+            filepath = find_file_with_extensions(upload_folder, f'forecast_data_{i}')
+            if filepath:
+                multi_files.append(filepath)
+                if first_file_ext is None:
+                    first_file_ext = os.path.splitext(filepath)[1].lower()
+            else:
+                break
+
+        if len(multi_files) < 2:
+            # 已經是單一檔案或沒有檔案
+            return jsonify({
+                'success': True,
+                'message': '不需要合併（已是單一檔案）',
+                'merged': False
+            })
+
+        print(f"  找到 {len(multi_files)} 個待合併檔案")
+
+        # 使用 xlwings 進行合併
+        import shutil
+        import time
+        import xlwings as xw
+
+        merge_start = time.time()
+
+        # 複製第一個檔案作為基礎
+        first_file = multi_files[0]
+        final_filename = 'forecast_data' + first_file_ext
+        final_filepath = os.path.join(upload_folder, final_filename)
+        shutil.copy2(first_file, final_filepath)
+        print(f"  複製第一個檔案完成")
+
+        # 使用 xlwings 合併其他檔案
+        app = xw.App(visible=False, add_book=False)
+        app.display_alerts = False
+        app.screen_updating = False
+
+        try:
+            # 打開目標檔案
+            dest_wb = app.books.open(final_filepath)
+            dest_ws = dest_wb.sheets[0]
+
+            # 嘗試取消保護
+            try:
+                if dest_ws.api.ProtectContents:
+                    dest_ws.api.Unprotect()
+            except:
+                pass
+
+            # 取得第一個檔案的欄數
+            first_max_col = dest_ws.used_range.last_cell.column
+
+            for file_idx in range(1, len(multi_files)):
+                src_path = multi_files[file_idx]
+                src_wb = app.books.open(src_path)
+                src_ws = src_wb.sheets[0]
+
+                # 嘗試取消來源保護
+                try:
+                    if src_ws.api.ProtectContents:
+                        src_ws.api.Unprotect()
+                except:
+                    pass
+
+                # 取得來源範圍（跳過標題）
+                src_last_row = src_ws.used_range.last_cell.row
+                src_max_col = src_ws.used_range.last_cell.column
+                use_col = min(first_max_col, src_max_col)
+
+                if src_last_row > 1:
+                    src_range = src_ws.range(f'A2:{xw.utils.col_name(use_col)}{src_last_row}')
+                    dest_last_row = dest_ws.used_range.last_cell.row
+                    dest_start_row = dest_last_row + 1
+
+                    # 複製貼上
+                    src_range.copy()
+                    dest_cell = dest_ws.range(f'A{dest_start_row}')
+                    dest_cell.paste(paste='all')
+                    app.api.CutCopyMode = False
+
+                    print(f"  合併檔案 {file_idx + 1} 完成（{src_last_row - 1} 行）")
+
+                src_wb.close()
+
+            # 儲存並關閉
+            dest_wb.save()
+            dest_wb.close()
+
+        finally:
+            app.quit()
+
+        # 刪除原來的分開檔案
+        for filepath in multi_files:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+                print(f"  已刪除: {os.path.basename(filepath)}")
+
+        merge_time = time.time() - merge_start
+        print(f"=== 合併完成，耗時 {merge_time:.2f} 秒 ===")
+
+        # 更新 session
+        session['forecast_merge_mode'] = True
+        session.modified = True
+
+        log_activity(user['id'], user['username'], 'merge_forecast',
+                   f"Forecast 檔案合併成功：{len(multi_files)} 個檔案", get_client_ip(), request.headers.get('User-Agent'))
+
+        return jsonify({
+            'success': True,
+            'message': f'{len(multi_files)} 個檔案已合併',
+            'merged': True,
+            'merged_filename': final_filename,
+            'merge_time': round(merge_time, 2)
+        })
+
+    except Exception as e:
+        print(f"合併 Forecast 檔案失敗: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': f'合併失敗: {str(e)}'})
+
+
 @app.route('/upload_transit', methods=['POST'])
 @login_required
 def upload_transit():
@@ -2582,65 +2731,145 @@ def run_forecast():
             # ===== Pegatron 專用處理：使用 PegatronForecastProcessor =====
             from pegatron_forecast_processor import PegatronForecastProcessor
 
-            cleaned_forecast = find_file_with_extensions(processed_folder, 'cleaned_forecast')
-            if not cleaned_forecast:
-                cleaned_forecast = find_file_with_extensions(processed_folder, 'cleaned_forecast_1')
+            # 判斷是否為多檔案模式
+            if is_multi_file_mode:
+                # ===== Pegatron 多檔案模式 =====
+                print(f"=== Pegatron 多檔案模式：{len(multi_cleaned_files)} 個檔案 ===")
 
-            if not cleaned_forecast:
-                log_process(user['id'], 'forecast', 'failed', '請先完成Forecast數據清理')
-                return jsonify({'success': False, 'message': '請先完成Forecast數據清理'})
+                total_erp_filled = 0
+                total_transit_filled = 0
+                processed_files = []
+                failed_files = []
 
-            # 決定輸出檔名（保持 .xls 格式）
-            input_ext = os.path.splitext(cleaned_forecast)[1].lower()
-            output_filename = 'forecast_result.xls' if input_ext == '.xls' else 'forecast_result.xlsx'
+                for idx, forecast_file in enumerate(multi_cleaned_files, 1):
+                    # 從檔名提取編號
+                    file_basename = os.path.basename(forecast_file)
+                    import re
+                    match = re.search(r'cleaned_forecast_(\d+)\.xlsx?', file_basename)
+                    file_num = match.group(1) if match else str(idx)
 
-            print("開始 Pegatron FORECAST 處理...")
-            print(f"清理後的Forecast文件: {cleaned_forecast}")
-            print(f"整合後的ERP文件: {integrated_erp}")
-            if has_transit:
-                print(f"整合後的Transit文件: {integrated_transit}")
+                    # 決定輸出檔名（保持原始格式）
+                    input_ext = os.path.splitext(forecast_file)[1].lower()
+                    output_filename = f'forecast_result_{file_num}{input_ext}'
 
-            processor = PegatronForecastProcessor(
-                forecast_file=cleaned_forecast,
-                erp_file=integrated_erp,
-                transit_file=integrated_transit if has_transit else None,
-                output_folder=processed_folder,
-                output_filename=output_filename
-            )
+                    print(f"\n--- 處理檔案 {idx}/{len(multi_cleaned_files)}: {file_basename} ---")
 
-            success = processor.process_all_blocks()
+                    try:
+                        processor = PegatronForecastProcessor(
+                            forecast_file=forecast_file,
+                            erp_file=integrated_erp,
+                            transit_file=integrated_transit if has_transit else None,
+                            output_folder=processed_folder,
+                            output_filename=output_filename
+                        )
 
-            if success:
-                result_file = os.path.join(processed_folder, output_filename)
-                if os.path.exists(result_file):
-                    file_size = os.path.getsize(result_file)
-                    duration = time.time() - start_time
-                    print(f"Pegatron FORECAST處理完成，結果文件: {result_file} (大小: {file_size} bytes)")
+                        success = processor.process_all_blocks()
 
+                        if success:
+                            result_file = os.path.join(processed_folder, output_filename)
+                            if os.path.exists(result_file):
+                                file_size = os.path.getsize(result_file)
+                                processed_files.append({
+                                    'input': file_basename,
+                                    'output': output_filename,
+                                    'erp_filled': processor.total_filled,
+                                    'transit_filled': processor.total_transit_filled,
+                                    'file_size': file_size
+                                })
+                                total_erp_filled += processor.total_filled
+                                total_transit_filled += processor.total_transit_filled
+                                print(f"  ✅ 成功: ERP填入 {processor.total_filled}, Transit填入 {processor.total_transit_filled}")
+                            else:
+                                failed_files.append({'input': file_basename, 'error': '結果文件未生成'})
+                        else:
+                            failed_files.append({'input': file_basename, 'error': '處理失敗'})
+
+                    except Exception as e:
+                        print(f"  ❌ 處理失敗: {str(e)}")
+                        failed_files.append({'input': file_basename, 'error': str(e)})
+
+                duration = time.time() - start_time
+
+                if processed_files:
                     log_process(user['id'], 'forecast', 'success',
-                              f'ERP填入: {processor.total_filled}, Transit填入: {processor.total_transit_filled}', duration)
+                              f'多檔案處理: {len(processed_files)} 成功, ERP填入: {total_erp_filled}, Transit填入: {total_transit_filled}', duration)
                     log_activity(user['id'], user['username'], 'forecast_success',
-                               f"Pegatron FORECAST 處理成功", get_client_ip(), request.headers.get('User-Agent'))
+                               f"Pegatron FORECAST 多檔案處理成功: {len(processed_files)} 個檔案", get_client_ip(), request.headers.get('User-Agent'))
 
-                    result_data = {
+                    return jsonify({
                         'success': True,
-                        'message': 'FORECAST處理完成',
-                        'file': output_filename,
-                        'erp_filled': processor.total_filled,
-                        'erp_skipped': processor.total_skipped,
-                        'transit_filled': processor.total_transit_filled,
-                        'transit_skipped': processor.total_transit_skipped,
-                        'file_size': file_size
-                    }
-                    return jsonify(result_data)
+                        'message': f'FORECAST處理完成：{len(processed_files)} 個檔案',
+                        'multi_file': True,
+                        'files': processed_files,
+                        'failed_files': failed_files,
+                        'total_erp_filled': total_erp_filled,
+                        'total_transit_filled': total_transit_filled
+                    })
+                else:
+                    log_process(user['id'], 'forecast', 'failed', '所有檔案處理失敗', duration)
+                    return jsonify({'success': False, 'message': '所有檔案處理失敗'})
+
+            else:
+                # ===== Pegatron 單檔案模式 =====
+                cleaned_forecast = find_file_with_extensions(processed_folder, 'cleaned_forecast')
+                if not cleaned_forecast:
+                    cleaned_forecast = find_file_with_extensions(processed_folder, 'cleaned_forecast_1')
+
+                if not cleaned_forecast:
+                    log_process(user['id'], 'forecast', 'failed', '請先完成Forecast數據清理')
+                    return jsonify({'success': False, 'message': '請先完成Forecast數據清理'})
+
+                # 決定輸出檔名（保持 .xls 格式）
+                input_ext = os.path.splitext(cleaned_forecast)[1].lower()
+                output_filename = 'forecast_result.xls' if input_ext == '.xls' else 'forecast_result.xlsx'
+
+                print("開始 Pegatron FORECAST 處理...")
+                print(f"清理後的Forecast文件: {cleaned_forecast}")
+                print(f"整合後的ERP文件: {integrated_erp}")
+                if has_transit:
+                    print(f"整合後的Transit文件: {integrated_transit}")
+
+                processor = PegatronForecastProcessor(
+                    forecast_file=cleaned_forecast,
+                    erp_file=integrated_erp,
+                    transit_file=integrated_transit if has_transit else None,
+                    output_folder=processed_folder,
+                    output_filename=output_filename
+                )
+
+                success = processor.process_all_blocks()
+
+                if success:
+                    result_file = os.path.join(processed_folder, output_filename)
+                    if os.path.exists(result_file):
+                        file_size = os.path.getsize(result_file)
+                        duration = time.time() - start_time
+                        print(f"Pegatron FORECAST處理完成，結果文件: {result_file} (大小: {file_size} bytes)")
+
+                        log_process(user['id'], 'forecast', 'success',
+                                  f'ERP填入: {processor.total_filled}, Transit填入: {processor.total_transit_filled}', duration)
+                        log_activity(user['id'], user['username'], 'forecast_success',
+                                   f"Pegatron FORECAST 處理成功", get_client_ip(), request.headers.get('User-Agent'))
+
+                        result_data = {
+                            'success': True,
+                            'message': 'FORECAST處理完成',
+                            'file': output_filename,
+                            'erp_filled': processor.total_filled,
+                            'erp_skipped': processor.total_skipped,
+                            'transit_filled': processor.total_transit_filled,
+                            'transit_skipped': processor.total_transit_skipped,
+                            'file_size': file_size
+                        }
+                        return jsonify(result_data)
+                    else:
+                        duration = time.time() - start_time
+                        log_process(user['id'], 'forecast', 'failed', '結果文件未生成', duration)
+                        return jsonify({'success': False, 'message': 'FORECAST處理完成但結果文件未生成'})
                 else:
                     duration = time.time() - start_time
-                    log_process(user['id'], 'forecast', 'failed', '結果文件未生成', duration)
-                    return jsonify({'success': False, 'message': 'FORECAST處理完成但結果文件未生成'})
-            else:
-                duration = time.time() - start_time
-                log_process(user['id'], 'forecast', 'failed', '處理失敗', duration)
-                return jsonify({'success': False, 'message': 'FORECAST處理失敗'})
+                    log_process(user['id'], 'forecast', 'failed', '處理失敗', duration)
+                    return jsonify({'success': False, 'message': 'FORECAST處理失敗'})
 
         elif not is_multi_file_mode:
             # ===== 單檔案模式：處理單一 cleaned_forecast.xlsx/.xls 或 cleaned_forecast_1.xlsx/.xls =====

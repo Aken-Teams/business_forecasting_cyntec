@@ -1083,7 +1083,63 @@ function closeUploadConfirmModal() {
 }
 
 // 確認並進入下一步
-function confirmAndProceed() {
+async function confirmAndProceed() {
+    // 檢查是否有勾選合併且上傳了多個 Forecast 檔案
+    const mergeCheckbox = document.getElementById('merge-forecast-files');
+    const shouldMerge = mergeCheckbox ? mergeCheckbox.checked : true;
+    const forecastInfo = uploadedFileInfo.forecast;
+    const hasMultipleFiles = forecastInfo && forecastInfo.fileCount > 1;
+
+    if (shouldMerge && hasMultipleFiles) {
+        // 需要合併，先呼叫後端 API 進行合併
+        try {
+            // 更新 modal 顯示合併中
+            const confirmBtn = document.querySelector('#upload-confirm-modal .btn-primary');
+            if (confirmBtn) {
+                confirmBtn.disabled = true;
+                confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 合併檔案中...';
+            }
+
+            const response = await fetch('/merge_forecast_files', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    upload_session_id: getUploadSessionId()
+                })
+            });
+
+            const result = await response.json();
+
+            if (!result.success) {
+                showNotification(`合併失敗: ${result.message}`, 'error');
+                if (confirmBtn) {
+                    confirmBtn.disabled = false;
+                    confirmBtn.innerHTML = '<i class="fas fa-check"></i> 確認，進入下一步';
+                }
+                return;
+            }
+
+            if (result.merged) {
+                console.log(`Forecast 檔案已合併: ${result.merged_filename}`);
+                // 更新上傳檔案資訊
+                uploadedFileInfo.forecast.merged = true;
+                uploadedFileInfo.forecast.mergedFilename = result.merged_filename;
+            }
+
+        } catch (error) {
+            console.error('合併檔案失敗:', error);
+            showNotification('合併檔案失敗，請重試', 'error');
+            const confirmBtn = document.querySelector('#upload-confirm-modal .btn-primary');
+            if (confirmBtn) {
+                confirmBtn.disabled = false;
+                confirmBtn.innerHTML = '<i class="fas fa-check"></i> 確認，進入下一步';
+            }
+            return;
+        }
+    }
+
     closeUploadConfirmModal();
 
     // 更新進度
