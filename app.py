@@ -363,6 +363,31 @@ os.makedirs('static/js', exist_ok=True)
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+def get_file_extension(filename):
+    """
+    獲取檔案的副檔名（小寫）
+    返回: '.xls' 或 '.xlsx'
+    """
+    if '.' in filename:
+        ext = '.' + filename.rsplit('.', 1)[1].lower()
+        if ext in ['.xls', '.xlsx']:
+            return ext
+    return '.xlsx'  # 預設
+
+def find_file_with_extensions(folder, base_name):
+    """
+    查找檔案，支持 .xls 和 .xlsx 兩種副檔名
+    例如: find_file_with_extensions('/path', 'forecast_data')
+    會嘗試尋找 forecast_data.xlsx 和 forecast_data.xls
+
+    返回: 找到的檔案完整路徑，或 None
+    """
+    for ext in ['.xlsx', '.xls']:
+        filepath = os.path.join(folder, base_name + ext)
+        if os.path.exists(filepath):
+            return filepath
+    return None
+
 def is_xls_format(file_path):
     """
     檢查檔案是否為舊版 .xls 格式
@@ -377,75 +402,117 @@ def is_xls_format(file_path):
 
 def cleanup_xls_file(file_path, output_path, username):
     """
-    清理 .xls 格式的檔案（使用 xlrd + xlutils 保留格式）
-    使用 xlutils.styles 來保留儲存格格式
+    清理 .xls 格式的檔案（使用 pywin32 COM 自動化）
+    完整保留格式、公式，只修改指定儲存格的值為 0
+    使用 SaveCopyAs 保存（因為 Save/SaveAs 在某些文件上會失敗）
     """
-    import xlrd
-    from xlrd import open_workbook
-    from xlutils.copy import copy as xl_copy
-    from xlutils.styles import Styles
+    import shutil
+    import pythoncom
+    from win32com import client as win32
 
-    # 讀取原始檔案（保留格式）
-    rb = open_workbook(file_path, formatting_info=True)
-    wb = xl_copy(rb)
-    ws = wb.get_sheet(0)
-    rs = rb.sheet_by_index(0)
+    print(f"  🔄 開始清理 .xls 檔案...")
+    print(f"  📂 輸入: {file_path}")
+    print(f"  📂 輸出: {output_path}")
 
-    # 取得樣式資訊
-    styles = Styles(rb)
+    # 先複製原始檔案到輸出位置（作為備份）
+    shutil.copy2(file_path, output_path)
 
+    # 使用絕對路徑
+    abs_input_path = os.path.abspath(file_path)
+    abs_output_path = os.path.abspath(output_path)
+
+    # 初始化 COM
+    pythoncom.CoInitialize()
+
+    excel = None
+    wb = None
     cleaned_count = 0
 
-    def write_with_style(sheet, row, col, value, rdsheet, rdrow, rdcol):
-        """寫入值並保留原始樣式"""
-        # 取得原始儲存格的 XF 索引
-        xf_index = rdsheet.cell_xf_index(rdrow, rdcol)
-        # 使用樣式寫入
-        sheet.write(row, col, value, styles[rb.xf_list[xf_index]])
+    try:
+        # 啟動 Excel（隱藏視窗）
+        print(f"  🚀 啟動 Excel...")
+        excel = win32.DispatchEx('Excel.Application')
+        excel.Visible = False
+        excel.DisplayAlerts = False
+        excel.ScreenUpdating = False
 
-    for row_idx in range(rs.nrows):
-        if username == 'pegatron':
-            # 檢查M欄位（第13列，索引12）是否為 "ETA QTY"
-            m_value = rs.cell_value(row_idx, 12) if rs.ncols > 12 else None
-            if m_value and str(m_value).strip() == "ETA QTY":
-                # 清空N~DN欄位（第14列到第118列，索引13~117）設為 0
-                for col_idx in range(13, min(118, rs.ncols)):
-                    cell_value = rs.cell_value(row_idx, col_idx)
-                    if cell_value is not None and cell_value != 0 and cell_value != '':
-                        try:
-                            write_with_style(ws, row_idx, col_idx, 0, rs, row_idx, col_idx)
-                        except:
-                            ws.write(row_idx, col_idx, 0)
-                        cleaned_count += 1
-        else:
-            # quanta 清理邏輯
-            # 檢查K欄位（第11列，索引10）是否為"供應數量"
-            k_value = rs.cell_value(row_idx, 10) if rs.ncols > 10 else None
-            if k_value and str(k_value) == "供應數量":
-                # 清空L~AW欄位（第12列到第49列，索引11~48）
-                for col_idx in range(11, min(49, rs.ncols)):
-                    cell_value = rs.cell_value(row_idx, col_idx)
-                    if cell_value != 0 and cell_value != '':
-                        try:
-                            write_with_style(ws, row_idx, col_idx, 0, rs, row_idx, col_idx)
-                        except:
-                            ws.write(row_idx, col_idx, 0)
-                        cleaned_count += 1
+        # 開啟原始檔案
+        print(f"  📖 開啟檔案...")
+        wb = excel.Workbooks.Open(abs_input_path)
+        ws = wb.Sheets(1)
 
-            # 檢查I欄位（第9列，索引8）是否包含"庫存數量"
-            i_value = rs.cell_value(row_idx, 8) if rs.ncols > 8 else None
-            if i_value and "庫存數量" in str(i_value):
-                if row_idx + 1 < rs.nrows:
-                    next_i_value = rs.cell_value(row_idx + 1, 8)
-                    if next_i_value != 0 and next_i_value != '':
-                        try:
-                            write_with_style(ws, row_idx + 1, 8, 0, rs, row_idx + 1, 8)
-                        except:
-                            ws.write(row_idx + 1, 8, 0)
-                        cleaned_count += 1
+        # 嘗試取消工作表保護
+        try:
+            ws.Unprotect()
+        except:
+            pass
 
-    # 保存為 .xls 格式
-    wb.save(output_path)
+        # 取得資料範圍
+        used_range = ws.UsedRange
+        max_row = used_range.Rows.Count
+        max_col = used_range.Columns.Count
+
+        print(f"  📊 檔案大小: {max_row} 行 x {max_col} 欄")
+        print(f"  🧹 開始清理資料（用戶: {username}）...")
+
+        # 掃描並清理
+        for row_idx in range(1, max_row + 1):
+            if row_idx % 10 == 0:
+                print(f"    處理進度: {row_idx}/{max_row} 行...")
+
+            if username == 'pegatron':
+                # 檢查M欄位（第13欄）是否為 "ETA QTY"
+                m_value = ws.Cells(row_idx, 13).Value
+                if m_value and str(m_value).strip() == "ETA QTY":
+                    # 清空N~DN欄位（第14欄到第118欄）設為 0
+                    for col_idx in range(14, min(119, max_col + 1)):
+                        cell = ws.Cells(row_idx, col_idx)
+                        cell_value = cell.Value
+                        if cell_value is not None and cell_value != 0 and cell_value != '':
+                            cell.Value = 0
+                            cleaned_count += 1
+            else:
+                # quanta 清理邏輯
+                k_value = ws.Cells(row_idx, 11).Value
+                if k_value and str(k_value) == "供應數量":
+                    for col_idx in range(12, min(50, max_col + 1)):
+                        cell = ws.Cells(row_idx, col_idx)
+                        cell_value = cell.Value
+                        if cell_value != 0 and cell_value != '':
+                            cell.Value = 0
+                            cleaned_count += 1
+
+                i_value = ws.Cells(row_idx, 9).Value
+                if i_value and "庫存數量" in str(i_value):
+                    if row_idx + 1 <= max_row:
+                        next_cell = ws.Cells(row_idx + 1, 9)
+                        next_value = next_cell.Value
+                        if next_value != 0 and next_value != '':
+                            next_cell.Value = 0
+                            cleaned_count += 1
+
+        # 使用 SaveCopyAs 保存（保留公式和格式）
+        print(f"  💾 儲存檔案...")
+        wb.SaveCopyAs(abs_output_path)
+        print(f"  ✅ 清理完成，共清理 {cleaned_count} 個儲存格")
+
+    except Exception as e:
+        print(f"  ❌ 清理失敗: {e}")
+        import traceback
+        traceback.print_exc()
+        raise e
+    finally:
+        # 關閉工作簿和 Excel
+        print(f"  🔒 關閉 Excel...")
+        try:
+            if wb:
+                wb.Close(SaveChanges=False)
+            if excel:
+                excel.Quit()
+        except Exception as close_error:
+            print(f"  ⚠️ 關閉 Excel 時發生錯誤: {close_error}")
+        pythoncom.CoUninitialize()
+
     return cleaned_count
 
 def get_or_create_session_folder(user_id, folder_type='uploads', upload_session_id=None):
@@ -630,27 +697,27 @@ def get_user_file_path(file_type):
     # 不再依賴 uploaded_* 標記（因為 session cookie 可能遺失）
     # 直接根據 session_timestamp 計算路徑並檢查檔案是否存在
 
-    # 根據檔案類型決定可能的檔名
-    possible_filenames = []
+    # 根據檔案類型決定可能的基礎檔名（不含副檔名）
+    possible_base_names = []
     if file_type == 'erp':
-        possible_filenames = ['erp_data.xlsx']
+        possible_base_names = ['erp_data']
     elif file_type == 'forecast':
         # 檢查是否為合併模式
         if session.get('forecast_merge_mode', True):
-            possible_filenames = ['forecast_data.xlsx', 'forecast_data_1.xlsx']
+            possible_base_names = ['forecast_data', 'forecast_data_1']
         else:
             # 非合併模式，返回第一個檔案
-            possible_filenames = ['forecast_data_1.xlsx', 'forecast_data.xlsx']
+            possible_base_names = ['forecast_data_1', 'forecast_data']
     elif file_type == 'transit':
-        possible_filenames = ['transit_data.xlsx']
+        possible_base_names = ['transit_data']
     else:
         return None
 
-    # 嘗試每個可能的檔名
+    # 嘗試每個可能的基礎檔名（支援 .xlsx 和 .xls）
     upload_folder = os.path.join(UPLOAD_FOLDER, str(user['id']), session_timestamp)
-    for filename in possible_filenames:
-        filepath = os.path.join(upload_folder, filename)
-        if os.path.exists(filepath):
+    for base_name in possible_base_names:
+        filepath = find_file_with_extensions(upload_folder, base_name)
+        if filepath:
             print(f"✅ get_user_file_path({file_type}): 找到檔案 {filepath}")
             return filepath
 
@@ -694,17 +761,17 @@ def get_forecast_files():
         print(f"❌ get_forecast_files: 資料夾不存在")
         return []
 
-    # 先檢查合併模式的單一檔案
-    single_file = os.path.join(upload_folder, 'forecast_data.xlsx')
-    if os.path.exists(single_file):
+    # 先檢查合併模式的單一檔案（支援 .xlsx 和 .xls）
+    single_file = find_file_with_extensions(upload_folder, 'forecast_data')
+    if single_file:
         print(f"✅ get_forecast_files: 找到合併檔案 {single_file}")
         return [single_file]
 
-    # 再檢查多檔案模式（forecast_data_1.xlsx, forecast_data_2.xlsx, ...）
+    # 再檢查多檔案模式（forecast_data_1.xlsx/.xls, forecast_data_2.xlsx/.xls, ...）
     files = []
     for i in range(1, 100):  # 最多支援 99 個檔案
-        filepath = os.path.join(upload_folder, f'forecast_data_{i}.xlsx')
-        if os.path.exists(filepath):
+        filepath = find_file_with_extensions(upload_folder, f'forecast_data_{i}')
+        if filepath:
             files.append(filepath)
         else:
             break  # 遇到不存在的編號就停止
@@ -959,9 +1026,10 @@ def upload_erp():
         print(f"📥 ERP 上傳 - 前端傳來的 session_id: {upload_session_id}")
 
         if file and allowed_file(file.filename):
-            # 使用資料夾管理結構：uploads/{user_id}/{session_timestamp}/erp_data.xlsx
+            # 使用資料夾管理結構：uploads/{user_id}/{session_timestamp}/erp_data.xlsx/.xls
             upload_folder, session_timestamp = get_or_create_session_folder(user['id'], 'uploads', upload_session_id)
-            filename = 'erp_data.xlsx'
+            original_ext = get_file_extension(original_filename)  # 保留原始副檔名
+            filename = 'erp_data' + original_ext
             filepath = os.path.join(upload_folder, filename)
 
             # 清理超過保留期限的資料夾
@@ -1102,10 +1170,11 @@ def upload_forecast():
 
         # ========== 處理多檔案上傳 ==========
         if len(files_list) == 1:
-            # 單檔案上傳：維持原有邏輯
+            # 單檔案上傳：保留原始副檔名
             file = files_list[0]
             original_filename = file.filename
-            filename = 'forecast_data.xlsx'
+            original_ext = get_file_extension(original_filename)  # 取得原始副檔名 (.xls 或 .xlsx)
+            filename = 'forecast_data' + original_ext
             filepath = os.path.join(upload_folder, filename)
 
             file.save(filepath)
@@ -1163,17 +1232,21 @@ def upload_forecast():
             total_size = 0
             validation_errors = []
 
-            # 先儲存所有檔案到暫存位置
+            # 先儲存所有檔案到暫存位置（保留原始副檔名）
             temp_files = []
+            first_file_ext = None  # 記錄第一個檔案的副檔名，用於合併後的檔案
             for idx, file in enumerate(files_list):
-                temp_filename = f'forecast_temp_{idx}.xlsx'
+                original_ext = get_file_extension(file.filename)
+                if idx == 0:
+                    first_file_ext = original_ext  # 記錄第一個檔案的副檔名
+                temp_filename = f'forecast_temp_{idx}{original_ext}'
                 temp_filepath = os.path.join(upload_folder, temp_filename)
                 file.save(temp_filepath)
-                temp_files.append((file.filename, temp_filepath))
+                temp_files.append((file.filename, temp_filepath, original_ext))
                 print(f"  暫存文件 {idx + 1}: {file.filename} -> {temp_filepath}")
 
             # 驗證並讀取每個檔案
-            for original_name, temp_path in temp_files:
+            for original_name, temp_path, _ in temp_files:
                 print(f"驗證 Forecast 文件: {original_name}（用戶: {template_username}）")
                 is_valid, message, details = validate_forecast_format(temp_path, template_username)
 
@@ -1209,7 +1282,7 @@ def upload_forecast():
             # 如果有驗證錯誤
             if validation_errors:
                 # 清理暫存檔案
-                for _, temp_path in temp_files:
+                for _, temp_path, _ in temp_files:
                     if os.path.exists(temp_path):
                         os.remove(temp_path)
 
@@ -1242,9 +1315,9 @@ def upload_forecast():
                 print(f"開始合併 {len(temp_files)} 個 Forecast 檔案（使用 Excel 原生複製貼上保留格式）...")
                 merge_start = time.time()
 
-                # ===== 步驟 1：直接複製第一個檔案作為基礎 =====
+                # ===== 步驟 1：直接複製第一個檔案作為基礎（保留原始副檔名）=====
                 first_temp_path = temp_files[0][1]
-                final_filename = 'forecast_data.xlsx'
+                final_filename = 'forecast_data' + first_file_ext
                 final_filepath = os.path.join(upload_folder, final_filename)
                 shutil.copy2(first_temp_path, final_filepath)
                 print(f"  複製第一個檔案完成，耗時 {time.time() - merge_start:.2f} 秒")
@@ -1272,7 +1345,7 @@ def upload_forecast():
                             # 如果有密碼保護，無法取消
                             app.quit()
                             # 清理暫存檔案
-                            for _, temp_path in temp_files:
+                            for _, temp_path, _ in temp_files:
                                 if os.path.exists(temp_path):
                                     os.remove(temp_path)
                             return jsonify({
@@ -1300,7 +1373,7 @@ def upload_forecast():
                                 src_wb.close()
                                 app.quit()
                                 # 清理暫存檔案
-                                for _, temp_path in temp_files:
+                                for _, temp_path, _ in temp_files:
                                     if os.path.exists(temp_path):
                                         os.remove(temp_path)
                                 return jsonify({
@@ -1353,7 +1426,7 @@ def upload_forecast():
                 print(f"=== 多檔案合併完成：{final_filepath}，總行數：{total_rows}，總耗時 {time.time() - merge_start:.2f} 秒 ===")
 
                 # 清理暫存檔案
-                for _, temp_path in temp_files:
+                for _, temp_path, _ in temp_files:
                     if os.path.exists(temp_path) and temp_path != final_filepath:
                         os.remove(temp_path)
 
@@ -1385,13 +1458,13 @@ def upload_forecast():
                 })
 
             else:
-                # 不合併模式：將暫存檔案重新命名為正式檔案
+                # 不合併模式：將暫存檔案重新命名為正式檔案（保留原始副檔名）
                 saved_files = []
                 total_rows = 0
 
-                for idx, (original_name, temp_path) in enumerate(temp_files):
-                    # 產生正式檔名：forecast_data_1.xlsx, forecast_data_2.xlsx, ...
-                    final_filename = f'forecast_data_{idx + 1}.xlsx'
+                for idx, (original_name, temp_path, file_ext) in enumerate(temp_files):
+                    # 產生正式檔名：forecast_data_1.xls/.xlsx, forecast_data_2.xls/.xlsx, ...（保留原始副檔名）
+                    final_filename = f'forecast_data_{idx + 1}{file_ext}'
                     final_filepath = os.path.join(upload_folder, final_filename)
 
                     # 移動暫存檔案到正式位置
@@ -1459,9 +1532,10 @@ def upload_transit():
         print(f"📥 Transit 上傳 - 前端傳來的 session_id: {upload_session_id}")
 
         if file and allowed_file(file.filename):
-            # 使用資料夾管理結構：uploads/{user_id}/{session_timestamp}/transit_data.xlsx
+            # 使用資料夾管理結構：uploads/{user_id}/{session_timestamp}/transit_data.xlsx/.xls
             upload_folder, session_timestamp = get_or_create_session_folder(user['id'], 'uploads', upload_session_id)
-            filename = 'transit_data.xlsx'
+            original_ext = get_file_extension(original_filename)  # 保留原始副檔名
+            filename = 'transit_data' + original_ext
             filepath = os.path.join(upload_folder, filename)
 
             # 保存文件
@@ -1788,22 +1862,22 @@ def process_forecast_cleanup():
         session['current_processed_folder'] = processed_folder
 
         # 根據實際上傳的檔案來判斷是否為多檔案模式（不依賴 session 標記）
-        # 掃描上傳資料夾，檢查是否有多個 forecast_data_*.xlsx 檔案
+        # 掃描上傳資料夾，檢查是否有多個 forecast_data_*.xlsx/.xls 檔案
         upload_folder = os.path.join(UPLOAD_FOLDER, str(user['id']), session_timestamp)
         print(f"🔍 Cleanup - 掃描上傳資料夾: {upload_folder}")
 
-        # 檢查是否有編號的多檔案 (forecast_data_1.xlsx, forecast_data_2.xlsx, ...)
+        # 檢查是否有編號的多檔案 (forecast_data_1.xlsx/.xls, forecast_data_2.xlsx/.xls, ...)
         multi_files = []
         for i in range(1, 100):
-            filepath = os.path.join(upload_folder, f'forecast_data_{i}.xlsx')
-            if os.path.exists(filepath):
+            filepath = find_file_with_extensions(upload_folder, f'forecast_data_{i}')
+            if filepath:
                 multi_files.append(filepath)
             else:
                 break
 
-        # 檢查是否有單一合併檔案
-        single_file = os.path.join(upload_folder, 'forecast_data.xlsx')
-        has_single_file = os.path.exists(single_file)
+        # 檢查是否有單一合併檔案（支援 .xlsx 和 .xls）
+        single_file = find_file_with_extensions(upload_folder, 'forecast_data')
+        has_single_file = single_file is not None
 
         print(f"📁 多檔案數量: {len(multi_files)}, 單一檔案存在: {has_single_file}")
 
@@ -1954,8 +2028,8 @@ def process_forecast_cleanup():
             print("開始清理Forecast數據，保持原始格式...")
 
             if is_xls:
-                # ========== .xls 格式：使用 xlrd + xlutils 保留格式 ==========
-                print(f"ℹ️ 檔案為 .xls 格式，使用 xlrd 處理以保留格式")
+                # ========== .xls 格式：使用 pywin32 COM 保留格式 ==========
+                print(f"ℹ️ 檔案為 .xls 格式，使用 pywin32 COM 處理以保留格式和公式")
                 cleaned_file = os.path.join(processed_folder, 'cleaned_forecast.xls')
                 cleaned_count = cleanup_xls_file(forecast_file, cleaned_file, username)
             else:
@@ -2329,19 +2403,19 @@ def run_forecast():
         has_transit = os.path.exists(integrated_transit)
 
         # 根據 processed 資料夾中的檔案來判斷是否為多檔案模式（不依賴 session 標記）
-        # 掃描 cleaned_forecast_*.xlsx 檔案
+        # 掃描 cleaned_forecast_*.xlsx 或 cleaned_forecast_*.xls 檔案
         print(f"🔍 Forecast - 掃描 processed 資料夾: {processed_folder}")
 
         multi_cleaned_files = []
         for i in range(1, 100):
-            filepath = os.path.join(processed_folder, f'cleaned_forecast_{i}.xlsx')
-            if os.path.exists(filepath):
+            filepath = find_file_with_extensions(processed_folder, f'cleaned_forecast_{i}')
+            if filepath:
                 multi_cleaned_files.append(filepath)
             else:
                 break
 
-        single_cleaned_file = os.path.join(processed_folder, 'cleaned_forecast.xlsx')
-        has_single_cleaned = os.path.exists(single_cleaned_file)
+        single_cleaned_file = find_file_with_extensions(processed_folder, 'cleaned_forecast')
+        has_single_cleaned = single_cleaned_file is not None
 
         print(f"📁 多檔案數量: {len(multi_cleaned_files)}, 單一清理檔案存在: {has_single_cleaned}")
 
@@ -2352,14 +2426,14 @@ def run_forecast():
         from ultra_fast_forecast_processor import UltraFastForecastProcessor
 
         if not is_multi_file_mode:
-            # ===== 單檔案模式：處理單一 cleaned_forecast.xlsx 或 cleaned_forecast_1.xlsx =====
-            # 先檢查合併檔案，再檢查編號檔案
-            cleaned_forecast = os.path.join(processed_folder, 'cleaned_forecast.xlsx')
-            if not os.path.exists(cleaned_forecast):
-                # 嘗試找 cleaned_forecast_1.xlsx（只有一個檔案的分開模式）
-                cleaned_forecast = os.path.join(processed_folder, 'cleaned_forecast_1.xlsx')
+            # ===== 單檔案模式：處理單一 cleaned_forecast.xlsx/.xls 或 cleaned_forecast_1.xlsx/.xls =====
+            # 先檢查合併檔案，再檢查編號檔案（支援 .xlsx 和 .xls）
+            cleaned_forecast = find_file_with_extensions(processed_folder, 'cleaned_forecast')
+            if not cleaned_forecast:
+                # 嘗試找 cleaned_forecast_1.xlsx/.xls（只有一個檔案的分開模式）
+                cleaned_forecast = find_file_with_extensions(processed_folder, 'cleaned_forecast_1')
 
-            if not os.path.exists(cleaned_forecast):
+            if not cleaned_forecast:
                 log_process(user['id'], 'forecast', 'failed', '請先完成Forecast數據清理')
                 return jsonify({'success': False, 'message': '請先完成Forecast數據清理'})
 
@@ -2420,12 +2494,15 @@ def run_forecast():
                 return jsonify({'success': False, 'message': 'FORECAST處理失敗'})
 
         else:
-            # ===== 多檔案模式：分別處理每個 cleaned_forecast_N.xlsx =====
+            # ===== 多檔案模式：分別處理每個 cleaned_forecast_N.xlsx/.xls =====
             import glob
 
-            # 尋找所有 cleaned_forecast_*.xlsx 檔案
-            forecast_pattern = os.path.join(processed_folder, 'cleaned_forecast_*.xlsx')
-            forecast_files = sorted(glob.glob(forecast_pattern))
+            # 尋找所有 cleaned_forecast_*.xlsx 和 cleaned_forecast_*.xls 檔案
+            forecast_files = []
+            for ext in ['.xlsx', '.xls']:
+                forecast_pattern = os.path.join(processed_folder, f'cleaned_forecast_*{ext}')
+                forecast_files.extend(glob.glob(forecast_pattern))
+            forecast_files = sorted(set(forecast_files))  # 去重並排序
 
             if not forecast_files:
                 log_process(user['id'], 'forecast', 'failed', '請先完成Forecast數據清理（未找到清理後的Forecast檔案）')
@@ -2447,16 +2524,17 @@ def run_forecast():
             failed_files = []
 
             for idx, forecast_file in enumerate(forecast_files, 1):
-                # 從檔名提取編號，例如 cleaned_forecast_1.xlsx -> 1
+                # 從檔名提取編號，例如 cleaned_forecast_1.xlsx 或 cleaned_forecast_1.xls -> 1
                 file_basename = os.path.basename(forecast_file)
-                # 提取數字部分
+                # 提取數字部分（支援 .xlsx 和 .xls）
                 import re
-                match = re.search(r'cleaned_forecast_(\d+)\.xlsx', file_basename)
+                match = re.search(r'cleaned_forecast_(\d+)\.xlsx?', file_basename)
                 if match:
                     file_num = match.group(1)
                 else:
                     file_num = str(idx)
 
+                # 輸出檔案使用 .xlsx 格式（最終結果總是 xlsx）
                 output_filename = f'forecast_result_{file_num}.xlsx'
 
                 print(f"\n處理檔案 {idx}/{len(forecast_files)}: {file_basename}")
@@ -3342,11 +3420,16 @@ def api_run_test():
         if not os.path.exists(test_folder):
             return jsonify({'success': False, 'message': f'測試資料夾不存在: test_data/{company}'})
 
-        required_files = ['erp_data.xlsx', 'forecast_data.xlsx', 'transit_data.xlsx']
+        # 檢查必要檔案是否存在（支援 .xlsx 和 .xls）
+        required_base_names = ['erp_data', 'forecast_data', 'transit_data']
         missing_files = []
-        for f in required_files:
-            if not os.path.exists(os.path.join(test_folder, f)):
-                missing_files.append(f)
+        found_files = {}  # 記錄找到的實際檔案名稱
+        for base_name in required_base_names:
+            found = find_file_with_extensions(test_folder, base_name)
+            if found:
+                found_files[base_name] = os.path.basename(found)
+            else:
+                missing_files.append(f'{base_name}.xlsx 或 {base_name}.xls')
 
         if missing_files:
             return jsonify({
@@ -3362,48 +3445,51 @@ def api_run_test():
         os.makedirs(upload_folder, exist_ok=True)
         os.makedirs(processed_folder, exist_ok=True)
 
-        # 複製測試檔案
-        for f in required_files:
+        # 複製測試檔案（保留原始副檔名）
+        for base_name, actual_filename in found_files.items():
             shutil.copy(
-                os.path.join(test_folder, f),
-                os.path.join(upload_folder, f)
+                os.path.join(test_folder, actual_filename),
+                os.path.join(upload_folder, actual_filename)
             )
 
         # 取得客戶的 username 用於模板驗證
         customer_username = customer['username']
 
-        # ========== 格式驗證（使用客戶專屬模板）==========
+        # ========== 格式驗證（使用客戶專屬模板，支援 .xlsx 和 .xls）==========
         validation_errors = []
 
         # 驗證 ERP 格式
-        erp_test_file = os.path.join(upload_folder, 'erp_data.xlsx')
-        is_valid, message, details = validate_erp_format(erp_test_file, customer_username)
-        if not is_valid:
-            validation_errors.append({
-                'file': 'ERP',
-                'message': message,
-                'details': details
-            })
+        erp_test_file = find_file_with_extensions(upload_folder, 'erp_data')
+        if erp_test_file:
+            is_valid, message, details = validate_erp_format(erp_test_file, customer_username)
+            if not is_valid:
+                validation_errors.append({
+                    'file': 'ERP',
+                    'message': message,
+                    'details': details
+                })
 
         # 驗證 Forecast 格式
-        forecast_test_file = os.path.join(upload_folder, 'forecast_data.xlsx')
-        is_valid, message, details = validate_forecast_format(forecast_test_file, customer_username)
-        if not is_valid:
-            validation_errors.append({
-                'file': 'Forecast',
-                'message': message,
-                'details': details
-            })
+        forecast_test_file = find_file_with_extensions(upload_folder, 'forecast_data')
+        if forecast_test_file:
+            is_valid, message, details = validate_forecast_format(forecast_test_file, customer_username)
+            if not is_valid:
+                validation_errors.append({
+                    'file': 'Forecast',
+                    'message': message,
+                    'details': details
+                })
 
         # 驗證在途格式
-        transit_test_file = os.path.join(upload_folder, 'transit_data.xlsx')
-        is_valid, message, details = validate_transit_format(transit_test_file, customer_username)
-        if not is_valid:
-            validation_errors.append({
-                'file': '在途',
-                'message': message,
-                'details': details
-            })
+        transit_test_file = find_file_with_extensions(upload_folder, 'transit_data')
+        if transit_test_file:
+            is_valid, message, details = validate_transit_format(transit_test_file, customer_username)
+            if not is_valid:
+                validation_errors.append({
+                    'file': '在途',
+                    'message': message,
+                    'details': details
+                })
 
         # 如果有驗證錯誤，返回錯誤訊息
         if validation_errors:
@@ -3439,35 +3525,46 @@ def api_run_test():
         )
 
         # 執行完整流程
-        # 1. 數據清理
+        # 1. 數據清理（支援 .xlsx 和 .xls）
         from openpyxl import load_workbook as openpyxl_load_workbook
-        forecast_file = os.path.join(upload_folder, 'forecast_data.xlsx')
-        wb = openpyxl_load_workbook(forecast_file)
-        ws = wb.active
+        forecast_file = find_file_with_extensions(upload_folder, 'forecast_data')
+        if not forecast_file:
+            return jsonify({'success': False, 'message': '找不到 Forecast 檔案'})
 
-        cleaned_count = 0
-        for row_idx in range(1, ws.max_row + 1):
-            k_cell = ws.cell(row=row_idx, column=11)
-            if k_cell.value and str(k_cell.value) == "供應數量":
-                for col_idx in range(12, min(50, ws.max_column + 1)):
-                    cell = ws.cell(row=row_idx, column=col_idx)
-                    if cell.value != 0:
-                        cell.value = 0
+        # 根據檔案類型選擇處理方式
+        is_xls = is_xls_format(forecast_file)
+        if is_xls:
+            # .xls 格式使用 pywin32 COM
+            cleaned_file = os.path.join(processed_folder, 'cleaned_forecast.xls')
+            cleaned_count = cleanup_xls_file(forecast_file, cleaned_file, customer_username)
+        else:
+            # .xlsx 格式使用 openpyxl
+            wb = openpyxl_load_workbook(forecast_file)
+            ws = wb.active
+
+            cleaned_count = 0
+            for row_idx in range(1, ws.max_row + 1):
+                k_cell = ws.cell(row=row_idx, column=11)
+                if k_cell.value and str(k_cell.value) == "供應數量":
+                    for col_idx in range(12, min(50, ws.max_column + 1)):
+                        cell = ws.cell(row=row_idx, column=col_idx)
+                        if cell.value != 0:
+                            cell.value = 0
+                            cleaned_count += 1
+
+                i_cell = ws.cell(row=row_idx, column=9)
+                if i_cell.value and "庫存數量" in str(i_cell.value):
+                    next_row_i_cell = ws.cell(row=row_idx + 1, column=9)
+                    if next_row_i_cell.value != 0:
+                        next_row_i_cell.value = 0
                         cleaned_count += 1
 
-            i_cell = ws.cell(row=row_idx, column=9)
-            if i_cell.value and "庫存數量" in str(i_cell.value):
-                next_row_i_cell = ws.cell(row=row_idx + 1, column=9)
-                if next_row_i_cell.value != 0:
-                    next_row_i_cell.value = 0
-                    cleaned_count += 1
+            cleaned_file = os.path.join(processed_folder, 'cleaned_forecast.xlsx')
+            wb.save(cleaned_file)
 
-        cleaned_file = os.path.join(processed_folder, 'cleaned_forecast.xlsx')
-        wb.save(cleaned_file)
-
-        # 2. ERP 和 Transit 整合
-        erp_file = os.path.join(upload_folder, 'erp_data.xlsx')
-        transit_file = os.path.join(upload_folder, 'transit_data.xlsx')
+        # 2. ERP 和 Transit 整合（支援 .xlsx 和 .xls）
+        erp_file = find_file_with_extensions(upload_folder, 'erp_data')
+        transit_file = find_file_with_extensions(upload_folder, 'transit_data')
 
         erp_df = pd.read_excel(erp_file)
         transit_df = pd.read_excel(transit_file)
