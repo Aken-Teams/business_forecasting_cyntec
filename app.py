@@ -2802,8 +2802,12 @@ def run_forecast():
                         'multi_file': True,
                         'files': processed_files,
                         'failed_files': failed_files,
+                        'file_count': len(multi_cleaned_files),
+                        'success_count': len(processed_files),
                         'total_erp_filled': total_erp_filled,
-                        'total_transit_filled': total_transit_filled
+                        'total_erp_skipped': 0,
+                        'total_transit_filled': total_transit_filled,
+                        'total_transit_skipped': 0
                     })
                 else:
                     log_process(user['id'], 'forecast', 'failed', '所有檔案處理失敗', duration)

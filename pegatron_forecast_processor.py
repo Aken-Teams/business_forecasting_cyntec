@@ -215,7 +215,14 @@ class PegatronForecastProcessor:
             print(f"ERP 更新筆數: {self.total_filled}")
 
             if not all_updates:
-                print("\n沒有需要更新的資料")
+                print("\n沒有需要更新的資料，複製原始檔案作為輸出")
+                # 即使沒有更新，也要建立輸出檔案讓用戶可以下載
+                if self.output_folder:
+                    output_path = os.path.join(self.output_folder, self.output_filename)
+                else:
+                    output_path = self.output_filename
+                shutil.copy2(self.forecast_file, output_path)
+                print(f"已輸出到: {output_path}")
                 return True
 
             # 6. 使用 COM 寫入 Excel
