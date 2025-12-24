@@ -1027,12 +1027,23 @@ function buildAccordionItem(type, title, icon, info) {
 // 建立獨立的合併狀態橫幅（直接讀取合併區塊 checkbox 的當前狀態）
 function buildMergeBanner() {
     const info = uploadedFileInfo.forecast;
-    // 只有多檔案時才顯示合併狀態
-    if (!info || info.fileCount <= 1) return '';
+    if (!info) return '';
 
     // 直接讀取合併區塊 checkbox 的當前狀態，而不是上傳時儲存的值
     const mergeCheckbox = document.getElementById('merge-forecast-files');
     const shouldMerge = mergeCheckbox ? mergeCheckbox.checked : true;
+
+    // 只有一個檔案時顯示不適用
+    if (info.fileCount <= 1) {
+        return `
+            <div class="confirm-merge-banner merge-na">
+                <div class="merge-icon">
+                    <i class="fas fa-file-alt"></i>
+                </div>
+                <span class="merge-text">Forecast 合併選項：不適用（僅單一檔案）</span>
+            </div>
+        `;
+    }
 
     if (shouldMerge) {
         return `

@@ -363,46 +363,90 @@ os.makedirs('static/js', exist_ok=True)
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def convert_xls_to_xlsx_if_needed(file_path):
+def is_xls_format(file_path):
     """
-    檢查檔案是否為舊版 .xls 格式，如果是則轉換為 .xlsx 格式
-    返回: (轉換後的檔案路徑, 是否有轉換)
+    檢查檔案是否為舊版 .xls 格式
+    返回: True 表示是 .xls 格式，False 表示是 .xlsx 格式
     """
     import zipfile
-
-    # 檢查檔案是否為有效的 xlsx（zip 格式）
     try:
         with zipfile.ZipFile(file_path, 'r') as z:
-            # 如果能成功打開為 zip，就是有效的 xlsx
-            return file_path, False
+            return False  # 是有效的 xlsx（zip 格式）
     except zipfile.BadZipFile:
-        # 不是 zip 格式，可能是舊版 .xls
-        print(f"⚠️ 檔案 {file_path} 不是有效的 xlsx 格式，嘗試轉換...")
+        return True  # 不是 zip 格式，是舊版 .xls
 
-        try:
-            # 使用 pandas 讀取（支援 xls 和 xlsx）
-            df = pd.read_excel(file_path, sheet_name=None, header=None, engine='xlrd')
+def cleanup_xls_file(file_path, output_path, username):
+    """
+    清理 .xls 格式的檔案（使用 xlrd + xlutils 保留格式）
+    使用 xlutils.styles 來保留儲存格格式
+    """
+    import xlrd
+    from xlrd import open_workbook
+    from xlutils.copy import copy as xl_copy
+    from xlutils.styles import Styles
 
-            # 建立新的 xlsx 檔案路徑
-            new_file_path = file_path.replace('.xlsx', '_converted.xlsx')
-            if new_file_path == file_path:
-                new_file_path = file_path + '_converted.xlsx'
+    # 讀取原始檔案（保留格式）
+    rb = open_workbook(file_path, formatting_info=True)
+    wb = xl_copy(rb)
+    ws = wb.get_sheet(0)
+    rs = rb.sheet_by_index(0)
 
-            # 使用 openpyxl 寫入
-            with pd.ExcelWriter(new_file_path, engine='openpyxl') as writer:
-                for sheet_name, sheet_df in df.items():
-                    sheet_df.to_excel(writer, sheet_name=sheet_name, index=False, header=False)
+    # 取得樣式資訊
+    styles = Styles(rb)
 
-            print(f"✅ 已轉換檔案: {file_path} -> {new_file_path}")
+    cleaned_count = 0
 
-            # 替換原檔案
-            os.remove(file_path)
-            os.rename(new_file_path, file_path)
+    def write_with_style(sheet, row, col, value, rdsheet, rdrow, rdcol):
+        """寫入值並保留原始樣式"""
+        # 取得原始儲存格的 XF 索引
+        xf_index = rdsheet.cell_xf_index(rdrow, rdcol)
+        # 使用樣式寫入
+        sheet.write(row, col, value, styles[rb.xf_list[xf_index]])
 
-            return file_path, True
-        except Exception as e:
-            print(f"❌ 轉換失敗: {e}")
-            raise Exception(f"無法處理檔案格式: {e}")
+    for row_idx in range(rs.nrows):
+        if username == 'pegatron':
+            # 檢查M欄位（第13列，索引12）是否為 "ETA QTY"
+            m_value = rs.cell_value(row_idx, 12) if rs.ncols > 12 else None
+            if m_value and str(m_value).strip() == "ETA QTY":
+                # 清空N~DN欄位（第14列到第118列，索引13~117）設為 0
+                for col_idx in range(13, min(118, rs.ncols)):
+                    cell_value = rs.cell_value(row_idx, col_idx)
+                    if cell_value is not None and cell_value != 0 and cell_value != '':
+                        try:
+                            write_with_style(ws, row_idx, col_idx, 0, rs, row_idx, col_idx)
+                        except:
+                            ws.write(row_idx, col_idx, 0)
+                        cleaned_count += 1
+        else:
+            # quanta 清理邏輯
+            # 檢查K欄位（第11列，索引10）是否為"供應數量"
+            k_value = rs.cell_value(row_idx, 10) if rs.ncols > 10 else None
+            if k_value and str(k_value) == "供應數量":
+                # 清空L~AW欄位（第12列到第49列，索引11~48）
+                for col_idx in range(11, min(49, rs.ncols)):
+                    cell_value = rs.cell_value(row_idx, col_idx)
+                    if cell_value != 0 and cell_value != '':
+                        try:
+                            write_with_style(ws, row_idx, col_idx, 0, rs, row_idx, col_idx)
+                        except:
+                            ws.write(row_idx, col_idx, 0)
+                        cleaned_count += 1
+
+            # 檢查I欄位（第9列，索引8）是否包含"庫存數量"
+            i_value = rs.cell_value(row_idx, 8) if rs.ncols > 8 else None
+            if i_value and "庫存數量" in str(i_value):
+                if row_idx + 1 < rs.nrows:
+                    next_i_value = rs.cell_value(row_idx + 1, 8)
+                    if next_i_value != 0 and next_i_value != '':
+                        try:
+                            write_with_style(ws, row_idx + 1, 8, 0, rs, row_idx + 1, 8)
+                        except:
+                            ws.write(row_idx + 1, 8, 0)
+                        cleaned_count += 1
+
+    # 保存為 .xls 格式
+    wb.save(output_path)
+    return cleaned_count
 
 def get_or_create_session_folder(user_id, folder_type='uploads', upload_session_id=None):
     """
@@ -1807,54 +1851,59 @@ def process_forecast_cleanup():
                 print(f"  清理檔案 {idx + 1}/{len(forecast_files_list)}: {original_name}")
 
                 try:
-                    # 檢查並轉換 xls 格式（如果需要）
-                    file_path, was_converted = convert_xls_to_xlsx_if_needed(file_path)
-                    if was_converted:
-                        print(f"  ℹ️ 檔案已從 xls 轉換為 xlsx 格式")
+                    # 檢查檔案格式
+                    is_xls = is_xls_format(file_path)
 
-                    # 使用openpyxl保持格式
-                    wb = load_workbook(file_path)
-                    ws = wb.active
+                    if is_xls:
+                        # ========== .xls 格式：使用 xlrd + xlutils 保留格式 ==========
+                        print(f"  ℹ️ 檔案為 .xls 格式，使用 xlrd 處理以保留格式")
+                        cleaned_filename = f'cleaned_forecast_{idx + 1}.xls'
+                        cleaned_file = os.path.join(processed_folder, cleaned_filename)
+                        cleaned_count = cleanup_xls_file(file_path, cleaned_file, username)
+                    else:
+                        # ========== .xlsx 格式：使用 openpyxl 保持格式 ==========
+                        wb = load_workbook(file_path)
+                        ws = wb.active
 
-                    # 清理數據
-                    cleaned_count = 0
+                        # 清理數據
+                        cleaned_count = 0
 
-                    for row_idx in range(1, ws.max_row + 1):
-                        # ========== pegatron 專屬清理邏輯 ==========
-                        if username == 'pegatron':
-                            # 檢查M欄位（第13列）是否為 "ETA QTY"
-                            m_cell = ws.cell(row=row_idx, column=13)
-                            if m_cell.value and str(m_cell.value).strip() == "ETA QTY":
-                                # 清空N~DN欄位（第14列到第118列）設為 0
-                                for col_idx in range(14, min(119, ws.max_column + 1)):
-                                    cell = ws.cell(row=row_idx, column=col_idx)
-                                    if cell.value is not None and cell.value != 0:
-                                        cell.value = 0
+                        for row_idx in range(1, ws.max_row + 1):
+                            # ========== pegatron 專屬清理邏輯 ==========
+                            if username == 'pegatron':
+                                # 檢查M欄位（第13列）是否為 "ETA QTY"
+                                m_cell = ws.cell(row=row_idx, column=13)
+                                if m_cell.value and str(m_cell.value).strip() == "ETA QTY":
+                                    # 清空N~DN欄位（第14列到第118列）設為 0
+                                    for col_idx in range(14, min(119, ws.max_column + 1)):
+                                        cell = ws.cell(row=row_idx, column=col_idx)
+                                        if cell.value is not None and cell.value != 0:
+                                            cell.value = 0
+                                            cleaned_count += 1
+                            # ========== quanta 原有清理邏輯 ==========
+                            else:
+                                # 檢查K欄位（第11列）是否為"供應數量"
+                                k_cell = ws.cell(row=row_idx, column=11)
+                                if k_cell.value and str(k_cell.value) == "供應數量":
+                                    # 清空L~AW欄位（第12列到第49列）
+                                    for col_idx in range(12, min(50, ws.max_column + 1)):
+                                        cell = ws.cell(row=row_idx, column=col_idx)
+                                        if cell.value != 0:
+                                            cell.value = 0
+                                            cleaned_count += 1
+
+                                # 檢查I欄位（第9列）是否包含"庫存數量"
+                                i_cell = ws.cell(row=row_idx, column=9)
+                                if i_cell.value and "庫存數量" in str(i_cell.value):
+                                    next_row_i_cell = ws.cell(row=row_idx + 1, column=9)
+                                    if next_row_i_cell.value != 0:
+                                        next_row_i_cell.value = 0
                                         cleaned_count += 1
-                        # ========== quanta 原有清理邏輯 ==========
-                        else:
-                            # 檢查K欄位（第11列）是否為"供應數量"
-                            k_cell = ws.cell(row=row_idx, column=11)
-                            if k_cell.value and str(k_cell.value) == "供應數量":
-                                # 清空L~AW欄位（第12列到第49列）
-                                for col_idx in range(12, min(50, ws.max_column + 1)):
-                                    cell = ws.cell(row=row_idx, column=col_idx)
-                                    if cell.value != 0:
-                                        cell.value = 0
-                                        cleaned_count += 1
 
-                            # 檢查I欄位（第9列）是否包含"庫存數量"
-                            i_cell = ws.cell(row=row_idx, column=9)
-                            if i_cell.value and "庫存數量" in str(i_cell.value):
-                                next_row_i_cell = ws.cell(row=row_idx + 1, column=9)
-                                if next_row_i_cell.value != 0:
-                                    next_row_i_cell.value = 0
-                                    cleaned_count += 1
-
-                    # 保存清理後的文件
-                    cleaned_filename = f'cleaned_forecast_{idx + 1}.xlsx'
-                    cleaned_file = os.path.join(processed_folder, cleaned_filename)
-                    wb.save(cleaned_file)
+                        # 保存清理後的文件
+                        cleaned_filename = f'cleaned_forecast_{idx + 1}.xlsx'
+                        cleaned_file = os.path.join(processed_folder, cleaned_filename)
+                        wb.save(cleaned_file)
 
                     total_cleaned_count += cleaned_count
                     cleaned_files_info.append({
@@ -1899,55 +1948,59 @@ def process_forecast_cleanup():
                 log_process(user['id'], 'cleanup', 'failed', '請先上傳Forecast文件')
                 return jsonify({'success': False, 'message': '請先上傳Forecast文件'})
 
-            # 檢查並轉換 xls 格式（如果需要）
-            forecast_file, was_converted = convert_xls_to_xlsx_if_needed(forecast_file)
-            if was_converted:
-                print(f"ℹ️ 檔案已從 xls 轉換為 xlsx 格式")
-
-            # 使用openpyxl保持格式
-            wb = load_workbook(forecast_file)
-            ws = wb.active
+            # 檢查檔案格式
+            is_xls = is_xls_format(forecast_file)
 
             print("開始清理Forecast數據，保持原始格式...")
 
-            # 清理數據
-            cleaned_count = 0
+            if is_xls:
+                # ========== .xls 格式：使用 xlrd + xlutils 保留格式 ==========
+                print(f"ℹ️ 檔案為 .xls 格式，使用 xlrd 處理以保留格式")
+                cleaned_file = os.path.join(processed_folder, 'cleaned_forecast.xls')
+                cleaned_count = cleanup_xls_file(forecast_file, cleaned_file, username)
+            else:
+                # ========== .xlsx 格式：使用 openpyxl 保持格式 ==========
+                wb = load_workbook(forecast_file)
+                ws = wb.active
 
-            for row_idx in range(1, ws.max_row + 1):
-                # ========== pegatron 專屬清理邏輯 ==========
-                if username == 'pegatron':
-                    # 檢查M欄位（第13列）是否為 "ETA QTY"
-                    m_cell = ws.cell(row=row_idx, column=13)
-                    if m_cell.value and str(m_cell.value).strip() == "ETA QTY":
-                        # 清空N~DN欄位（第14列到第118列）設為 0
-                        for col_idx in range(14, min(119, ws.max_column + 1)):
-                            cell = ws.cell(row=row_idx, column=col_idx)
-                            if cell.value is not None and cell.value != 0:
-                                cell.value = 0
+                # 清理數據
+                cleaned_count = 0
+
+                for row_idx in range(1, ws.max_row + 1):
+                    # ========== pegatron 專屬清理邏輯 ==========
+                    if username == 'pegatron':
+                        # 檢查M欄位（第13列）是否為 "ETA QTY"
+                        m_cell = ws.cell(row=row_idx, column=13)
+                        if m_cell.value and str(m_cell.value).strip() == "ETA QTY":
+                            # 清空N~DN欄位（第14列到第118列）設為 0
+                            for col_idx in range(14, min(119, ws.max_column + 1)):
+                                cell = ws.cell(row=row_idx, column=col_idx)
+                                if cell.value is not None and cell.value != 0:
+                                    cell.value = 0
+                                    cleaned_count += 1
+                    # ========== quanta 原有清理邏輯 ==========
+                    else:
+                        # 檢查K欄位（第11列）是否為"供應數量"
+                        k_cell = ws.cell(row=row_idx, column=11)
+                        if k_cell.value and str(k_cell.value) == "供應數量":
+                            # 清空L~AW欄位（第12列到第49列）
+                            for col_idx in range(12, min(50, ws.max_column + 1)):
+                                cell = ws.cell(row=row_idx, column=col_idx)
+                                if cell.value != 0:
+                                    cell.value = 0
+                                    cleaned_count += 1
+
+                        # 檢查I欄位（第9列）是否包含"庫存數量"
+                        i_cell = ws.cell(row=row_idx, column=9)
+                        if i_cell.value and "庫存數量" in str(i_cell.value):
+                            next_row_i_cell = ws.cell(row=row_idx + 1, column=9)
+                            if next_row_i_cell.value != 0:
+                                next_row_i_cell.value = 0
                                 cleaned_count += 1
-                # ========== quanta 原有清理邏輯 ==========
-                else:
-                    # 檢查K欄位（第11列）是否為"供應數量"
-                    k_cell = ws.cell(row=row_idx, column=11)
-                    if k_cell.value and str(k_cell.value) == "供應數量":
-                        # 清空L~AW欄位（第12列到第49列）
-                        for col_idx in range(12, min(50, ws.max_column + 1)):
-                            cell = ws.cell(row=row_idx, column=col_idx)
-                            if cell.value != 0:
-                                cell.value = 0
-                                cleaned_count += 1
 
-                    # 檢查I欄位（第9列）是否包含"庫存數量"
-                    i_cell = ws.cell(row=row_idx, column=9)
-                    if i_cell.value and "庫存數量" in str(i_cell.value):
-                        next_row_i_cell = ws.cell(row=row_idx + 1, column=9)
-                        if next_row_i_cell.value != 0:
-                            next_row_i_cell.value = 0
-                            cleaned_count += 1
-
-            # 保存清理後的文件
-            cleaned_file = os.path.join(processed_folder, 'cleaned_forecast.xlsx')
-            wb.save(cleaned_file)
+                # 保存清理後的文件
+                cleaned_file = os.path.join(processed_folder, 'cleaned_forecast.xlsx')
+                wb.save(cleaned_file)
 
             duration = time.time() - start_time
             print(f"Forecast數據清理完成，清理了 {cleaned_count} 個單元格")
