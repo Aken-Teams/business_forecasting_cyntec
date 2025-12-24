@@ -400,15 +400,31 @@ async function handleTransitUpload(event) {
 function handleTransitRequiredChange(event) {
     transitRequired = event.target.checked;
     const uploadItem = document.querySelector('#transit-upload-box').closest('.upload-item');
+    const uploadBox = document.getElementById('transit-upload-box');
+    const fileInput = document.getElementById('transit-file');
+    const selectBtn = uploadBox.querySelector('.btn');
 
     if (transitRequired) {
         // 必填模式
         uploadItem.classList.remove('transit-optional');
+        // 啟用文件選擇
+        if (selectBtn) {
+            selectBtn.disabled = false;
+        }
+        if (fileInput) {
+            fileInput.disabled = false;
+        }
         console.log('在途文件設為必填');
     } else {
-        // 選填模式
+        // 選填模式 - 禁用文件選擇
         uploadItem.classList.add('transit-optional');
-        console.log('在途文件設為選填');
+        if (selectBtn) {
+            selectBtn.disabled = true;
+        }
+        if (fileInput) {
+            fileInput.disabled = true;
+        }
+        console.log('在途文件設為選填（已禁用上傳）');
     }
 
     // 重新檢查上傳完成狀態
@@ -885,7 +901,7 @@ function updateUploadChecklist() {
             checkTransit.classList.add('skipped');
             checkTransit.classList.remove('completed', 'optional');
             checkTransit.querySelector('i').className = 'fas fa-minus-circle';
-            checkTransit.querySelector('span').textContent = '在途文件（選填）';
+            checkTransit.querySelector('span').textContent = '在途文件（不須提供）';
         } else {
             checkTransit.classList.remove('completed', 'optional', 'skipped');
             checkTransit.querySelector('i').className = 'fas fa-circle';
@@ -1363,7 +1379,7 @@ async function handleMappingProcess() {
             updateProgressBar('mapping-progress-fill', 'mapping-progress-text', 40, '讀取在途文件...');
             await sleep(500);
         } else if (!transitRequired) {
-            updateProgressBar('mapping-progress-fill', 'mapping-progress-text', 40, '跳過在途文件（選填）...');
+            updateProgressBar('mapping-progress-fill', 'mapping-progress-text', 40, '跳過在途文件（不須提供）...');
             await sleep(300);
         }
 

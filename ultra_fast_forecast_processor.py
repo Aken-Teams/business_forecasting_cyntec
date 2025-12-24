@@ -44,6 +44,9 @@ class UltraFastForecastProcessor:
             # 預處理：建立ERP索引以提高查找速度
             self.erp_df['match_key'] = self.erp_df['客戶料號'].astype(str) + '_' + self.erp_df['客戶需求地區'].astype(str)
 
+            # 保存原始行索引，以便後續更新 erp_df 的已分配狀態
+            self.erp_df['_original_idx'] = self.erp_df.index
+
             # 檢查「已分配」欄位是否存在（從映射整合階段新增）
             if '已分配' not in self.erp_df.columns:
                 self.erp_df['已分配'] = ''
@@ -70,6 +73,9 @@ class UltraFastForecastProcessor:
                         print(f"   M欄位名稱(索引12): {self.transit_df.columns[12]}")
 
                         self.transit_df['match_key'] = self.transit_df.iloc[:, 12].astype(str) + '_' + self.transit_df.iloc[:, 5].astype(str)
+
+                        # 保存原始行索引，以便後續更新 transit_df 的已分配狀態
+                        self.transit_df['_original_idx'] = self.transit_df.index
 
                         # 檢查「已分配」欄位是否存在（從映射整合階段新增）
                         if '已分配' not in self.transit_df.columns:
@@ -476,8 +482,8 @@ class UltraFastForecastProcessor:
             print("\n💾 儲存分配狀態到 ERP/Transit 檔案...")
 
             # 儲存 ERP 檔案（覆蓋原檔案，更新已分配欄位）
-            # 移除暫時的 match_key 欄位後再儲存
-            erp_save_df = self.erp_df.drop(columns=['match_key'], errors='ignore')
+            # 移除暫時的 match_key 和 _original_idx 欄位後再儲存
+            erp_save_df = self.erp_df.drop(columns=['match_key', '_original_idx'], errors='ignore')
             erp_save_df.to_excel(self.erp_file, index=False)
             erp_allocated = (self.erp_df['已分配'] == '✓').sum()
             print(f"✅ ERP 檔案已更新: {self.erp_file}")
@@ -485,8 +491,8 @@ class UltraFastForecastProcessor:
 
             # 儲存 Transit 檔案（如果有）
             if self.transit_df is not None and self.transit_file:
-                # 移除暫時的 match_key 欄位後再儲存
-                transit_save_df = self.transit_df.drop(columns=['match_key'], errors='ignore')
+                # 移除暫時的 match_key 和 _original_idx 欄位後再儲存
+                transit_save_df = self.transit_df.drop(columns=['match_key', '_original_idx'], errors='ignore')
                 transit_save_df.to_excel(self.transit_file, index=False)
                 transit_allocated = (self.transit_df['已分配'] == '✓').sum()
                 print(f"✅ Transit 檔案已更新: {self.transit_file}")
@@ -519,21 +525,14 @@ class UltraFastForecastProcessor:
 
             # 處理每筆ERP記錄
             for idx, erp_record in erp_records.iterrows():
-                # 檢查該筆ERP記錄是否已被分配（1對1邏輯）
-                # 由於使用索引，需要在原始 DataFrame 中查找
-                original_idx = self.erp_df[
-                    (self.erp_df['match_key'] == f"{customer_part}_{customer_region}") &
-                    (self.erp_df['排程出貨日期'] == erp_record['排程出貨日期']) &
-                    (self.erp_df['淨需求'] == erp_record['淨需求'])
-                ].index
+                # 使用 _original_idx 來獲取原始 DataFrame 中的行索引
+                original_idx = erp_record['_original_idx']
 
-                if len(original_idx) > 0:
-                    first_idx = original_idx[0]
-                    # 檢查是否已分配（使用 '✓' 標記）
-                    current_status = self.erp_df.at[first_idx, '已分配']
-                    if current_status == '✓':
-                        skipped_count += 1
-                        continue
+                # 檢查已分配狀態（每筆記錄都是獨立的，即使欄位值相同也是不同的訂單）
+                current_status = self.erp_df.at[original_idx, '已分配']
+                if current_status == '✓':
+                    skipped_count += 1
+                    continue
 
                 # 計算目標信息
                 target_date_str, converted_demand = self.calculate_target_info(erp_record)
@@ -554,9 +553,8 @@ class UltraFastForecastProcessor:
 
                 if success:
                     filled_count += 1
-                    # 標記該筆ERP記錄為已分配（使用 '✓' 標記）
-                    if len(original_idx) > 0:
-                        self.erp_df.at[first_idx, '已分配'] = '✓'
+                    # 使用 original_idx 標記該筆ERP記錄為已分配
+                    self.erp_df.at[original_idx, '已分配'] = '✓'
                 else:
                     skipped_count += 1
 
@@ -607,25 +605,18 @@ class UltraFastForecastProcessor:
             # 處理每筆Transit記錄
             for idx, transit_record in transit_records.iterrows():
                 try:
+                    # 使用 _original_idx 來獲取原始 DataFrame 中的行索引
+                    original_idx = transit_record['_original_idx']
+
+                    # 檢查已分配狀態（每筆記錄都是獨立的，即使欄位值相同也是不同的訂單）
+                    current_status = self.transit_df.at[original_idx, '已分配']
+                    if current_status == '✓':
+                        skipped_count += 1
+                        continue
+
                     # 獲取 H 欄位數據（索引7）和 I 欄位 ETA（索引8）
                     h_value = transit_record.iloc[7] if len(transit_record) > 7 else None
                     eta_value = transit_record.iloc[8] if len(transit_record) > 8 else None
-
-                    # 檢查該筆Transit記錄是否已被分配（1對1邏輯）
-                    # 由於使用索引，需要在原始 DataFrame 中查找
-                    original_idx = self.transit_df[
-                        (self.transit_df['match_key'] == match_key) &
-                        (self.transit_df.iloc[:, 7] == h_value) &
-                        (self.transit_df.iloc[:, 8] == eta_value)
-                    ].index
-
-                    if len(original_idx) > 0:
-                        first_idx = original_idx[0]
-                        # 檢查是否已分配（使用 '✓' 標記）
-                        current_status = self.transit_df.at[first_idx, '已分配']
-                        if current_status == '✓':
-                            skipped_count += 1
-                            continue
 
                     # 調試信息
                     if filled_count == 0 and skipped_count == 0:
@@ -663,9 +654,8 @@ class UltraFastForecastProcessor:
 
                     if success:
                         filled_count += 1
-                        # 標記該筆Transit記錄為已分配（使用 '✓' 標記）
-                        if len(original_idx) > 0:
-                            self.transit_df.at[first_idx, '已分配'] = '✓'
+                        # 使用 original_idx 標記該筆Transit記錄為已分配
+                        self.transit_df.at[original_idx, '已分配'] = '✓'
                     else:
                         skipped_count += 1
 

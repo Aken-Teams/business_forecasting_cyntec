@@ -279,20 +279,33 @@ class PegatronForecastProcessor:
                     matched_block = block
                     break
 
-            if matched_block and pd.notna(transit_eta):
-                eta_date = pd.to_datetime(transit_eta).date()
-                days_since_monday = eta_date.weekday()
-                week_start = eta_date - timedelta(days=days_since_monday)
+            if not matched_block:
+                print(f"  ⚠️ Transit 跳過: {transit_line_po}, {transit_ordered_item} - 找不到匹配的 Forecast 區塊")
+                self.total_transit_skipped += 1
+                continue
 
-                if week_start in date_columns:
-                    excel_col = date_columns[week_start]
-                    eta_qty_value = transit_qty * 1000
+            if not pd.notna(transit_eta):
+                print(f"  ⚠️ Transit 跳過: {transit_line_po}, {transit_ordered_item} - ETA 為空")
+                self.total_transit_skipped += 1
+                continue
 
-                    print(f"  Transit: {transit_line_po}, {transit_ordered_item} -> Row {matched_block['eta_qty_row']}, Col {excel_col}, 值={eta_qty_value}")
-                    updates.append((matched_block['eta_qty_row'], excel_col, eta_qty_value))
+            eta_date = pd.to_datetime(transit_eta).date()
+            days_since_monday = eta_date.weekday()
+            week_start = eta_date - timedelta(days=days_since_monday)
 
-                    # 記錄已分配的索引
-                    self.allocated_transit_indices.append(idx)
+            if week_start not in date_columns:
+                print(f"  ⚠️ Transit 跳過: {transit_line_po}, {transit_ordered_item} - 找不到 ETA 日期 {eta_date} 對應的欄位")
+                self.total_transit_skipped += 1
+                continue
+
+            excel_col = date_columns[week_start]
+            eta_qty_value = transit_qty * 1000
+
+            print(f"  Transit: {transit_line_po}, {transit_ordered_item} -> Row {matched_block['eta_qty_row']}, Col {excel_col}, 值={eta_qty_value}")
+            updates.append((matched_block['eta_qty_row'], excel_col, eta_qty_value))
+
+            # 記錄已分配的索引
+            self.allocated_transit_indices.append(idx)
 
         return updates
 
@@ -333,9 +346,13 @@ class PegatronForecastProcessor:
                     break
 
             if not matched_block:
+                print(f"  ⚠️ ERP 跳過: {erp_line_po}, {erp_pn} - 找不到匹配的 Forecast 區塊")
+                self.total_skipped += 1
                 continue
 
             if pd.isna(erp_schedule_date) or not erp_breakpoint or not erp_eta:
+                print(f"  ⚠️ ERP 跳過: {erp_line_po}, {erp_pn} - 缺少排程日期/斷點/ETA")
+                self.total_skipped += 1
                 continue
 
             schedule_date = pd.to_datetime(erp_schedule_date)
@@ -343,11 +360,15 @@ class PegatronForecastProcessor:
             target_date = self.calculate_erp_eta_target_date(week_end, erp_eta)
 
             if target_date is None:
+                print(f"  ⚠️ ERP 跳過: {erp_line_po}, {erp_pn} - 無法計算目標日期 (ETA={erp_eta})")
+                self.total_skipped += 1
                 continue
 
             excel_col = self.find_week_column(target_date, date_columns)
 
             if excel_col is None:
+                print(f"  ⚠️ ERP 跳過: {erp_line_po}, {erp_pn} - 找不到目標日期 {target_date.date()} 對應的欄位")
+                self.total_skipped += 1
                 continue
 
             forecast_value = erp_qty * 1000
