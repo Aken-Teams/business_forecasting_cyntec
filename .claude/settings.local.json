@@ -11,7 +11,8 @@
       "Bash(xargs ls:*)",
       "Bash(git -C \"d:\\\\github\\\\business_forecasting_pc\" log --oneline -30)",
       "Bash(dir \"d:\\\\github\\\\business_forecasting_pc\\\\uploads\\\\5\\\\20251224_121650\"\")",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(chcp 65001)"
     ]
   }
 }

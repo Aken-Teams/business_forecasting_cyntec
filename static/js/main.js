@@ -1390,8 +1390,8 @@ async function handleForecast() {
 
                 detailMessage += '</div>';
 
-                // 更新下載區域為單檔案模式
-                updateDownloadSectionSingleFile();
+                // 更新下載區域為單檔案模式，傳入檔名
+                updateDownloadSectionSingleFile(result.file || 'forecast_result.xlsx');
             }
 
             showProcessResult('forecast-result', result.message + detailMessage, 'success');
@@ -1418,7 +1418,9 @@ function downloadFile(filename) {
 }
 
 // 更新下載區域為單檔案模式
-function updateDownloadSectionSingleFile() {
+function updateDownloadSectionSingleFile(filename) {
+    // 使用傳入的檔名，預設為 forecast_result.xlsx
+    const outputFilename = filename || 'forecast_result.xlsx';
     const downloadContainer = document.querySelector('.download-single');
     if (downloadContainer) {
         // 移除多檔案模式的 class
@@ -1429,9 +1431,9 @@ function updateDownloadSectionSingleFile() {
                 <i class="fas fa-file-excel"></i>
                 <div class="download-info">
                     <div class="download-title">FORECAST處理結果</div>
-                    <div class="download-desc">forecast_result.xlsx</div>
+                    <div class="download-desc">${outputFilename}</div>
                 </div>
-                <button class="btn btn-primary" onclick="downloadFile('forecast_result.xlsx')">
+                <button class="btn btn-primary" onclick="downloadFile('${outputFilename}')">
                     <i class="fas fa-download"></i> 下載
                 </button>
             </div>

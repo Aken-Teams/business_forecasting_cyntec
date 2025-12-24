@@ -18,6 +18,7 @@ class PegatronForecastProcessor:
     - Transit 和 ERP 都填入 ETA QTY 行
     - 使用 pywin32 COM 保留格式和公式
     - 支援累加邏輯
+    - 追蹤已分配狀態，避免重複分配
     """
 
     def __init__(self, forecast_file, erp_file, transit_file=None, output_folder=None, output_filename=None):
@@ -32,6 +33,14 @@ class PegatronForecastProcessor:
         self.total_skipped = 0
         self.total_transit_filled = 0
         self.total_transit_skipped = 0
+
+        # 追蹤已分配的索引
+        self.allocated_erp_indices = []
+        self.allocated_transit_indices = []
+
+        # 保存 DataFrame 以便更新已分配狀態
+        self.erp_df = None
+        self.transit_df = None
 
     def get_week_end_by_breakpoint(self, schedule_date, breakpoint_text):
         """
@@ -128,13 +137,20 @@ class PegatronForecastProcessor:
                 forecast_df = pd.read_excel(self.forecast_file, header=None)
             print(f"Forecast 行數: {len(forecast_df)}, 欄數: {len(forecast_df.columns)}")
 
-            erp_df = pd.read_excel(self.erp_file)
-            print(f"ERP 行數: {len(erp_df)}")
+            self.erp_df = pd.read_excel(self.erp_file)
+            print(f"ERP 行數: {len(self.erp_df)}")
 
-            transit_df = None
+            # 確保 ERP 有「已分配」欄位
+            if '已分配' not in self.erp_df.columns:
+                self.erp_df['已分配'] = ''
+
+            self.transit_df = None
             if self.transit_file and os.path.exists(self.transit_file):
-                transit_df = pd.read_excel(self.transit_file)
-                print(f"Transit 行數: {len(transit_df)}")
+                self.transit_df = pd.read_excel(self.transit_file)
+                print(f"Transit 行數: {len(self.transit_df)}")
+                # 確保 Transit 有「已分配」欄位
+                if '已分配' not in self.transit_df.columns:
+                    self.transit_df['已分配'] = ''
 
             # 2. 建立 Forecast 區塊結構
             # F+G 欄位 = Line 客戶採購單號, I 欄位 (row+1) = Ordered Item
@@ -184,16 +200,16 @@ class PegatronForecastProcessor:
             all_updates = []
 
             # 4. 處理 Transit 資料
-            if transit_df is not None:
+            if self.transit_df is not None:
                 print("\n=== 處理 Transit 資料 ===")
-                transit_updates = self._process_transit(transit_df, forecast_blocks, date_columns)
+                transit_updates = self._process_transit(self.transit_df, forecast_blocks, date_columns)
                 all_updates.extend(transit_updates)
                 self.total_transit_filled = len(transit_updates)
                 print(f"Transit 更新筆數: {self.total_transit_filled}")
 
             # 5. 處理 ERP 資料
             print("\n=== 處理 ERP 資料 ===")
-            erp_updates = self._process_erp(erp_df, forecast_blocks, date_columns)
+            erp_updates = self._process_erp(self.erp_df, forecast_blocks, date_columns)
             all_updates.extend(erp_updates)
             self.total_filled = len(erp_updates)
             print(f"ERP 更新筆數: {self.total_filled}")
@@ -207,6 +223,9 @@ class PegatronForecastProcessor:
             success = self._write_to_excel(all_updates)
 
             if success:
+                # 7. 更新並保存已分配狀態
+                self._save_allocation_status()
+
                 print("\n" + "=" * 50)
                 print("處理完成")
                 print("=" * 50)
@@ -234,6 +253,10 @@ class PegatronForecastProcessor:
         print(f"有 Line 客戶採購單號 的在途記錄: {len(transit_with_line)}")
 
         for idx, transit_row in transit_with_line.iterrows():
+            # 跳過已分配的記錄
+            if transit_df.at[idx, '已分配'] == '✓':
+                continue
+
             transit_line_po = str(transit_row['Line 客戶採購單號']).strip()
             transit_ordered_item = str(transit_row['Ordered Item']).strip() if 'Ordered Item' in transit_row and pd.notna(transit_row['Ordered Item']) else ''
             transit_qty = transit_row['Qty'] if 'Qty' in transit_row and pd.notna(transit_row['Qty']) else 0
@@ -261,6 +284,9 @@ class PegatronForecastProcessor:
                     print(f"  Transit: {transit_line_po}, {transit_ordered_item} -> Row {matched_block['eta_qty_row']}, Col {excel_col}, 值={eta_qty_value}")
                     updates.append((matched_block['eta_qty_row'], excel_col, eta_qty_value))
 
+                    # 記錄已分配的索引
+                    self.allocated_transit_indices.append(idx)
+
         return updates
 
     def _process_erp(self, erp_df, forecast_blocks, date_columns):
@@ -278,6 +304,10 @@ class PegatronForecastProcessor:
         print(f"有 mapping 的 ERP 記錄: {len(erp_with_mapping)}")
 
         for idx, erp_row in erp_with_mapping.iterrows():
+            # 跳過已分配的記錄
+            if erp_df.at[idx, '已分配'] == '✓':
+                continue
+
             erp_line_po = str(erp_row['Line 客戶採購單號']).strip() if pd.notna(erp_row['Line 客戶採購單號']) else ''
             erp_pn = str(erp_row['客戶料號']).strip() if pd.notna(erp_row['客戶料號']) else ''
             erp_qty = erp_row['淨需求'] if pd.notna(erp_row['淨需求']) else 0
@@ -317,6 +347,9 @@ class PegatronForecastProcessor:
 
             print(f"  ERP: {erp_line_po}, {erp_pn} -> Row {matched_block['eta_qty_row']}, Col {excel_col}, 值={forecast_value}")
             updates.append((matched_block['eta_qty_row'], excel_col, forecast_value))
+
+            # 記錄已分配的索引
+            self.allocated_erp_indices.append(idx)
 
         return updates
 
@@ -389,3 +422,27 @@ class PegatronForecastProcessor:
             except:
                 pass
             pythoncom.CoUninitialize()
+
+    def _save_allocation_status(self):
+        """保存已分配狀態到 ERP 和 Transit 檔案"""
+        try:
+            # 更新 ERP 已分配狀態
+            if self.erp_df is not None and self.allocated_erp_indices:
+                for idx in self.allocated_erp_indices:
+                    self.erp_df.at[idx, '已分配'] = '✓'
+                # 保存 ERP 檔案
+                self.erp_df.to_excel(self.erp_file, index=False)
+                print(f"已更新 ERP 已分配狀態: {len(self.allocated_erp_indices)} 筆")
+
+            # 更新 Transit 已分配狀態
+            if self.transit_df is not None and self.allocated_transit_indices:
+                for idx in self.allocated_transit_indices:
+                    self.transit_df.at[idx, '已分配'] = '✓'
+                # 保存 Transit 檔案
+                self.transit_df.to_excel(self.transit_file, index=False)
+                print(f"已更新 Transit 已分配狀態: {len(self.allocated_transit_indices)} 筆")
+
+        except Exception as e:
+            print(f"保存已分配狀態失敗: {e}")
+            import traceback
+            traceback.print_exc()
