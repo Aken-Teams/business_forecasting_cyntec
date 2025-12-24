@@ -6,6 +6,13 @@ let uploadedFiles = {
     transit: false
 };
 
+// 儲存上傳檔案的詳細資訊
+let uploadedFileInfo = {
+    erp: null,
+    forecast: null,
+    transit: null
+};
+
 // 上傳 Session ID - 前端產生，確保同一批上傳的檔案都在同一個資料夾
 let uploadSessionId = null;
 
@@ -102,6 +109,13 @@ async function handleErpUpload(event) {
         if (result.success) {
             showUploadSuccess('erp', result);
             uploadedFiles.erp = true;
+            // 儲存檔案資訊
+            uploadedFileInfo.erp = {
+                filename: file.name,
+                rows: result.rows,
+                columns: result.columns ? result.columns.length : 0,
+                fileSize: result.file_size
+            };
             checkUploadComplete();
         } else {
             // 檢查是否為格式驗證錯誤
@@ -178,6 +192,15 @@ async function handleForecastUpload(event) {
 
             showForecastMultiUploadSuccess(result, shouldMerge);
             uploadedFiles.forecast = true;
+            // 儲存檔案資訊
+            uploadedFileInfo.forecast = {
+                files: Array.from(files).map(f => f.name),
+                fileCount: files.length,
+                totalRows: result.total_rows || result.rows || 0,
+                totalSize: result.total_size || result.file_size,
+                shouldMerge: shouldMerge,
+                details: result.files || null
+            };
             checkUploadComplete();
         } else {
             // 標記失敗的檔案
@@ -348,6 +371,13 @@ async function handleTransitUpload(event) {
         if (result.success) {
             showUploadSuccess('transit', result);
             uploadedFiles.transit = true;
+            // 儲存檔案資訊
+            uploadedFileInfo.transit = {
+                filename: file.name,
+                rows: result.rows,
+                columns: result.columns ? result.columns.length : 0,
+                fileSize: result.file_size
+            };
             checkUploadComplete();
         } else {
             // 檢查是否為格式驗證錯誤
@@ -841,6 +871,211 @@ function goToNextStep() {
         showNotification(`請先完成上傳：${missing.join('、')}`, 'error');
         return;
     }
+
+    // 顯示確認對話框
+    showUploadConfirmModal();
+}
+
+// 顯示上傳確認對話框
+function showUploadConfirmModal() {
+    // 建立 Modal HTML - 手風琴設計
+    const modalHtml = `
+        <div class="modal-overlay" id="upload-confirm-modal">
+            <div class="modal-container upload-confirm-modal">
+                <div class="modal-header">
+                    <h3><i class="fas fa-clipboard-check"></i> 確認上傳檔案</h3>
+                    <button class="modal-close" onclick="closeUploadConfirmModal()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p class="confirm-subtitle">點擊項目可展開查看詳細資訊</p>
+
+                    <div class="confirm-file-list">
+                        ${buildAccordionItem('erp', 'ERP 淨需求', 'fa-file-excel', uploadedFileInfo.erp)}
+                        ${buildAccordionItem('forecast', 'Forecast', 'fa-chart-bar', uploadedFileInfo.forecast)}
+                        ${buildAccordionItem('transit', '在途數據', 'fa-truck', uploadedFileInfo.transit)}
+                    </div>
+
+                    ${buildMergeBanner()}
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="closeUploadConfirmModal()">
+                        <i class="fas fa-arrow-left"></i> 返回修改
+                    </button>
+                    <button class="btn btn-primary" onclick="confirmAndProceed()">
+                        <i class="fas fa-check"></i> 確認，進入下一步
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // 移除舊的 modal（如果存在）
+    const existingModal = document.getElementById('upload-confirm-modal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    // 插入 modal 到 body
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    // 顯示 modal
+    setTimeout(() => {
+        document.getElementById('upload-confirm-modal').classList.add('show');
+    }, 10);
+}
+
+// 建立手風琴項目
+function buildAccordionItem(type, title, icon, info) {
+    if (!info) return '';
+
+    let briefText = '';
+    let detailsHtml = '';
+
+    if (type === 'forecast' && info.fileCount > 1) {
+        // 多檔案 Forecast
+        briefText = `${info.fileCount} 個檔案 · ${info.totalRows.toLocaleString()} 行`;
+        detailsHtml = `
+            <div class="accordion-details">
+                <div class="accordion-details-row">
+                    <span class="accordion-details-label">檔案數量</span>
+                    <span class="accordion-details-value">${info.fileCount} 個</span>
+                </div>
+                <div class="accordion-details-row">
+                    <span class="accordion-details-label">總資料行數</span>
+                    <span class="accordion-details-value">${info.totalRows.toLocaleString()} 行</span>
+                </div>
+                ${info.totalSize ? `
+                <div class="accordion-details-row">
+                    <span class="accordion-details-label">總檔案大小</span>
+                    <span class="accordion-details-value">${formatFileSize(info.totalSize)}</span>
+                </div>
+                ` : ''}
+                <div class="accordion-file-list">
+                    ${info.files.map(f => `<div class="accordion-file-item"><i class="fas fa-file-excel"></i> ${f}</div>`).join('')}
+                </div>
+            </div>
+        `;
+    } else if (type === 'forecast') {
+        // 單檔案 Forecast
+        briefText = `${info.files[0]}`;
+        detailsHtml = `
+            <div class="accordion-details">
+                <div class="accordion-details-row">
+                    <span class="accordion-details-label">檔案名稱</span>
+                    <span class="accordion-details-value">${info.files[0]}</span>
+                </div>
+                <div class="accordion-details-row">
+                    <span class="accordion-details-label">資料行數</span>
+                    <span class="accordion-details-value">${info.totalRows.toLocaleString()} 行</span>
+                </div>
+                ${info.totalSize ? `
+                <div class="accordion-details-row">
+                    <span class="accordion-details-label">檔案大小</span>
+                    <span class="accordion-details-value">${formatFileSize(info.totalSize)}</span>
+                </div>
+                ` : ''}
+            </div>
+        `;
+    } else {
+        // ERP 或 Transit
+        briefText = info.filename;
+        detailsHtml = `
+            <div class="accordion-details">
+                <div class="accordion-details-row">
+                    <span class="accordion-details-label">檔案名稱</span>
+                    <span class="accordion-details-value">${info.filename}</span>
+                </div>
+                <div class="accordion-details-row">
+                    <span class="accordion-details-label">資料行數</span>
+                    <span class="accordion-details-value">${info.rows.toLocaleString()} 行</span>
+                </div>
+                <div class="accordion-details-row">
+                    <span class="accordion-details-label">欄位數量</span>
+                    <span class="accordion-details-value">${info.columns} 欄</span>
+                </div>
+                ${info.fileSize ? `
+                <div class="accordion-details-row">
+                    <span class="accordion-details-label">檔案大小</span>
+                    <span class="accordion-details-value">${formatFileSize(info.fileSize)}</span>
+                </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    // 截斷過長的摘要文字
+    const shortBrief = briefText.length > 30 ? briefText.substring(0, 27) + '...' : briefText;
+
+    return `
+        <div class="confirm-accordion-item" onclick="toggleAccordion(this)">
+            <div class="confirm-accordion-header">
+                <div class="accordion-icon ${type}">
+                    <i class="fas ${icon}"></i>
+                </div>
+                <div class="accordion-summary">
+                    <div class="accordion-title">${title}</div>
+                    <div class="accordion-brief" title="${briefText}">${shortBrief}</div>
+                </div>
+                <div class="accordion-status">
+                    <i class="fas fa-check-circle"></i>
+                    <i class="fas fa-chevron-down accordion-toggle"></i>
+                </div>
+            </div>
+            <div class="confirm-accordion-content">
+                ${detailsHtml}
+            </div>
+        </div>
+    `;
+}
+
+// 建立獨立的合併狀態橫幅
+function buildMergeBanner() {
+    const info = uploadedFileInfo.forecast;
+    // 只有多檔案時才顯示合併狀態
+    if (!info || info.fileCount <= 1) return '';
+
+    if (info.shouldMerge) {
+        return `
+            <div class="confirm-merge-banner merge-enabled">
+                <div class="merge-icon">
+                    <i class="fas fa-object-group"></i>
+                </div>
+                <span class="merge-text">Forecast 下載時將合併為單一檔案</span>
+            </div>
+        `;
+    } else {
+        return `
+            <div class="confirm-merge-banner merge-disabled">
+                <div class="merge-icon">
+                    <i class="fas fa-copy"></i>
+                </div>
+                <span class="merge-text">Forecast 下載時將分別輸出各檔案</span>
+            </div>
+        `;
+    }
+}
+
+// 切換手風琴展開/收合
+function toggleAccordion(element) {
+    element.classList.toggle('expanded');
+}
+
+// 關閉確認對話框
+function closeUploadConfirmModal() {
+    const modal = document.getElementById('upload-confirm-modal');
+    if (modal) {
+        modal.classList.remove('show');
+        setTimeout(() => {
+            modal.remove();
+        }, 300);
+    }
+}
+
+// 確認並進入下一步
+function confirmAndProceed() {
+    closeUploadConfirmModal();
 
     // 更新進度
     currentStep = 2;
