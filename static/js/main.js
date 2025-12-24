@@ -6,6 +6,9 @@ let uploadedFiles = {
     transit: false
 };
 
+// 在途文件是否為必填項目
+let transitRequired = true;
+
 // 儲存上傳檔案的詳細資訊
 let uploadedFileInfo = {
     erp: null,
@@ -69,7 +72,13 @@ function initializeEventListeners() {
     document.getElementById('erp-file').addEventListener('change', handleErpUpload);
     document.getElementById('forecast-file').addEventListener('change', handleForecastUpload);
     document.getElementById('transit-file').addEventListener('change', handleTransitUpload);
-    
+
+    // 在途文件必填選項變更
+    const transitCheckbox = document.getElementById('transit-required-checkbox');
+    if (transitCheckbox) {
+        transitCheckbox.addEventListener('change', handleTransitRequiredChange);
+    }
+
     // 處理按鈕
     document.getElementById('cleanup-btn').addEventListener('click', handleCleanup);
     document.getElementById('mapping-config-btn').addEventListener('click', openMappingConfig);
@@ -385,6 +394,25 @@ async function handleTransitUpload(event) {
         console.error('在途文件上傳錯誤:', error);
         showError('transit', '上傳失敗: ' + error.message);
     }
+}
+
+// 處理在途文件必填選項變更
+function handleTransitRequiredChange(event) {
+    transitRequired = event.target.checked;
+    const uploadItem = document.querySelector('#transit-upload-box').closest('.upload-item');
+
+    if (transitRequired) {
+        // 必填模式
+        uploadItem.classList.remove('transit-optional');
+        console.log('在途文件設為必填');
+    } else {
+        // 選填模式
+        uploadItem.classList.add('transit-optional');
+        console.log('在途文件設為選填');
+    }
+
+    // 重新檢查上傳完成狀態
+    checkUploadComplete();
 }
 
 // 顯示載入狀態
@@ -791,8 +819,9 @@ function checkUploadComplete() {
     // 更新 checklist 狀態
     updateUploadChecklist();
 
-    // 檢查是否全部上傳完成
-    const allUploaded = uploadedFiles.erp && uploadedFiles.forecast && uploadedFiles.transit;
+    // 檢查是否全部上傳完成（根據 transitRequired 決定是否需要在途文件）
+    const transitCheck = transitRequired ? uploadedFiles.transit : true;
+    const allUploaded = uploadedFiles.erp && uploadedFiles.forecast && transitCheck;
 
     // 更新下一步按鈕狀態
     const nextBtn = document.getElementById('upload-next-btn');
@@ -802,13 +831,16 @@ function checkUploadComplete() {
 
     // 顯示提示訊息
     if (allUploaded) {
-        showNotification('所有文件上傳完成，請點擊「下一步」繼續', 'success');
+        const msg = transitRequired || uploadedFiles.transit
+            ? '所有文件上傳完成，請點擊「下一步」繼續'
+            : '必填文件上傳完成（在途文件為選填），請點擊「下一步」繼續';
+        showNotification(msg, 'success');
     } else {
         // 顯示還需要上傳哪些文件
         const missing = [];
         if (!uploadedFiles.erp) missing.push('ERP淨需求文件');
         if (!uploadedFiles.forecast) missing.push('Forecast文件');
-        if (!uploadedFiles.transit) missing.push('在途文件');
+        if (transitRequired && !uploadedFiles.transit) missing.push('在途文件');
 
         if (missing.length > 0 && (uploadedFiles.erp || uploadedFiles.forecast || uploadedFiles.transit)) {
             showNotification(`還需要上傳：${missing.join('、')}`, 'info');
@@ -845,22 +877,32 @@ function updateUploadChecklist() {
     if (checkTransit) {
         if (uploadedFiles.transit) {
             checkTransit.classList.add('completed');
+            checkTransit.classList.remove('optional', 'skipped');
             checkTransit.querySelector('i').className = 'fas fa-check-circle';
+            checkTransit.querySelector('span').textContent = '在途文件';
+        } else if (!transitRequired) {
+            // 選填且未上傳時顯示為已跳過
+            checkTransit.classList.add('skipped');
+            checkTransit.classList.remove('completed', 'optional');
+            checkTransit.querySelector('i').className = 'fas fa-minus-circle';
+            checkTransit.querySelector('span').textContent = '在途文件（選填）';
         } else {
-            checkTransit.classList.remove('completed');
+            checkTransit.classList.remove('completed', 'optional', 'skipped');
             checkTransit.querySelector('i').className = 'fas fa-circle';
+            checkTransit.querySelector('span').textContent = '在途文件';
         }
     }
 }
 
 // 下一步：進入數據清理
 function goToNextStep() {
-    // 再次檢查是否全部上傳完成
-    if (!uploadedFiles.erp || !uploadedFiles.forecast || !uploadedFiles.transit) {
+    // 再次檢查是否全部上傳完成（根據 transitRequired 決定是否需要在途文件）
+    const transitCheck = transitRequired ? uploadedFiles.transit : true;
+    if (!uploadedFiles.erp || !uploadedFiles.forecast || !transitCheck) {
         const missing = [];
         if (!uploadedFiles.erp) missing.push('ERP淨需求文件');
         if (!uploadedFiles.forecast) missing.push('Forecast文件');
-        if (!uploadedFiles.transit) missing.push('在途文件');
+        if (transitRequired && !uploadedFiles.transit) missing.push('在途文件');
 
         showNotification(`請先完成上傳：${missing.join('、')}`, 'error');
         return;
@@ -922,6 +964,26 @@ function showUploadConfirmModal() {
 
 // 建立手風琴項目
 function buildAccordionItem(type, title, icon, info) {
+    // 處理在途文件跳過的情況
+    if (type === 'transit' && !info && !transitRequired) {
+        return `
+            <div class="confirm-accordion-item transit-skipped-item">
+                <div class="confirm-accordion-header">
+                    <div class="accordion-icon ${type} skipped">
+                        <i class="fas ${icon}"></i>
+                    </div>
+                    <div class="accordion-summary">
+                        <div class="accordion-title">${title}</div>
+                        <div class="accordion-brief skipped-text">已跳過（選填項目）</div>
+                    </div>
+                    <div class="accordion-status skipped">
+                        <i class="fas fa-minus-circle"></i>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
     if (!info) return '';
 
     let briefText = '';
@@ -1289,48 +1351,69 @@ async function handleMappingProcess() {
     try {
         showButtonLoading('mapping-process-btn');
         showProgress('mapping-progress', 'mapping-progress-fill', 'mapping-progress-text');
-        
+
         // 模擬進度更新
         updateProgressBar('mapping-progress-fill', 'mapping-progress-text', 0, '開始映射整合...');
         await sleep(500);
-        
+
         updateProgressBar('mapping-progress-fill', 'mapping-progress-text', 20, '讀取ERP文件...');
         await sleep(500);
-        
-        updateProgressBar('mapping-progress-fill', 'mapping-progress-text', 40, '讀取在途文件...');
-        await sleep(500);
-        
+
+        if (transitRequired && uploadedFiles.transit) {
+            updateProgressBar('mapping-progress-fill', 'mapping-progress-text', 40, '讀取在途文件...');
+            await sleep(500);
+        } else if (!transitRequired) {
+            updateProgressBar('mapping-progress-fill', 'mapping-progress-text', 40, '跳過在途文件（選填）...');
+            await sleep(300);
+        }
+
         updateProgressBar('mapping-progress-fill', 'mapping-progress-text', 60, '讀取映射配置...');
         await sleep(500);
-        
+
         updateProgressBar('mapping-progress-fill', 'mapping-progress-text', 80, '應用映射關係...');
         await sleep(500);
-        
+
         const response = await fetch('/process_erp_mapping', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                upload_session_id: getUploadSessionId()
+                upload_session_id: getUploadSessionId(),
+                transit_required: transitRequired
             })
         });
-        
+
         const result = await response.json();
-        
+
         updateProgressBar('mapping-progress-fill', 'mapping-progress-text', 100, '整合完成！');
         await sleep(500);
-        
+
         hideProgress('mapping-progress');
-        
+
         if (result.success) {
-            const detailMessage = `
+            let detailMessage = `
                 <div style="margin-top: 10px;">
                     <div>✅ ERP 數據整合完成：${result.erp_rows} 行</div>
-                    <div>✅ 在途數據整合完成：${result.transit_rows} 行</div>
+            `;
+
+            // 根據是否有在途數據顯示不同的訊息
+            if (result.transit_skipped) {
+                detailMessage += `<div>⏭️ 在途數據：已跳過（選填項目）</div>`;
+            } else {
+                detailMessage += `<div>✅ 在途數據整合完成：${result.transit_rows} 行</div>`;
+            }
+
+            detailMessage += `
                     <div style="margin-top: 8px; font-size: 0.9em; color: #666;">
                         <div>• ${result.erp_file}</div>
-                        <div>• ${result.transit_file}</div>
+            `;
+
+            if (!result.transit_skipped) {
+                detailMessage += `<div>• ${result.transit_file}</div>`;
+            }
+
+            detailMessage += `
                     </div>
                 </div>
             `;
@@ -1378,7 +1461,8 @@ async function handleForecast() {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                upload_session_id: getUploadSessionId()
+                upload_session_id: getUploadSessionId(),
+                transit_required: transitRequired
             })
         });
         
@@ -1408,7 +1492,14 @@ async function handleForecast() {
                 `;
 
                 // 如果有 Transit 數據
-                if (result.total_transit_filled !== undefined) {
+                if (result.transit_file_skipped) {
+                    detailMessage += `
+                        <div style="font-weight: 600; margin-top: 12px; margin-bottom: 8px;">🚚 Transit 數據：</div>
+                        <div style="margin-left: 20px;">
+                            <div style="color: #888;">⏭️ 已跳過（選填項目）</div>
+                        </div>
+                    `;
+                } else if (result.total_transit_filled !== undefined) {
                     detailMessage += `
                         <div style="font-weight: 600; margin-top: 12px; margin-bottom: 8px;">🚚 Transit 數據填寫結果（合計）：</div>
                         <div style="margin-left: 20px;">
@@ -1434,7 +1525,14 @@ async function handleForecast() {
                 `;
 
                 // 如果有 Transit 數據
-                if (result.transit_filled !== undefined) {
+                if (result.transit_file_skipped) {
+                    detailMessage += `
+                        <div style="font-weight: 600; margin-top: 12px; margin-bottom: 8px;">🚚 Transit 數據：</div>
+                        <div style="margin-left: 20px;">
+                            <div style="color: #888;">⏭️ 已跳過（選填項目）</div>
+                        </div>
+                    `;
+                } else if (result.transit_filled !== undefined) {
                     detailMessage += `
                         <div style="font-weight: 600; margin-top: 12px; margin-bottom: 8px;">🚚 Transit 數據填寫結果：</div>
                         <div style="margin-left: 20px;">

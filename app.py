@@ -2319,6 +2319,10 @@ def process_erp_mapping():
         test_mode = data.get('test_mode', False)
         test_customer_id = data.get('customer_id')
 
+        # 獲取在途文件是否必填的參數（預設為必填）
+        transit_required = data.get('transit_required', True)
+        print(f"📋 Transit Required: {transit_required}")
+
         # 獲取前端傳來的 upload_session_id
         upload_session_id = data.get('upload_session_id')
         print(f"📥 Mapping - 前端傳來的 session_id: {upload_session_id}")
@@ -2356,9 +2360,16 @@ def process_erp_mapping():
             log_process(user['id'], 'mapping', 'failed', '請先上傳ERP文件')
             return jsonify({'success': False, 'message': '請先上傳ERP文件'})
 
+        # 在途文件檢查（根據 transit_required 決定）
+        transit_skipped = False
         if not transit_file or not os.path.exists(transit_file):
-            log_process(user['id'], 'mapping', 'failed', '請先上傳在途文件')
-            return jsonify({'success': False, 'message': '請先上傳在途文件'})
+            if transit_required:
+                log_process(user['id'], 'mapping', 'failed', '請先上傳在途文件')
+                return jsonify({'success': False, 'message': '請先上傳在途文件'})
+            else:
+                # 在途文件為選填且未上傳，標記為跳過
+                transit_skipped = True
+                print("⏭️ 在途文件為選填且未上傳，跳過在途整合")
 
         # 檢查 mapping 資料來源（優先資料庫）
         mapping_data = None
@@ -2528,11 +2539,13 @@ def process_erp_mapping():
         print(f"✅ ERP數據整合完成: {len(erp_df)} 行 (session: {session_timestamp})")
         
         # === 2. 處理 Transit 數據整合 ===
-        print("開始整合在途數據...")
-        transit_df = pd.read_excel(transit_file)
-
-        if is_pegatron:
+        transit_rows = 0
+        if transit_skipped:
+            print("⏭️ 跳過在途數據整合（選填項目）")
+        elif is_pegatron:
             # === Pegatron 專用 Transit 映射邏輯 ===
+            print("開始整合在途數據...")
+            transit_df = pd.read_excel(transit_file)
             # Transit 匹配規則: L欄(Line 客戶採購單號) + E欄(Ordered Item) 匹配 ERP 的 M欄 + N欄
             print("🔧 使用 Pegatron 專用 Transit 映射邏輯...")
 
@@ -2595,8 +2608,20 @@ def process_erp_mapping():
             # 統計匹配結果
             matched_count = (transit_df['客戶需求地區'] != '').sum()
             print(f"   ✅ Pegatron Transit 映射完成: {matched_count}/{len(transit_df)} 行匹配成功")
+
+            # 新增「已分配」欄位（用於 1 對 1 分配邏輯追蹤）
+            transit_df['已分配'] = ''
+            print(f"📋 Transit 新增「已分配」欄位，目前欄位數: {len(transit_df.columns)}")
+
+            # 保存整合後的 Transit 文件（使用同一個 session 資料夾）
+            integrated_transit_file = os.path.join(processed_folder, 'integrated_transit.xlsx')
+            transit_df.to_excel(integrated_transit_file, index=False)
+            print(f"✅ 在途數據整合完成: {len(transit_df)} 行 (session: {session_timestamp})")
+            transit_rows = len(transit_df)
         else:
             # === 原有 Transit 映射邏輯（Quanta 等其他客戶）===
+            print("開始整合在途數據...")
+            transit_df = pd.read_excel(transit_file)
             # 建立 mapping 字典（從 mapping_data 轉換格式）
             mapping_dict = {}
             if mapping_data:
@@ -2661,45 +2686,48 @@ def process_erp_mapping():
                 lambda x: mapping_dict.get(str(x), {}).get('eta', '') if pd.notna(x) else ''
             )
 
-        # 顯示整合後的欄位結構
-        print(f"✅ 在途數據整合完成，欄位結構:")
-        for i, col in enumerate(transit_df.columns):
-            print(f"   索引{i}: {col}")
-        print(f"   整合後總欄位數: {len(transit_df.columns)}")
-        
-        # 新增「已分配」欄位（用於 1 對 1 分配邏輯追蹤）
-        transit_df['已分配'] = ''
-        print(f"📋 Transit 新增「已分配」欄位，目前欄位數: {len(transit_df.columns)}，最後 3 欄: {list(transit_df.columns[-3:])}")
+            # 顯示整合後的欄位結構
+            print(f"✅ 在途數據整合完成，欄位結構:")
+            for i, col in enumerate(transit_df.columns):
+                print(f"   索引{i}: {col}")
+            print(f"   整合後總欄位數: {len(transit_df.columns)}")
 
-        # 注意：整合後的結構（總共17個欄位，索引0-16）
-        # 索引8: ETA (原始文件中的ETA)
-        # 索引12: 客戶需求地區 (整合後新增)
-        # 索引13: 排程出貨日期斷點 (整合後新增)
-        # 索引14: ETD (整合後新增)
-        # 索引15: ETA_mapping (整合後新增，來自mapping表)
-        # 索引16: 已分配 (整合後新增，用於1對1分配追蹤)
+            # 新增「已分配」欄位（用於 1 對 1 分配邏輯追蹤）
+            transit_df['已分配'] = ''
+            print(f"📋 Transit 新增「已分配」欄位，目前欄位數: {len(transit_df.columns)}，最後 3 欄: {list(transit_df.columns[-3:])}")
 
-        # 保存整合後的 Transit 文件（使用同一個 session 資料夾）
-        integrated_transit_file = os.path.join(processed_folder, 'integrated_transit.xlsx')
-        transit_df.to_excel(integrated_transit_file, index=False)
-        print(f"✅ 在途數據整合完成: {len(transit_df)} 行 (session: {session_timestamp})")
+            # 注意：整合後的結構（總共17個欄位，索引0-16）
+            # 索引8: ETA (原始文件中的ETA)
+            # 索引12: 客戶需求地區 (整合後新增)
+            # 索引13: 排程出貨日期斷點 (整合後新增)
+            # 索引14: ETD (整合後新增)
+            # 索引15: ETA_mapping (整合後新增，來自mapping表)
+            # 索引16: 已分配 (整合後新增，用於1對1分配追蹤)
+
+            # 保存整合後的 Transit 文件（使用同一個 session 資料夾）
+            integrated_transit_file = os.path.join(processed_folder, 'integrated_transit.xlsx')
+            transit_df.to_excel(integrated_transit_file, index=False)
+            print(f"✅ 在途數據整合完成: {len(transit_df)} 行 (session: {session_timestamp})")
+            transit_rows = len(transit_df)
 
         # 存儲 processed 資料夾路徑到 session
         session['current_processed_folder'] = processed_folder
 
         duration = time.time() - start_time
         # 記錄處理成功
-        log_process(user['id'], 'mapping', 'success', f'ERP: {len(erp_df)} 行, Transit: {len(transit_df)} 行', duration)
+        transit_log_msg = f'ERP: {len(erp_df)} 行' + (', Transit: 已跳過' if transit_skipped else f', Transit: {transit_rows} 行')
+        log_process(user['id'], 'mapping', 'success', transit_log_msg, duration)
         log_activity(user['id'], user['username'], 'mapping_success',
-                   f"ERP 和在途數據整合成功", get_client_ip(), request.headers.get('User-Agent'))
+                   f"ERP 數據整合成功" + ("（在途已跳過）" if transit_skipped else " 和在途數據整合成功"), get_client_ip(), request.headers.get('User-Agent'))
 
         return jsonify({
             'success': True,
-            'message': 'ERP 和在途數據整合完成',
+            'message': 'ERP 數據整合完成' + ('（在途已跳過）' if transit_skipped else ' 和在途數據整合完成'),
             'erp_file': 'integrated_erp.xlsx',
-            'transit_file': 'integrated_transit.xlsx',
+            'transit_file': '' if transit_skipped else 'integrated_transit.xlsx',
             'erp_rows': len(erp_df),
-            'transit_rows': len(transit_df)
+            'transit_rows': transit_rows,
+            'transit_skipped': transit_skipped
         })
     except Exception as e:
         duration = time.time() - start_time
@@ -2720,6 +2748,10 @@ def run_forecast():
         # 檢查是否為測試模式（silent=True 避免沒有 JSON body 時報錯）
         data = request.get_json(silent=True) or {}
         test_mode = data.get('test_mode', False)
+
+        # 獲取在途文件是否必填的參數（預設為必填）
+        transit_required = data.get('transit_required', True)
+        print(f"📋 Forecast - Transit Required: {transit_required}")
 
         # 獲取前端傳來的 upload_session_id
         upload_session_id = data.get('upload_session_id')
@@ -2759,6 +2791,10 @@ def run_forecast():
 
         # 檢查是否有 Transit 文件
         has_transit = os.path.exists(integrated_transit)
+        # 如果在途為選填且沒有在途文件，標記為跳過
+        transit_skipped = not transit_required and not has_transit
+        if transit_skipped:
+            print("⏭️ 在途數據跳過（選填項目且未上傳）")
 
         # 根據 processed 資料夾中的檔案來判斷是否為多檔案模式（不依賴 session 標記）
         # 掃描 cleaned_forecast_*.xlsx 或 cleaned_forecast_*.xls 檔案
@@ -2866,7 +2902,8 @@ def run_forecast():
                         'total_erp_filled': total_erp_filled,
                         'total_erp_skipped': 0,
                         'total_transit_filled': total_transit_filled,
-                        'total_transit_skipped': 0
+                        'total_transit_skipped': 0,
+                        'transit_file_skipped': transit_skipped
                     })
                 else:
                     log_process(user['id'], 'forecast', 'failed', '所有檔案處理失敗', duration)
@@ -2922,6 +2959,7 @@ def run_forecast():
                             'erp_skipped': processor.total_skipped,
                             'transit_filled': processor.total_transit_filled,
                             'transit_skipped': processor.total_transit_skipped,
+                            'transit_file_skipped': transit_skipped,
                             'file_size': file_size
                         }
                         return jsonify(result_data)
@@ -2981,7 +3019,8 @@ def run_forecast():
                         'file': 'forecast_result.xlsx',
                         'erp_filled': processor.total_filled,
                         'erp_skipped': processor.total_skipped,
-                        'file_size': file_size
+                        'file_size': file_size,
+                        'transit_file_skipped': transit_skipped
                     }
 
                     if has_transit:
@@ -3109,7 +3148,8 @@ def run_forecast():
                     'total_erp_skipped': total_erp_skipped,
                     'file_count': len(forecast_files),
                     'success_count': success_count,
-                    'fail_count': fail_count
+                    'fail_count': fail_count,
+                    'transit_file_skipped': transit_skipped
                 }
 
                 if has_transit:
