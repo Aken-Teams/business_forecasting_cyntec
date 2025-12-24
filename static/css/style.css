@@ -1218,6 +1218,67 @@ body {
     padding-right: 24px;
 }
 
+/* 分頁容器 */
+.pagination-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    background: #f8f9fa;
+    border-radius: 0 0 10px 10px;
+    border-top: 1px solid #e7e4df;
+    margin-top: -1px;
+}
+
+.pagination-info {
+    color: #666;
+    font-size: 14px;
+}
+
+.pagination-buttons {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+}
+
+.pagination-btn {
+    min-width: 36px;
+    height: 36px;
+    padding: 0 10px;
+    border: 1px solid #ddd;
+    background: #fff;
+    color: #333;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.pagination-btn:hover:not(:disabled) {
+    background: #bc773e;
+    border-color: #bc773e;
+    color: #fff;
+}
+
+.pagination-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.pagination-btn.active {
+    background: #bc773e;
+    border-color: #bc773e;
+    color: #fff;
+    font-weight: bold;
+}
+
+.pagination-btn.pagination-num {
+    min-width: 40px;
+}
+
 /* 載入狀態 */
 .loading-state {
     text-align: center;

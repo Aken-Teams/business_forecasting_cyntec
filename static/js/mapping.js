@@ -1,6 +1,11 @@
 // 映射配置頁面JavaScript
-let customers = [];
-let mappingData = {};
+let mappingList = [];  // 新格式：列表形式，每筆為一個 mapping 記錄
+let customers = [];    // 舊格式相容
+let mappingData = {};  // 舊格式相容
+
+// 分頁設定
+let currentPage = 1;
+const PAGE_SIZE = 10;  // 每頁顯示 10 筆
 
 // 下拉選單選項定義
 const SCHEDULE_OPTIONS = [
@@ -79,18 +84,30 @@ function initializeEventListeners() {
 async function loadMappingData() {
     try {
         showLoading();
-        
+
         const response = await fetch('/get_mapping_data');
         const result = await response.json();
-        
+
         if (result.success) {
-            customers = result.customers;
-            mappingData = result.existing_mapping || {};
-            renderMappingTable();
+            // 檢查是新格式（list）還是舊格式
+            if (result.format === 'list' && result.mapping_list) {
+                // 新格式：直接使用列表
+                mappingList = result.mapping_list;
+                renderMappingTableList();
+            } else {
+                // 舊格式：轉換為列表格式
+                customers = result.customers || [];
+                mappingData = result.existing_mapping || {};
+                // 轉換舊格式為新格式
+                mappingList = convertOldFormatToList(customers, mappingData);
+                renderMappingTableList();
+            }
             hideLoading();
-            
+
             // 顯示數據來源
-            if (result.source === 'mapping_table') {
+            if (result.source === 'database') {
+                showNotification(`已載入 ${mappingList.length} 筆映射資料`, 'success');
+            } else if (result.source === 'mapping_table') {
                 showNotification('已載入現有mapping表數據', 'success');
             } else {
                 showNotification('已載入ERP文件客戶數據，請配置映射關係', 'info');
@@ -103,31 +120,59 @@ async function loadMappingData() {
     }
 }
 
-// 渲染映射表格
-function renderMappingTable() {
+// 將舊格式轉換為列表格式
+function convertOldFormatToList(customers, mappingData) {
+    const list = [];
+    customers.forEach(customer => {
+        list.push({
+            customer_name: customer,
+            region: mappingData.regions ? (mappingData.regions[customer] || '') : '',
+            schedule_breakpoint: mappingData.schedule_breakpoints ? (mappingData.schedule_breakpoints[customer] || '') : '',
+            etd: mappingData.etd ? (mappingData.etd[customer] || '') : '',
+            eta: mappingData.eta ? (mappingData.eta[customer] || '') : ''
+        });
+    });
+    return list;
+}
+
+// 計算總頁數
+function getTotalPages() {
+    return Math.ceil(mappingList.length / PAGE_SIZE);
+}
+
+// 取得當前頁的資料
+function getCurrentPageData() {
+    const startIndex = (currentPage - 1) * PAGE_SIZE;
+    const endIndex = startIndex + PAGE_SIZE;
+    return mappingList.slice(startIndex, endIndex).map((item, i) => ({
+        ...item,
+        originalIndex: startIndex + i  // 保存原始索引
+    }));
+}
+
+// 渲染映射表格（新版列表格式，支援分頁）
+function renderMappingTableList() {
     const tbody = document.getElementById('mapping-tbody');
     tbody.innerHTML = '';
 
-    customers.forEach((customer, index) => {
+    // 取得當前頁的資料
+    const pageData = getCurrentPageData();
+
+    pageData.forEach((item) => {
+        const index = item.originalIndex;  // 使用原始索引
         const row = document.createElement('tr');
         row.setAttribute('data-row-index', index);
 
-        // 獲取現有數據
-        const regionValue = mappingData.regions && mappingData.regions[customer] ? mappingData.regions[customer] : '';
-        const scheduleValue = mappingData.schedule_breakpoints && mappingData.schedule_breakpoints[customer] ? mappingData.schedule_breakpoints[customer] : '';
-        const etdValue = mappingData.etd && mappingData.etd[customer] ? mappingData.etd[customer] : '';
-        const etaValue = mappingData.eta && mappingData.eta[customer] ? mappingData.eta[customer] : '';
-
         // 解析 ETD 和 ETA 的週別和星期
-        const etdParsed = parseWeekDay(etdValue);
-        const etaParsed = parseWeekDay(etaValue);
+        const etdParsed = parseWeekDay(item.etd || '');
+        const etaParsed = parseWeekDay(item.eta || '');
 
         row.innerHTML = `
-            <td><input type="text" data-row="${index}" data-field="customer" placeholder="輸入客戶簡稱" value="${customer}" class="customer-name-input"></td>
-            <td><input type="text" data-row="${index}" data-field="region" placeholder="輸入地區代碼" value="${regionValue}"></td>
+            <td><input type="text" data-row="${index}" data-field="customer" placeholder="輸入客戶簡稱" value="${item.customer_name || ''}" class="customer-name-input"></td>
+            <td><input type="text" data-row="${index}" data-field="region" placeholder="輸入地區代碼" value="${item.region || ''}"></td>
             <td>
                 <select data-row="${index}" data-field="schedule" class="mapping-select">
-                    ${generateSelectOptions(SCHEDULE_OPTIONS, scheduleValue)}
+                    ${generateSelectOptions(SCHEDULE_OPTIONS, item.schedule_breakpoint || '')}
                 </select>
             </td>
             <td>
@@ -151,7 +196,7 @@ function renderMappingTable() {
                 </div>
             </td>
             <td class="action-cell">
-                <button class="btn btn-danger btn-sm delete-btn" onclick="deleteCustomer(${index})" title="刪除此客戶">
+                <button class="btn btn-danger btn-sm delete-btn" onclick="deleteCustomerFromList(${index})" title="刪除此記錄">
                     <i class="fas fa-trash"></i>
                 </button>
             </td>
@@ -161,25 +206,144 @@ function renderMappingTable() {
 
     // 顯示表格
     document.getElementById('mapping-table-container').style.display = 'block';
+
+    // 渲染分頁控件
+    renderPagination();
 }
 
-// 新增客戶
+// 渲染分頁控件
+function renderPagination() {
+    const totalPages = getTotalPages();
+    let paginationContainer = document.getElementById('pagination-container');
+
+    // 如果容器不存在，創建它
+    if (!paginationContainer) {
+        paginationContainer = document.createElement('div');
+        paginationContainer.id = 'pagination-container';
+        paginationContainer.className = 'pagination-container';
+        const tableWrapper = document.querySelector('.table-wrapper');
+        if (tableWrapper) {
+            tableWrapper.after(paginationContainer);
+        }
+    }
+
+    // 如果只有一頁或沒有資料，隱藏分頁
+    if (totalPages <= 1) {
+        paginationContainer.style.display = 'none';
+        return;
+    }
+
+    paginationContainer.style.display = 'flex';
+
+    // 生成分頁 HTML
+    let paginationHTML = `
+        <div class="pagination-info">
+            共 ${mappingList.length} 筆記錄，第 ${currentPage} / ${totalPages} 頁
+        </div>
+        <div class="pagination-buttons">
+            <button class="pagination-btn" onclick="goToPage(1)" ${currentPage === 1 ? 'disabled' : ''}>
+                <i class="fas fa-angle-double-left"></i>
+            </button>
+            <button class="pagination-btn" onclick="goToPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>
+                <i class="fas fa-angle-left"></i>
+            </button>
+    `;
+
+    // 頁碼按鈕（最多顯示 5 個）
+    const maxVisiblePages = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+
+    if (endPage - startPage + 1 < maxVisiblePages) {
+        startPage = Math.max(1, endPage - maxVisiblePages + 1);
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+        paginationHTML += `
+            <button class="pagination-btn pagination-num ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">
+                ${i}
+            </button>
+        `;
+    }
+
+    paginationHTML += `
+            <button class="pagination-btn" onclick="goToPage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>
+                <i class="fas fa-angle-right"></i>
+            </button>
+            <button class="pagination-btn" onclick="goToPage(${totalPages})" ${currentPage === totalPages ? 'disabled' : ''}>
+                <i class="fas fa-angle-double-right"></i>
+            </button>
+        </div>
+    `;
+
+    paginationContainer.innerHTML = paginationHTML;
+}
+
+// 跳轉到指定頁
+function goToPage(page) {
+    const totalPages = getTotalPages();
+    if (page < 1 || page > totalPages) return;
+
+    // 保存當前頁面的編輯
+    saveCurrentPageEdits();
+
+    currentPage = page;
+    renderMappingTableList();
+}
+
+// 保存當前頁面的編輯到 mappingList
+function saveCurrentPageEdits() {
+    const rows = document.querySelectorAll('#mapping-tbody tr');
+    rows.forEach(row => {
+        const index = parseInt(row.getAttribute('data-row-index'));
+        if (index >= 0 && index < mappingList.length) {
+            const customerInput = row.querySelector('input[data-field="customer"]');
+            const regionInput = row.querySelector('input[data-field="region"]');
+            const scheduleSelect = row.querySelector('select[data-field="schedule"]');
+            const etdWeekSelect = row.querySelector('select[data-field="etd-week"]');
+            const etdDaySelect = row.querySelector('select[data-field="etd-day"]');
+            const etaWeekSelect = row.querySelector('select[data-field="eta-week"]');
+            const etaDaySelect = row.querySelector('select[data-field="eta-day"]');
+
+            mappingList[index].customer_name = customerInput ? customerInput.value.trim() : '';
+            mappingList[index].region = regionInput ? regionInput.value.trim() : '';
+            mappingList[index].schedule_breakpoint = scheduleSelect ? scheduleSelect.value : '';
+
+            const etdWeek = etdWeekSelect ? etdWeekSelect.value : '';
+            const etdDay = etdDaySelect ? etdDaySelect.value : '';
+            const etaWeek = etaWeekSelect ? etaWeekSelect.value : '';
+            const etaDay = etaDaySelect ? etaDaySelect.value : '';
+
+            mappingList[index].etd = combineWeekDay(etdWeek, etdDay);
+            mappingList[index].eta = combineWeekDay(etaWeek, etaDay);
+        }
+    });
+}
+
+// 渲染映射表格（舊版相容）
+function renderMappingTable() {
+    // 轉換為列表格式後使用新版渲染
+    mappingList = convertOldFormatToList(customers, mappingData);
+    renderMappingTableList();
+}
+
+// 新增客戶（新版列表格式）
 function addNewCustomer() {
-    const newCustomerName = `新客戶_${Date.now()}`;
-    customers.push(newCustomerName);
+    // 保存當前頁面的編輯
+    saveCurrentPageEdits();
 
-    // 初始化新客戶的映射數據
-    if (!mappingData.regions) mappingData.regions = {};
-    if (!mappingData.schedule_breakpoints) mappingData.schedule_breakpoints = {};
-    if (!mappingData.etd) mappingData.etd = {};
-    if (!mappingData.eta) mappingData.eta = {};
+    // 新增一筆空的 mapping 記錄
+    mappingList.push({
+        customer_name: '',
+        region: '',
+        schedule_breakpoint: '',
+        etd: '',
+        eta: ''
+    });
 
-    mappingData.regions[newCustomerName] = '';
-    mappingData.schedule_breakpoints[newCustomerName] = '';
-    mappingData.etd[newCustomerName] = '';
-    mappingData.eta[newCustomerName] = '';
-
-    renderMappingTable();
+    // 跳轉到最後一頁
+    currentPage = getTotalPages();
+    renderMappingTableList();
 
     // 滾動到新增的行並聚焦
     const tbody = document.getElementById('mapping-tbody');
@@ -193,15 +357,16 @@ function addNewCustomer() {
         }
     }
 
-    showNotification('已新增客戶，請填寫客戶簡稱和相關資訊', 'info');
+    showNotification('已新增一筆映射記錄，請填寫客戶簡稱和相關資訊', 'info');
 }
 
 // 待刪除的客戶索引（用於確認刪除）
 let pendingDeleteIndex = null;
 
-// 顯示刪除確認彈跳視窗
-function showDeleteConfirmModal(index) {
-    const customerName = customers[index];
+// 顯示刪除確認彈跳視窗（新版列表格式）
+function showDeleteConfirmModalList(index) {
+    const item = mappingList[index];
+    const displayName = item.customer_name ? `${item.customer_name} - ${item.region}` : `記錄 #${index + 1}`;
     pendingDeleteIndex = index;
 
     // 建立 Modal HTML（如果不存在）
@@ -224,7 +389,7 @@ function showDeleteConfirmModal(index) {
                     <button class="btn btn-secondary" onclick="hideDeleteConfirmModal()">
                         <i class="fas fa-times"></i> 取消
                     </button>
-                    <button class="btn btn-danger" onclick="confirmDeleteCustomer()">
+                    <button class="btn btn-danger" onclick="confirmDeleteFromList()">
                         <i class="fas fa-trash"></i> 確認刪除
                     </button>
                 </div>
@@ -235,7 +400,7 @@ function showDeleteConfirmModal(index) {
 
     // 更新訊息
     document.getElementById('delete-confirm-message').textContent =
-        `確定要刪除客戶「${customerName}」嗎？`;
+        `確定要刪除「${displayName}」嗎？`;
 
     // 顯示 Modal
     modal.style.display = 'flex';
@@ -256,71 +421,63 @@ function hideDeleteConfirmModal() {
     pendingDeleteIndex = null;
 }
 
-// 確認刪除客戶
-function confirmDeleteCustomer() {
+// 確認刪除（新版列表格式）
+function confirmDeleteFromList() {
     if (pendingDeleteIndex === null) return;
 
     const index = pendingDeleteIndex;
-    const customerName = customers[index];
+    const item = mappingList[index];
+    const displayName = item.customer_name ? `${item.customer_name} - ${item.region}` : `記錄 #${index + 1}`;
 
-    // 從陣列中移除
-    customers.splice(index, 1);
+    // 從列表中移除
+    mappingList.splice(index, 1);
 
-    // 從映射數據中移除
-    if (mappingData.regions && mappingData.regions[customerName]) {
-        delete mappingData.regions[customerName];
-    }
-    if (mappingData.schedule_breakpoints && mappingData.schedule_breakpoints[customerName]) {
-        delete mappingData.schedule_breakpoints[customerName];
-    }
-    if (mappingData.etd && mappingData.etd[customerName]) {
-        delete mappingData.etd[customerName];
-    }
-    if (mappingData.eta && mappingData.eta[customerName]) {
-        delete mappingData.eta[customerName];
+    // 如果刪除後當前頁沒有資料，則跳轉到前一頁
+    const totalPages = getTotalPages();
+    if (currentPage > totalPages && totalPages > 0) {
+        currentPage = totalPages;
     }
 
     // 隱藏 Modal
     hideDeleteConfirmModal();
 
     // 重新渲染表格
-    renderMappingTable();
-    showNotification(`已刪除客戶「${customerName}」`, 'success');
+    renderMappingTableList();
+    showNotification(`已刪除「${displayName}」`, 'success');
 }
 
-// 刪除客戶（顯示確認視窗）
+// 刪除客戶（從列表，顯示確認視窗）
+function deleteCustomerFromList(index) {
+    showDeleteConfirmModalList(index);
+}
+
+// 舊版刪除函數（相容）
 function deleteCustomer(index) {
-    showDeleteConfirmModal(index);
+    deleteCustomerFromList(index);
 }
 
-// 保存映射配置
+// 舊版確認刪除（相容）
+function confirmDeleteCustomer() {
+    confirmDeleteFromList();
+}
+
+// 保存映射配置（新版列表格式）
 async function saveMapping() {
     try {
-        // 收集所有輸入數據 - 使用新的 data-row 結構
-        const rows = document.querySelectorAll('#mapping-tbody tr');
-        const mapping = {
-            regions: {},
-            schedule_breakpoints: {},
-            etd: {},
-            eta: {}
-        };
+        // 先保存當前頁面的編輯到 mappingList
+        saveCurrentPageEdits();
 
-        // 用於檢查重複的客戶名稱
-        const customerNames = new Set();
+        // 使用完整的 mappingList 來驗證和保存
+        // 用於檢查重複的 (customer_name, region) 組合
+        const uniqueKeys = new Set();
         let hasDuplicate = false;
         let hasEmptyCustomer = false;
+        let hasEmptyRegion = false;
 
-        rows.forEach(row => {
-            const customerInput = row.querySelector('input[data-field="customer"]');
-            const regionInput = row.querySelector('input[data-field="region"]');
-            const scheduleSelect = row.querySelector('select[data-field="schedule"]');
-            // ETD 和 ETA 現在是兩個下拉選單的組合
-            const etdWeekSelect = row.querySelector('select[data-field="etd-week"]');
-            const etdDaySelect = row.querySelector('select[data-field="etd-day"]');
-            const etaWeekSelect = row.querySelector('select[data-field="eta-week"]');
-            const etaDaySelect = row.querySelector('select[data-field="eta-day"]');
-
-            const customerName = customerInput ? customerInput.value.trim() : '';
+        // 遍歷完整的 mappingList 進行驗證
+        mappingList.forEach((item, index) => {
+            const customerName = (item.customer_name || '').trim();
+            const regionValue = (item.region || '').trim();
 
             // 檢查空的客戶名稱
             if (!customerName) {
@@ -328,29 +485,33 @@ async function saveMapping() {
                 return;
             }
 
-            // 檢查重複
-            if (customerNames.has(customerName)) {
+            // 檢查空的地區代碼
+            if (!regionValue) {
+                hasEmptyRegion = true;
+                return;
+            }
+
+            // 檢查重複的 (customer_name, region) 組合
+            const uniqueKey = `${customerName}|${regionValue}`;
+            if (uniqueKeys.has(uniqueKey)) {
                 hasDuplicate = true;
                 return;
             }
-            customerNames.add(customerName);
-
-            // 收集數據
-            const regionValue = regionInput ? regionInput.value.trim() : '';
-            const scheduleValue = scheduleSelect ? scheduleSelect.value : '';
-            // 組合 ETD 和 ETA 的週別和星期
-            const etdWeek = etdWeekSelect ? etdWeekSelect.value : '';
-            const etdDay = etdDaySelect ? etdDaySelect.value : '';
-            const etaWeek = etaWeekSelect ? etaWeekSelect.value : '';
-            const etaDay = etaDaySelect ? etaDaySelect.value : '';
-            const etdValue = combineWeekDay(etdWeek, etdDay);
-            const etaValue = combineWeekDay(etaWeek, etaDay);
-
-            if (regionValue) mapping.regions[customerName] = regionValue;
-            if (scheduleValue) mapping.schedule_breakpoints[customerName] = scheduleValue;
-            if (etdValue) mapping.etd[customerName] = etdValue;
-            if (etaValue) mapping.eta[customerName] = etaValue;
+            uniqueKeys.add(uniqueKey);
         });
+
+        // 準備要保存的資料
+        const mappingListToSave = mappingList.filter(item => {
+            const customerName = (item.customer_name || '').trim();
+            const regionValue = (item.region || '').trim();
+            return customerName && regionValue;
+        }).map(item => ({
+            customer_name: (item.customer_name || '').trim(),
+            region: (item.region || '').trim(),
+            schedule_breakpoint: item.schedule_breakpoint || '',
+            etd: item.etd || '',
+            eta: item.eta || ''
+        }));
 
         // 驗證
         if (hasEmptyCustomer) {
@@ -358,18 +519,23 @@ async function saveMapping() {
             return;
         }
 
-        if (hasDuplicate) {
-            showNotification('存在重複的客戶簡稱，請檢查後再保存', 'error');
+        if (hasEmptyRegion) {
+            showNotification('客戶需求地區不能為空，請檢查後再保存', 'error');
             return;
         }
 
-        // 發送到服務器
-        const response = await fetch('/save_mapping', {
+        if (hasDuplicate) {
+            showNotification('存在重複的（客戶簡稱 + 地區）組合，請檢查後再保存', 'error');
+            return;
+        }
+
+        // 發送到服務器（使用新的列表格式 API）
+        const response = await fetch('/save_mapping_list', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(mapping)
+            body: JSON.stringify({ mapping_list: mappingListToSave })
         });
 
         const result = await response.json();

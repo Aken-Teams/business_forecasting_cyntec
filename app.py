@@ -19,7 +19,7 @@ load_dotenv()
 from database import (
     get_db_connection, init_database, create_default_users,
     verify_user, log_activity, log_upload, log_process, get_user_by_id,
-    get_customer_mappings, get_customer_mappings_raw, save_customer_mappings, has_customer_mappings,
+    get_customer_mappings, get_customer_mappings_raw, save_customer_mappings, save_customer_mappings_list, has_customer_mappings,
     # IT/Admin 管理介面函數
     get_upload_records, get_process_records, get_activity_logs_filtered,
     get_all_customer_mappings, get_users_with_company, get_all_users,
@@ -1793,25 +1793,29 @@ def mapping():
 def get_mapping_data():
     user = get_current_user()
     try:
-        # 1. 首先嘗試從資料庫讀取用戶的 mapping 資料
+        # 1. 首先嘗試從資料庫讀取用戶的 mapping 資料（使用 raw 格式以支援多記錄）
         if has_customer_mappings(user['id']):
             print(f"從資料庫讀取用戶 {user['username']} 的 mapping 資料...")
-            existing_mapping = get_customer_mappings(user['id'])
+            raw_mappings = get_customer_mappings_raw(user['id'])
 
-            if existing_mapping:
-                # 收集所有客戶名稱
-                all_customers = set()
-                all_customers.update(existing_mapping.get('regions', {}).keys())
-                all_customers.update(existing_mapping.get('schedule_breakpoints', {}).keys())
-                all_customers.update(existing_mapping.get('etd', {}).keys())
-                all_customers.update(existing_mapping.get('eta', {}).keys())
+            if raw_mappings:
+                # 返回列表格式，每筆記錄為一行
+                mapping_list = []
+                for row in raw_mappings:
+                    mapping_list.append({
+                        'customer_name': row['customer_name'] or '',
+                        'region': row['region'] or '',
+                        'schedule_breakpoint': row['schedule_breakpoint'] or '',
+                        'etd': row['etd'] or '',
+                        'eta': row['eta'] or ''
+                    })
 
                 return jsonify({
                     'success': True,
-                    'customers': list(all_customers),
+                    'mapping_list': mapping_list,
                     'customer_column': '客戶簡稱',
-                    'existing_mapping': existing_mapping,
-                    'source': 'database'
+                    'source': 'database',
+                    'format': 'list'
                 })
 
         # 2. 如果資料庫沒有資料，嘗試從 mapping 表 Excel 讀取（向後相容）
@@ -1975,6 +1979,61 @@ def save_mapping():
             user_agent=request.headers.get('User-Agent')
         )
         return jsonify({'success': False, 'message': f'保存映射表失敗: {str(e)}'})
+
+
+@app.route('/save_mapping_list', methods=['POST'])
+@login_required
+def save_mapping_list():
+    """
+    新版保存映射 API - 支援列表格式
+    每筆記錄以 (customer_name, region) 為唯一 key
+    """
+    user = get_current_user()
+    try:
+        data = request.json
+        mapping_list = data.get('mapping_list', [])
+
+        if not mapping_list:
+            return jsonify({'success': False, 'message': '沒有資料需要保存'})
+
+        # 直接儲存列表格式到資料庫
+        if save_customer_mappings_list(user['id'], mapping_list):
+            print(f"✅ 已儲存 {len(mapping_list)} 筆 mapping 資料到資料庫 (user: {user['username']})")
+
+            # 記錄 LOG
+            log_activity(
+                user_id=user['id'],
+                username=user['username'],
+                action_type='mapping_config_save',
+                action_detail=f"用戶 {user['display_name']} 保存映射配置，共 {len(mapping_list)} 筆記錄",
+                ip_address=get_client_ip(),
+                user_agent=request.headers.get('User-Agent')
+            )
+
+            return jsonify({'success': True, 'message': f'映射表保存成功，共 {len(mapping_list)} 筆記錄'})
+        else:
+            log_activity(
+                user_id=user['id'],
+                username=user['username'],
+                action_type='mapping_config_failed',
+                action_detail=f"用戶 {user['display_name']} 保存映射配置失敗：儲存至資料庫失敗",
+                ip_address=get_client_ip(),
+                user_agent=request.headers.get('User-Agent')
+            )
+            return jsonify({'success': False, 'message': '儲存映射資料到資料庫失敗'})
+
+    except Exception as e:
+        print(f"❌ 保存映射表失敗: {str(e)}")
+        log_activity(
+            user_id=user['id'],
+            username=user['username'],
+            action_type='mapping_config_failed',
+            action_detail=f"用戶 {user['display_name']} 保存映射配置異常：{str(e)}",
+            ip_address=get_client_ip(),
+            user_agent=request.headers.get('User-Agent')
+        )
+        return jsonify({'success': False, 'message': f'保存映射表失敗: {str(e)}'})
+
 
 @app.route('/process_forecast_cleanup', methods=['POST'])
 @login_required

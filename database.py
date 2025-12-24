@@ -1162,6 +1162,61 @@ def save_customer_mappings(user_id, mapping_data):
     finally:
         connection.close()
 
+
+def save_customer_mappings_list(user_id, mapping_list):
+    """
+    儲存用戶的客戶映射資料（列表格式，完整替換模式）
+    每筆記錄以 (customer_name, region) 為唯一 key
+    會先刪除用戶的所有現有 mapping 資料，再插入新資料
+
+    mapping_list 格式：
+    [
+        {'customer_name': '和碩', 'region': '3A32', 'schedule_breakpoint': '週三', 'etd': '下週二', 'eta': '下下週二'},
+        {'customer_name': '和碩', 'region': '3A33', 'schedule_breakpoint': '週三', 'etd': '下週二', 'eta': '下下週二'},
+        ...
+    ]
+    """
+    connection = get_db_connection()
+    if not connection:
+        return False
+
+    try:
+        with connection.cursor() as cursor:
+            # 先刪除該用戶的所有現有映射資料
+            cursor.execute("""
+                DELETE FROM customer_mappings WHERE user_id = %s
+            """, (user_id,))
+            print(f"🔄 已清除用戶 {user_id} 的舊映射資料")
+
+            # 插入新的映射資料
+            for item in mapping_list:
+                customer_name = item.get('customer_name', '')
+                region = item.get('region', '')
+                schedule_breakpoint = item.get('schedule_breakpoint', '')
+                etd = item.get('etd', '')
+                eta = item.get('eta', '')
+
+                if not customer_name or not region:
+                    continue  # 跳過無效記錄
+
+                cursor.execute("""
+                    INSERT INTO customer_mappings
+                    (user_id, customer_name, delivery_location, region, schedule_breakpoint, etd, eta)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """, (user_id, customer_name, '', region, schedule_breakpoint, etd, eta))
+
+            connection.commit()
+            print(f"✅ 已儲存 {len(mapping_list)} 筆映射資料 (user_id: {user_id})")
+            return True
+
+    except Exception as e:
+        print(f"❌ 儲存客戶映射資料（列表格式）失敗: {e}")
+        connection.rollback()
+        return False
+    finally:
+        connection.close()
+
+
 def delete_customer_mapping(user_id, customer_name):
     """刪除指定用戶的特定客戶映射"""
     connection = get_db_connection()
