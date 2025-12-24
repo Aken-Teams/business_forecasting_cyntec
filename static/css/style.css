@@ -400,9 +400,9 @@ body {
     gap: 6px;
 }
 
-/* Forecast 多檔案上傳區塊 */
+/* Forecast 多檔案上傳區塊 - 統一卡片高度 */
 .upload-item.forecast-multi-upload .upload-status {
-    max-height: 320px;
+    max-height: 220px;
     overflow-y: auto;
     align-items: flex-start;
 }
@@ -543,7 +543,7 @@ body {
     border-top: 1px dashed #d4cbc4;
     text-align: left;
     font-size: 0.85rem;
-    max-height: 180px;
+    max-height: 120px;
     overflow-y: auto;
 }
 

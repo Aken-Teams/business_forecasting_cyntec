@@ -190,7 +190,7 @@ async function handleForecastUpload(event) {
             }
             await sleep(500);
 
-            showForecastMultiUploadSuccess(result, shouldMerge);
+            showForecastMultiUploadSuccess(result);
             uploadedFiles.forecast = true;
             // 儲存檔案資訊
             uploadedFileInfo.forecast = {
@@ -198,7 +198,6 @@ async function handleForecastUpload(event) {
                 fileCount: files.length,
                 totalRows: result.total_rows || result.rows || 0,
                 totalSize: result.total_size || result.file_size,
-                shouldMerge: shouldMerge,
                 details: result.files || null
             };
             checkUploadComplete();
@@ -287,7 +286,7 @@ function updateFileProgress(index, status, percentage) {
 }
 
 // 顯示 Forecast 多檔案上傳成功
-function showForecastMultiUploadSuccess(result, shouldMerge) {
+function showForecastMultiUploadSuccess(result) {
     const status = document.getElementById('forecast-status');
     const fileCount = result.file_count || 1;
     const totalRows = result.total_rows || result.rows || 0;
@@ -304,11 +303,6 @@ function showForecastMultiUploadSuccess(result, shouldMerge) {
         if (totalSize) {
             detailsHtml += ` (${totalSize})`;
         }
-        // 顯示合併模式
-        const mergeText = shouldMerge ?
-            '<span style="color: #27ae60;"><i class="fas fa-check-circle"></i> 下載時合併</span>' :
-            '<span style="color: #3498db;"><i class="fas fa-files-o"></i> 下載時分開</span>';
-        detailsHtml += `<div style="margin-top: 5px; font-size: 0.85rem;">${mergeText}</div>`;
 
         // 顯示每個檔案的詳細資訊
         if (result.files && result.files.length > 0) {
@@ -1030,13 +1024,17 @@ function buildAccordionItem(type, title, icon, info) {
     `;
 }
 
-// 建立獨立的合併狀態橫幅
+// 建立獨立的合併狀態橫幅（直接讀取合併區塊 checkbox 的當前狀態）
 function buildMergeBanner() {
     const info = uploadedFileInfo.forecast;
     // 只有多檔案時才顯示合併狀態
     if (!info || info.fileCount <= 1) return '';
 
-    if (info.shouldMerge) {
+    // 直接讀取合併區塊 checkbox 的當前狀態，而不是上傳時儲存的值
+    const mergeCheckbox = document.getElementById('merge-forecast-files');
+    const shouldMerge = mergeCheckbox ? mergeCheckbox.checked : true;
+
+    if (shouldMerge) {
         return `
             <div class="confirm-merge-banner merge-enabled">
                 <div class="merge-icon">
