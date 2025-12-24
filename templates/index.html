@@ -138,18 +138,6 @@
                                     <button class="btn btn-primary" onclick="document.getElementById('forecast-file').click()">
                                         <i class="fas fa-plus"></i> 選擇文件
                                     </button>
-                                    <!-- 合併選項 -->
-                                    <div class="merge-option">
-                                        <label class="merge-checkbox">
-                                            <input type="checkbox" id="merge-forecast-files">
-                                            <span class="checkmark"></span>
-                                            <span class="merge-label">下載時合併檔案</span>
-                                        </label>
-                                        <div class="merge-hint">
-                                            <i class="fas fa-info-circle"></i>
-                                            勾選後，最終下載的 Forecast 會合併為單一檔案
-                                        </div>
-                                    </div>
                                 </div>
                                 <div class="upload-status" id="forecast-status" style="display: none;">
                                     <div class="status-content">
@@ -181,6 +169,26 @@
                                             <div class="status-details" id="transit-details"></div>
                                         </div>
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Forecast 合併選項 - 獨立醒目區塊 -->
+                        <div class="merge-option-banner" id="merge-option-banner">
+                            <div class="merge-option-content">
+                                <div class="merge-option-icon">
+                                    <i class="fas fa-object-group"></i>
+                                </div>
+                                <div class="merge-option-text">
+                                    <label class="merge-checkbox">
+                                        <input type="checkbox" id="merge-forecast-files">
+                                        <span class="checkmark"></span>
+                                        <span class="merge-label">下載時合併 Forecast 檔案</span>
+                                    </label>
+                                    <p class="merge-description">
+                                        <i class="fas fa-info-circle"></i>
+                                        上傳多個 Forecast 檔案時，勾選此選項可在最終下載時自動合併為單一檔案
+                                    </p>
                                 </div>
                             </div>
                         </div>

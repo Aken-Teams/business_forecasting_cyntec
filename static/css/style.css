@@ -319,7 +319,15 @@ body {
 
 .upload-item {
     position: relative;
-    min-height: 200px; /* 固定最小高度防止跑版 */
+}
+
+/* 統一所有上傳卡片的高度 */
+.upload-grid {
+    align-items: stretch;
+}
+
+.upload-grid .upload-item .upload-box {
+    min-height: 280px;
 }
 
 .upload-box {
@@ -333,9 +341,13 @@ body {
     height: 100%;
     display: flex;
     flex-direction: column;
-    justify-content: center;
     align-items: center;
     position: relative;
+}
+
+/* 讓按鈕固定在底部 */
+.upload-box .btn {
+    margin-top: auto;
 }
 
 .upload-box::after {
@@ -388,35 +400,54 @@ body {
 }
 
 /* Forecast 多檔案上傳區塊 */
-.upload-item.forecast-multi-upload {
-    min-height: 320px;
-}
-
-.upload-item.forecast-multi-upload .upload-box {
-    padding: 25px 20px;
-}
-
 .upload-item.forecast-multi-upload .upload-status {
     max-height: 320px;
     overflow-y: auto;
     align-items: flex-start;
 }
 
-/* 合併選項樣式 */
-.merge-option {
-    margin-top: 15px;
-    padding-top: 15px;
-    border-top: 1px dashed #d4cbc4;
-    width: 100%;
+/* 合併選項橫幅樣式 */
+.merge-option-banner {
+    margin-top: 24px;
+    padding: 18px 24px;
+    background: linear-gradient(135deg, #fff9f0 0%, #fff3e6 100%);
+    border: 2px solid #bc773e;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(188, 119, 62, 0.15);
+}
+
+.merge-option-content {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+}
+
+.merge-option-icon {
+    width: 50px;
+    height: 50px;
+    background: linear-gradient(135deg, #bc773e 0%, #d4954e 100%);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.merge-option-icon i {
+    font-size: 22px;
+    color: white;
+}
+
+.merge-option-text {
+    flex: 1;
 }
 
 .merge-checkbox {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     cursor: pointer;
-    justify-content: center;
-    font-size: 0.9rem;
+    font-size: 1rem;
     color: #333;
 }
 
@@ -425,19 +456,26 @@ body {
 }
 
 .merge-checkbox .checkmark {
-    width: 20px;
-    height: 20px;
+    width: 24px;
+    height: 24px;
     border: 2px solid #bc773e;
-    border-radius: 4px;
+    border-radius: 6px;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: all 0.2s ease;
     flex-shrink: 0;
+    background: white;
+}
+
+.merge-checkbox:hover .checkmark {
+    border-color: #a06530;
+    box-shadow: 0 0 0 3px rgba(188, 119, 62, 0.15);
 }
 
 .merge-checkbox input[type="checkbox"]:checked + .checkmark {
     background: #bc773e;
+    border-color: #bc773e;
 }
 
 .merge-checkbox input[type="checkbox"]:checked + .checkmark::after {
@@ -445,25 +483,56 @@ body {
     font-family: 'Font Awesome 6 Free';
     font-weight: 900;
     color: white;
-    font-size: 12px;
+    font-size: 14px;
 }
 
 .merge-checkbox .merge-label {
-    font-weight: 500;
+    font-weight: 600;
+    color: #5c4033;
+    font-size: 1.05rem;
 }
 
-.merge-hint {
-    margin-top: 8px;
-    font-size: 0.8rem;
-    color: #888;
+.merge-description {
+    margin: 8px 0 0 34px;
+    font-size: 0.9rem;
+    color: #7a6a5a;
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 5px;
+    gap: 6px;
 }
 
-.merge-hint i {
+.merge-description i {
     color: #bc773e;
+    font-size: 0.9rem;
+}
+
+/* 響應式調整 */
+@media (max-width: 768px) {
+    .merge-option-banner {
+        padding: 14px 16px;
+    }
+
+    .merge-option-content {
+        gap: 12px;
+    }
+
+    .merge-option-icon {
+        width: 42px;
+        height: 42px;
+    }
+
+    .merge-option-icon i {
+        font-size: 18px;
+    }
+
+    .merge-checkbox .merge-label {
+        font-size: 0.95rem;
+    }
+
+    .merge-description {
+        margin-left: 34px;
+        font-size: 0.85rem;
+    }
 }
 
 /* 多檔案上傳成功顯示 */
