@@ -242,14 +242,27 @@ def init_database():
 
             # 升級 upload_records.original_filename 欄位長度（支援多檔案上傳）
             try:
+                # 先檢查目前欄位長度
                 cursor.execute("""
-                    ALTER TABLE upload_records
-                    MODIFY COLUMN original_filename VARCHAR(2000)
+                    SELECT CHARACTER_MAXIMUM_LENGTH
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                    AND TABLE_NAME = 'upload_records'
+                    AND COLUMN_NAME = 'original_filename'
                 """)
-                print("✅ 已升級 upload_records.original_filename 欄位長度")
+                result = cursor.fetchone()
+                current_length = result['CHARACTER_MAXIMUM_LENGTH'] if result else 0
+
+                if current_length < 2000:
+                    cursor.execute("""
+                        ALTER TABLE upload_records
+                        MODIFY COLUMN original_filename VARCHAR(2000)
+                    """)
+                    print(f"✅ 已升級 upload_records.original_filename 欄位長度 ({current_length} -> 2000)")
+                else:
+                    print(f"ℹ️ upload_records.original_filename 欄位長度已足夠 ({current_length})")
             except Exception as alter_error:
-                # 可能已經是正確長度，忽略錯誤
-                pass
+                print(f"⚠️ 升級 original_filename 欄位失敗: {alter_error}")
 
             connection.commit()
             print("✅ 資料庫表格初始化完成")
