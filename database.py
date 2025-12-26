@@ -1208,15 +1208,19 @@ def save_customer_mappings_list(user_id, mapping_list):
                 schedule_breakpoint = item.get('schedule_breakpoint', '')
                 etd = item.get('etd', '')
                 eta = item.get('eta', '')
+                # 處理 requires_transit，預設為 True
+                requires_transit = item.get('requires_transit', True)
+                if requires_transit is None:
+                    requires_transit = True
 
                 if not customer_name or not region:
                     continue  # 跳過無效記錄
 
                 cursor.execute("""
                     INSERT INTO customer_mappings
-                    (user_id, customer_name, delivery_location, region, schedule_breakpoint, etd, eta)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                """, (user_id, customer_name, '', region, schedule_breakpoint, etd, eta))
+                    (user_id, customer_name, delivery_location, region, schedule_breakpoint, etd, eta, requires_transit)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (user_id, customer_name, '', region, schedule_breakpoint, etd, eta, requires_transit))
 
             connection.commit()
             print(f"✅ 已儲存 {len(mapping_list)} 筆映射資料 (user_id: {user_id})")

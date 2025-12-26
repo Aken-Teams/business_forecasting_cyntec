@@ -16,6 +16,9 @@ let uploadedFileInfo = {
     transit: null
 };
 
+// 儲存 Forecast 上傳時的在途需求檢查結果
+let forecastTransitCheck = null;
+
 // 上傳 Session ID - 前端產生，確保同一批上傳的檔案都在同一個資料夾
 let uploadSessionId = null;
 
@@ -215,6 +218,26 @@ async function handleForecastUpload(event) {
                 totalSize: result.total_size || result.file_size,
                 details: result.files || null
             };
+
+            // 儲存在途需求檢查結果，並根據結果自動調整 transitRequired
+            if (result.transit_check) {
+                forecastTransitCheck = result.transit_check;
+                // 如果所有廠區都不需要在途文件，自動將 transitRequired 設為 false
+                if (!result.transit_check.has_transit_requirement &&
+                    result.transit_check.transit_not_required_regions &&
+                    result.transit_check.transit_not_required_regions.length > 0) {
+                    transitRequired = false;
+                    // 更新前端 checkbox 狀態
+                    const transitCheckbox = document.getElementById('transit-required-checkbox');
+                    if (transitCheckbox) {
+                        transitCheckbox.checked = false;
+                        // 觸發 change 事件以更新 UI
+                        transitCheckbox.dispatchEvent(new Event('change'));
+                    }
+                    console.log('📋 根據 Forecast 廠區檢查結果，自動設定在途文件為非必填');
+                }
+            }
+
             checkUploadComplete();
         } else {
             // 標記失敗的檔案
@@ -335,6 +358,26 @@ function showForecastMultiUploadSuccess(result) {
         }
     }
 
+    // 檢查是否有在途提醒
+    let transitAlertHtml = '';
+    if (result.transit_check && result.transit_check.message) {
+        const check = result.transit_check;
+        let alertClass = 'info';
+        let alertIcon = 'info-circle';
+
+        if (check.has_transit_requirement) {
+            alertClass = 'warning';
+            alertIcon = 'exclamation-triangle';
+        }
+
+        transitAlertHtml = `
+            <div class="transit-alert ${alertClass}">
+                <i class="fas fa-${alertIcon}"></i>
+                <span>${check.message}</span>
+            </div>
+        `;
+    }
+
     status.innerHTML = `
         <div class="status-content" style="flex-direction: column; align-items: flex-start; width: 100%;">
             <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px;">
@@ -344,6 +387,7 @@ function showForecastMultiUploadSuccess(result) {
                 </div>
             </div>
             <div class="status-details" style="width: 100%;">${detailsHtml}</div>
+            ${transitAlertHtml}
         </div>
     `;
 }
@@ -955,6 +999,7 @@ function showUploadConfirmModal() {
                         ${buildAccordionItem('transit', '在途數據', 'fa-truck', uploadedFileInfo.transit)}
                     </div>
 
+                    ${buildTransitRequirementBanner()}
                     ${buildMergeBanner()}
                 </div>
                 <div class="modal-footer">
@@ -1148,6 +1193,50 @@ function buildMergeBanner() {
             </div>
         `;
     }
+}
+
+// 建立在途需求提示區塊
+function buildTransitRequirementBanner() {
+    // 如果沒有在途檢查結果，不顯示
+    if (!forecastTransitCheck || !forecastTransitCheck.message) {
+        return '';
+    }
+
+    const check = forecastTransitCheck;
+    let bannerClass = 'transit-info';
+    let icon = 'fa-check-circle';
+
+    if (check.has_transit_requirement) {
+        bannerClass = 'transit-warning';
+        icon = 'fa-exclamation-triangle';
+    }
+
+    // 建立廠區列表
+    let regionDetails = '';
+    if (check.transit_not_required_regions && check.transit_not_required_regions.length > 0) {
+        regionDetails += `<div class="transit-region-list">
+            <span class="region-label">不需在途：</span>
+            <span class="region-values">${check.transit_not_required_regions.join('、')}</span>
+        </div>`;
+    }
+    if (check.transit_required_regions && check.transit_required_regions.length > 0) {
+        regionDetails += `<div class="transit-region-list">
+            <span class="region-label">需要在途：</span>
+            <span class="region-values warning">${check.transit_required_regions.join('、')}</span>
+        </div>`;
+    }
+
+    return `
+        <div class="confirm-transit-banner ${bannerClass}">
+            <div class="transit-banner-header">
+                <div class="transit-icon">
+                    <i class="fas ${icon}"></i>
+                </div>
+                <span class="transit-text">${check.message}</span>
+            </div>
+            ${regionDetails}
+        </div>
+    `;
 }
 
 // 切換手風琴展開/收合

@@ -335,6 +335,139 @@ def validate_forecast_format(uploaded_file_path, username=None):
     except Exception as e:
         return False, f'驗證過程發生錯誤: {str(e)}', []
 
+
+def check_transit_requirements_from_forecast(forecast_file_paths, user_id, username):
+    """
+    檢查 Forecast 文件中的 Plant 欄位（F欄，索引5）是否需要在途文件
+    方案 C：只提醒不卡控
+
+    Pegatron 專用邏輯：
+    - 讀取 Forecast 的 F 欄位（Plant）
+    - 與 customer_mappings 的 region 欄位比對
+    - 根據 requires_transit 欄位決定是否需要提醒
+
+    參數:
+        forecast_file_paths: 單個檔案路徑(str)或多個檔案路徑列表(list)
+        user_id: 用戶 ID
+        username: 用戶名稱
+
+    返回: {
+        'has_transit_requirement': bool,  # 是否有需要在途的項目
+        'transit_required_regions': [],   # 需要在途的 region 列表
+        'transit_not_required_regions': [], # 不需要在途的 region 列表
+        'unmapped_regions': [],           # 沒有映射的 region 列表
+        'message': str                    # 提醒訊息
+    }
+    """
+    result = {
+        'has_transit_requirement': False,
+        'transit_required_regions': [],
+        'transit_not_required_regions': [],
+        'unmapped_regions': [],
+        'message': ''
+    }
+
+    # 只針對 Pegatron 用戶進行檢查
+    if username.lower() != 'pegatron':
+        return result
+
+    # 統一處理：將單個路徑轉為列表
+    if isinstance(forecast_file_paths, str):
+        file_paths = [forecast_file_paths]
+    else:
+        file_paths = forecast_file_paths
+
+    try:
+        # 收集所有檔案中的 Plant 值
+        all_plant_values = set()
+
+        for forecast_file_path in file_paths:
+            # 讀取 Forecast 文件
+            forecast_ext = os.path.splitext(forecast_file_path)[1].lower()
+            if forecast_ext == '.xls':
+                forecast_df = pd.read_excel(forecast_file_path, header=None, engine='xlrd')
+            else:
+                forecast_df = pd.read_excel(forecast_file_path, header=None)
+
+            # 獲取 F 欄位（索引 5）的所有唯一值（跳過標題行）
+            # Pegatron Forecast 的 F 欄位是 Plant（如：3A32）
+            if len(forecast_df.columns) <= 5:
+                print(f"⚠️ Forecast 文件 {os.path.basename(forecast_file_path)} 欄位數不足，跳過")
+                continue
+
+            # 從第 3 行開始讀取（跳過標題行，通常前 2 行是標題）
+            plant_values = forecast_df.iloc[2:, 5].dropna().unique()
+            plant_values = [str(v).strip() for v in plant_values if str(v).strip()]
+
+            if plant_values:
+                all_plant_values.update(plant_values)
+                print(f"📋 {os.path.basename(forecast_file_path)} 中的 Plant 值: {plant_values}")
+
+        plant_values = list(all_plant_values)
+
+        if not plant_values:
+            print(f"⚠️ 所有 Forecast 文件 F 欄位都沒有有效數據")
+            return result
+
+        print(f"📋 所有 Forecast 文件中的 Plant 值（合併後）: {plant_values}")
+
+        # 獲取用戶的 mapping 資料
+        from database import get_customer_mapping_list
+        mappings = get_customer_mapping_list(user_id)
+
+        if not mappings:
+            # 沒有映射資料，所有 Plant 都視為未映射
+            result['unmapped_regions'] = list(plant_values)
+            result['message'] = f'提醒：發現 {len(plant_values)} 個廠區尚未配置映射資料'
+            return result
+
+        # 建立 region -> requires_transit 的對照表
+        region_transit_map = {}
+        for mapping in mappings:
+            region = mapping.get('region', '')
+            requires_transit = mapping.get('requires_transit', True)
+            # 如果是 0 或 False 則不需要在途
+            if requires_transit == 0 or requires_transit is False:
+                requires_transit = False
+            else:
+                requires_transit = True
+            region_transit_map[region] = requires_transit
+
+        # 檢查每個 Plant 值
+        for plant in plant_values:
+            if plant in region_transit_map:
+                if region_transit_map[plant]:
+                    result['transit_required_regions'].append(plant)
+                else:
+                    result['transit_not_required_regions'].append(plant)
+            else:
+                result['unmapped_regions'].append(plant)
+
+        # 判斷是否需要在途
+        result['has_transit_requirement'] = len(result['transit_required_regions']) > 0
+
+        # 組合提醒訊息
+        messages = []
+        if result['transit_required_regions']:
+            regions_str = '、'.join(result['transit_required_regions'])
+            messages.append(f"廠區 [{regions_str}] 需要上傳在途文件")
+        if result['transit_not_required_regions']:
+            regions_str = '、'.join(result['transit_not_required_regions'])
+            messages.append(f"廠區 [{regions_str}] 不需要上傳在途文件")
+        if result['unmapped_regions']:
+            regions_str = '、'.join(result['unmapped_regions'])
+            messages.append(f"廠區 [{regions_str}] 尚未配置映射")
+
+        result['message'] = '；'.join(messages)
+
+        print(f"🔍 在途檢查結果: 需要={result['transit_required_regions']}, 不需要={result['transit_not_required_regions']}, 未映射={result['unmapped_regions']}")
+
+        return result
+
+    except Exception as e:
+        print(f"❌ 檢查在途需求時發生錯誤: {e}")
+        return result
+
 # ========================================
 
 # 生成版本號用於防止快取
@@ -1211,7 +1344,10 @@ def upload_forecast():
             log_activity(user['id'], user['username'], 'upload_forecast',
                        f"Forecast 文件上傳成功：{original_filename}", get_client_ip(), request.headers.get('User-Agent'))
 
-            return jsonify({
+            # 檢查在途需求（方案 C：只提醒不卡控）
+            transit_check = check_transit_requirements_from_forecast(filepath, user['id'], template_username)
+
+            response_data = {
                 'success': True,
                 'message': 'Forecast文件上傳成功（格式驗證通過）',
                 'rows': len(df),
@@ -1219,7 +1355,13 @@ def upload_forecast():
                 'file_size': file_size,
                 'file_count': 1,
                 'saved_filename': filename
-            })
+            }
+
+            # 如果有在途相關提醒，加入回應
+            if transit_check['message']:
+                response_data['transit_check'] = transit_check
+
+            return jsonify(response_data)
 
         else:
             # 多檔案上傳模式
@@ -1446,7 +1588,10 @@ def upload_forecast():
                 log_activity(user['id'], user['username'], 'upload_forecast',
                            f"Forecast 多檔案上傳成功：{len(files_list)} 個文件已合併", get_client_ip(), request.headers.get('User-Agent'))
 
-                return jsonify({
+                # 檢查在途需求（方案 C：只提醒不卡控）
+                transit_check = check_transit_requirements_from_forecast(final_filepath, user['id'], template_username)
+
+                response_data = {
                     'success': True,
                     'message': f'{len(files_list)} 個 Forecast 文件上傳並合併成功',
                     'file_count': len(files_list),
@@ -1455,7 +1600,13 @@ def upload_forecast():
                     'files': files_info,
                     'merge_mode': True,
                     'saved_filename': final_filename
-                })
+                }
+
+                # 如果有在途相關提醒，加入回應
+                if transit_check['message']:
+                    response_data['transit_check'] = transit_check
+
+                return jsonify(response_data)
 
             else:
                 # 不合併模式：將暫存檔案重新命名為正式檔案（保留原始副檔名）
@@ -1495,7 +1646,11 @@ def upload_forecast():
                 log_activity(user['id'], user['username'], 'upload_forecast',
                            f"Forecast 多檔案上傳成功：{len(files_list)} 個文件（不合併）", get_client_ip(), request.headers.get('User-Agent'))
 
-                return jsonify({
+                # 檢查在途需求（方案 C：只提醒不卡控）- 檢查所有檔案
+                all_file_paths = [f['path'] for f in saved_files]
+                transit_check = check_transit_requirements_from_forecast(all_file_paths, user['id'], template_username) if saved_files else {'message': ''}
+
+                response_data = {
                     'success': True,
                     'message': f'{len(files_list)} 個 Forecast 文件上傳成功（不合併）',
                     'file_count': len(files_list),
@@ -1504,7 +1659,13 @@ def upload_forecast():
                     'files': files_info,
                     'merge_mode': False,
                     'saved_files': [f['saved_name'] for f in saved_files]
-                })
+                }
+
+                # 如果有在途相關提醒，加入回應
+                if transit_check['message']:
+                    response_data['transit_check'] = transit_check
+
+                return jsonify(response_data)
 
     except Exception as e:
         print(f"Forecast上傳處理錯誤: {str(e)}")
@@ -1802,12 +1963,20 @@ def get_mapping_data():
                 # 返回列表格式，每筆記錄為一行
                 mapping_list = []
                 for row in raw_mappings:
+                    # 處理 requires_transit，確保正確轉換布林值
+                    requires_transit = row.get('requires_transit', True)
+                    if requires_transit is None or requires_transit == 1:
+                        requires_transit = True
+                    elif requires_transit == 0:
+                        requires_transit = False
+
                     mapping_list.append({
                         'customer_name': row['customer_name'] or '',
                         'region': row['region'] or '',
                         'schedule_breakpoint': row['schedule_breakpoint'] or '',
                         'etd': row['etd'] or '',
-                        'eta': row['eta'] or ''
+                        'eta': row['eta'] or '',
+                        'requires_transit': requires_transit
                     })
 
                 return jsonify({

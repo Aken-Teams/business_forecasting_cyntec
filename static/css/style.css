@@ -3011,3 +3011,130 @@ kbd {
 .toggle-switch-mini input:focus + .toggle-slider-mini {
     box-shadow: 0 0 1px #28a745;
 }
+
+/* ========================================
+   在途提醒訊息樣式
+   ======================================== */
+
+.transit-alert {
+    margin-top: 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    width: 100%;
+}
+
+.transit-alert i {
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.transit-alert.info {
+    background: #e7f3ff;
+    border: 1px solid #b3d9ff;
+    color: #0056b3;
+}
+
+.transit-alert.warning {
+    background: #fff3e0;
+    border: 1px solid #ffcc80;
+    color: #e65100;
+}
+
+.transit-alert.success {
+    background: #e8f5e9;
+    border: 1px solid #a5d6a7;
+    color: #2e7d32;
+}
+
+/* ========================================
+   確認對話框 - 在途需求提示區塊
+   ======================================== */
+
+.confirm-transit-banner {
+    margin-top: 16px;
+    padding: 14px 18px;
+    border-radius: 12px;
+    font-size: 0.9rem;
+}
+
+.confirm-transit-banner.transit-info {
+    background: linear-gradient(135deg, #e8f5e9 0%, #f1f8e9 100%);
+    border: 1px solid #a5d6a7;
+}
+
+.confirm-transit-banner.transit-warning {
+    background: linear-gradient(135deg, #fff8e1 0%, #fff3e0 100%);
+    border: 1px solid #ffcc80;
+}
+
+.transit-banner-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.confirm-transit-banner .transit-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 0.9rem;
+}
+
+.confirm-transit-banner.transit-info .transit-icon {
+    background: linear-gradient(135deg, #43a047 0%, #66bb6a 100%);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(67, 160, 71, 0.3);
+}
+
+.confirm-transit-banner.transit-warning .transit-icon {
+    background: linear-gradient(135deg, #f57c00 0%, #ff9800 100%);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(245, 124, 0, 0.3);
+}
+
+.confirm-transit-banner .transit-text {
+    font-weight: 500;
+    color: #333;
+    flex: 1;
+    font-size: 0.95rem;
+    text-align: left;
+}
+
+.confirm-transit-banner.transit-info .transit-text {
+    color: #2e7d32;
+}
+
+.confirm-transit-banner.transit-warning .transit-text {
+    color: #e65100;
+}
+
+/* 廠區列表 */
+.transit-region-list {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    padding-left: 44px;
+    font-size: 0.85rem;
+}
+
+.transit-region-list .region-label {
+    color: #666;
+}
+
+.transit-region-list .region-values {
+    color: #2e7d32;
+    font-weight: 500;
+}
+
+.transit-region-list .region-values.warning {
+    color: #e65100;
+}
