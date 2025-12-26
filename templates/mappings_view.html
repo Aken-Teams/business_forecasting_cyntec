@@ -713,6 +713,89 @@
             color: #2c3e50 !important;
         }
 
+        /* Toggle Switch 樣式 */
+        .toggle-switch-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 52px;
+            height: 28px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: 0.3s;
+            border-radius: 28px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 22px;
+            width: 22px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(24px);
+        }
+
+        .toggle-label {
+            font-size: 0.9rem;
+            color: #555;
+        }
+
+        .field-hint {
+            font-size: 0.8rem;
+            color: #999;
+            margin-top: 6px;
+            margin-bottom: 0;
+        }
+
+        /* 需在途狀態標籤 */
+        .transit-badge {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .transit-badge.yes {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .transit-badge.no {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
         @media (max-width: 768px) {
             .page-title-bar {
                 flex-direction: column;
@@ -818,13 +901,14 @@
                             <th>排程出貨日期斷點</th>
                             <th>ETD</th>
                             <th>ETA</th>
+                            <th>需在途</th>
                             <th>更新時間</th>
                             <th>操作</th>
                         </tr>
                     </thead>
                     <tbody id="mappings-tbody">
                         <tr>
-                            <td colspan="9" class="loading">
+                            <td colspan="10" class="loading">
                                 <i class="fas fa-spinner"></i>
                                 <p>載入中...</p>
                             </td>
@@ -949,6 +1033,17 @@
                             </select>
                         </div>
                     </div>
+                </div>
+                <div class="form-group">
+                    <label>需要在途文件</label>
+                    <div class="toggle-switch-container">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="mapping-requires-transit" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span class="toggle-label" id="requires-transit-label">是（前台需上傳在途文件）</span>
+                    </div>
+                    <p class="field-hint">設為「否」時，前台在途文件上傳將不卡控</p>
                 </div>
             </div>
             <div class="modal-footer">
@@ -1159,7 +1254,7 @@
             if (!filteredMappings || filteredMappings.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="9" class="no-data">
+                        <td colspan="10" class="no-data">
                             <i class="fas fa-inbox"></i>
                             <p>沒有映射資料</p>
                         </td>
@@ -1177,6 +1272,10 @@
             let html = '';
             currentPageData.forEach((mapping) => {
                 const company = mapping.company || '未知公司';
+                const requiresTransit = mapping.requires_transit !== false && mapping.requires_transit !== 0;
+                const transitBadge = requiresTransit
+                    ? '<span class="transit-badge yes">是</span>'
+                    : '<span class="transit-badge no">否</span>';
                 html += `
                     <tr>
                         <td>
@@ -1188,6 +1287,7 @@
                         <td>${mapping.schedule_breakpoint ? `<span class="mapping-value">${mapping.schedule_breakpoint}</span>` : '<span class="empty-value">未設定</span>'}</td>
                         <td>${mapping.etd ? `<span class="mapping-value">${mapping.etd}</span>` : '<span class="empty-value">未設定</span>'}</td>
                         <td>${mapping.eta ? `<span class="mapping-value">${mapping.eta}</span>` : '<span class="empty-value">未設定</span>'}</td>
+                        <td>${transitBadge}</td>
                         <td style="font-size: 0.85rem; color: #7f8c8d;">${mapping.updated_at || '-'}</td>
                         <td>
                             <div class="action-buttons">
@@ -1233,6 +1333,20 @@
             return week + day;
         }
 
+        // 更新在途開關標籤
+        function updateTransitLabel() {
+            const checkbox = document.getElementById('mapping-requires-transit');
+            const label = document.getElementById('requires-transit-label');
+            if (checkbox.checked) {
+                label.textContent = '是（前台需上傳在途文件）';
+            } else {
+                label.textContent = '否（前台不需上傳在途文件）';
+            }
+        }
+
+        // 綁定開關事件
+        document.getElementById('mapping-requires-transit').addEventListener('change', updateTransitLabel);
+
         // 顯示新增 Modal
         function showAddModal() {
             document.getElementById('modal-title').textContent = '新增映射';
@@ -1247,6 +1361,8 @@
             document.getElementById('mapping-etd-day').value = '';
             document.getElementById('mapping-eta-week').value = '';
             document.getElementById('mapping-eta-day').value = '';
+            document.getElementById('mapping-requires-transit').checked = true;
+            updateTransitLabel();
 
             document.getElementById('mapping-modal').classList.add('show');
         }
@@ -1275,6 +1391,11 @@
                     document.getElementById('mapping-etd-day').value = etdParsed.day;
                     document.getElementById('mapping-eta-week').value = etaParsed.week;
                     document.getElementById('mapping-eta-day').value = etaParsed.day;
+
+                    // 設定需在途開關（預設為 true）
+                    const requiresTransit = mapping.requires_transit !== false && mapping.requires_transit !== 0;
+                    document.getElementById('mapping-requires-transit').checked = requiresTransit;
+                    updateTransitLabel();
 
                     document.getElementById('mapping-modal').classList.add('show');
                 } else {
@@ -1322,6 +1443,9 @@
                 return;
             }
 
+            // 獲取需在途開關值
+            const requiresTransit = document.getElementById('mapping-requires-transit').checked;
+
             const data = {
                 user_id: parseInt(userId),
                 customer_name: customerName,
@@ -1329,7 +1453,8 @@
                 region: region,
                 schedule_breakpoint: scheduleBreakpoint || null,
                 etd: etd || null,
-                eta: eta || null
+                eta: eta || null,
+                requires_transit: requiresTransit
             };
 
             try {

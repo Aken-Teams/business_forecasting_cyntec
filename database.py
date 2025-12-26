@@ -126,6 +126,7 @@ def init_database():
                     schedule_breakpoint VARCHAR(50),
                     etd VARCHAR(50),
                     eta VARCHAR(50),
+                    requires_transit BOOLEAN DEFAULT TRUE,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -144,6 +145,18 @@ def init_database():
                 # 欄位已存在則忽略
                 if "Duplicate column" not in str(alter_error):
                     print(f"ℹ️ delivery_location 欄位檢查: {alter_error}")
+
+            # 確保 requires_transit 欄位存在（用於舊資料庫升級）
+            try:
+                cursor.execute("""
+                    ALTER TABLE customer_mappings
+                    ADD COLUMN requires_transit BOOLEAN DEFAULT TRUE AFTER eta
+                """)
+                print("✅ 已新增 requires_transit 欄位")
+            except Exception as alter_error:
+                # 欄位已存在則忽略
+                if "Duplicate column" not in str(alter_error):
+                    print(f"ℹ️ requires_transit 欄位檢查: {alter_error}")
 
             # 更新唯一索引（從 user_id + customer_name 改為 user_id + customer_name + region）
             try:
@@ -1041,7 +1054,7 @@ def get_customer_mappings(user_id):
     try:
         with connection.cursor() as cursor:
             cursor.execute("""
-                SELECT customer_name, delivery_location, region, schedule_breakpoint, etd, eta
+                SELECT customer_name, delivery_location, region, schedule_breakpoint, etd, eta, requires_transit
                 FROM customer_mappings
                 WHERE user_id = %s
             """, (user_id,))
@@ -1090,7 +1103,7 @@ def get_customer_mappings_raw(user_id):
     try:
         with connection.cursor() as cursor:
             cursor.execute("""
-                SELECT customer_name, delivery_location, region, schedule_breakpoint, etd, eta
+                SELECT customer_name, delivery_location, region, schedule_breakpoint, etd, eta, requires_transit
                 FROM customer_mappings
                 WHERE user_id = %s
             """, (user_id,))
@@ -1272,7 +1285,7 @@ def get_customer_mapping_list(user_id):
     try:
         with connection.cursor() as cursor:
             cursor.execute("""
-                SELECT customer_name, delivery_location, region, schedule_breakpoint, etd, eta, updated_at
+                SELECT customer_name, delivery_location, region, schedule_breakpoint, etd, eta, requires_transit, updated_at
                 FROM customer_mappings
                 WHERE user_id = %s
                 ORDER BY customer_name
@@ -1536,7 +1549,10 @@ def get_all_customer_mappings():
     try:
         with connection.cursor() as cursor:
             cursor.execute("""
-                SELECT cm.*, u.username, u.display_name, u.company
+                SELECT cm.id, cm.user_id, cm.customer_name, cm.delivery_location, cm.region,
+                       cm.schedule_breakpoint, cm.etd, cm.eta, cm.requires_transit,
+                       cm.created_at, cm.updated_at,
+                       u.username, u.display_name, u.company
                 FROM customer_mappings cm
                 LEFT JOIN users u ON cm.user_id = u.id
                 ORDER BY u.company, cm.customer_name
@@ -1578,7 +1594,7 @@ def get_users_with_company():
 
 # ==================== 管理者客戶映射 CRUD ====================
 
-def admin_create_customer_mapping(user_id, customer_name, delivery_location=None, region=None, schedule_breakpoint=None, etd=None, eta=None):
+def admin_create_customer_mapping(user_id, customer_name, delivery_location=None, region=None, schedule_breakpoint=None, etd=None, eta=None, requires_transit=True):
     """
     管理者新增客戶映射
 
@@ -1590,6 +1606,7 @@ def admin_create_customer_mapping(user_id, customer_name, delivery_location=None
         schedule_breakpoint: 排程出貨日期斷點
         etd: ETD
         eta: ETA
+        requires_transit: 是否需要在途文件（預設 True）
 
     返回: (success, message, mapping_id)
 
@@ -1617,9 +1634,9 @@ def admin_create_customer_mapping(user_id, customer_name, delivery_location=None
             # 新增映射
             cursor.execute("""
                 INSERT INTO customer_mappings
-                (user_id, customer_name, delivery_location, region, schedule_breakpoint, etd, eta)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (user_id, customer_name, delivery_location, region, schedule_breakpoint, etd, eta))
+                (user_id, customer_name, delivery_location, region, schedule_breakpoint, etd, eta, requires_transit)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (user_id, customer_name, delivery_location, region, schedule_breakpoint, etd, eta, requires_transit))
 
             connection.commit()
             mapping_id = cursor.lastrowid
@@ -1638,7 +1655,7 @@ def admin_update_customer_mapping(mapping_id, **kwargs):
 
     參數:
         mapping_id: 映射ID
-        **kwargs: 可更新的欄位 (customer_name, delivery_location, region, schedule_breakpoint, etd, eta)
+        **kwargs: 可更新的欄位 (customer_name, delivery_location, region, schedule_breakpoint, etd, eta, requires_transit)
 
     返回: (success, message)
 
@@ -1652,7 +1669,7 @@ def admin_update_customer_mapping(mapping_id, **kwargs):
     if not connection:
         return False, "資料庫連線失敗"
 
-    allowed_fields = ['customer_name', 'delivery_location', 'region', 'schedule_breakpoint', 'etd', 'eta']
+    allowed_fields = ['customer_name', 'delivery_location', 'region', 'schedule_breakpoint', 'etd', 'eta', 'requires_transit']
     update_fields = []
     values = []
 
