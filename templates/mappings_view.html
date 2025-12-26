@@ -773,9 +773,23 @@
 
         .field-hint {
             font-size: 0.8rem;
-            color: #999;
-            margin-top: 6px;
+            color: #666;
+            margin-top: 10px;
             margin-bottom: 0;
+            background: #f8f9fa;
+            padding: 8px 12px;
+            border-radius: 6px;
+            border-left: 3px solid #9b59b6;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .field-hint::before {
+            content: "\f05a";
+            font-family: "Font Awesome 6 Free";
+            font-weight: 900;
+            color: #9b59b6;
         }
 
         /* 需在途狀態標籤 */

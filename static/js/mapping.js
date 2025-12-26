@@ -129,7 +129,8 @@ function convertOldFormatToList(customers, mappingData) {
             region: mappingData.regions ? (mappingData.regions[customer] || '') : '',
             schedule_breakpoint: mappingData.schedule_breakpoints ? (mappingData.schedule_breakpoints[customer] || '') : '',
             etd: mappingData.etd ? (mappingData.etd[customer] || '') : '',
-            eta: mappingData.eta ? (mappingData.eta[customer] || '') : ''
+            eta: mappingData.eta ? (mappingData.eta[customer] || '') : '',
+            requires_transit: true  // 舊格式預設為需要在途
         });
     });
     return list;
@@ -194,6 +195,12 @@ function renderMappingTableList() {
                         ${generateSelectOptions(DAY_OPTIONS, etaParsed.day)}
                     </select>
                 </div>
+            </td>
+            <td class="toggle-cell">
+                <label class="toggle-switch-mini">
+                    <input type="checkbox" data-row="${index}" data-field="requires-transit" ${item.requires_transit !== false ? 'checked' : ''}>
+                    <span class="toggle-slider-mini"></span>
+                </label>
             </td>
             <td class="action-cell">
                 <button class="btn btn-danger btn-sm delete-btn" onclick="deleteCustomerFromList(${index})" title="刪除此記錄">
@@ -304,6 +311,7 @@ function saveCurrentPageEdits() {
             const etdDaySelect = row.querySelector('select[data-field="etd-day"]');
             const etaWeekSelect = row.querySelector('select[data-field="eta-week"]');
             const etaDaySelect = row.querySelector('select[data-field="eta-day"]');
+            const requiresTransitCheckbox = row.querySelector('input[data-field="requires-transit"]');
 
             mappingList[index].customer_name = customerInput ? customerInput.value.trim() : '';
             mappingList[index].region = regionInput ? regionInput.value.trim() : '';
@@ -316,6 +324,7 @@ function saveCurrentPageEdits() {
 
             mappingList[index].etd = combineWeekDay(etdWeek, etdDay);
             mappingList[index].eta = combineWeekDay(etaWeek, etaDay);
+            mappingList[index].requires_transit = requiresTransitCheckbox ? requiresTransitCheckbox.checked : true;
         }
     });
 }
@@ -338,7 +347,8 @@ function addNewCustomer() {
         region: '',
         schedule_breakpoint: '',
         etd: '',
-        eta: ''
+        eta: '',
+        requires_transit: true  // 預設需要在途文件
     });
 
     // 跳轉到最後一頁
@@ -510,7 +520,8 @@ async function saveMapping() {
             region: (item.region || '').trim(),
             schedule_breakpoint: item.schedule_breakpoint || '',
             etd: item.etd || '',
-            eta: item.eta || ''
+            eta: item.eta || '',
+            requires_transit: item.requires_transit !== false  // 預設為 true
         }));
 
         // 驗證

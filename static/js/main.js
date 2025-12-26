@@ -84,6 +84,12 @@ function initializeEventListeners() {
     document.getElementById('mapping-config-btn').addEventListener('click', openMappingConfig);
     document.getElementById('mapping-process-btn').addEventListener('click', handleMappingProcess);
     document.getElementById('forecast-btn').addEventListener('click', handleForecast);
+
+    // 文件上傳區域的映射配置按鈕
+    const uploadMappingBtn = document.getElementById('upload-mapping-config-btn');
+    if (uploadMappingBtn) {
+        uploadMappingBtn.addEventListener('click', openMappingConfig);
+    }
 }
 
 // ERP文件上傳處理

@@ -274,6 +274,18 @@ body {
     background: #f5f5f5;
     padding: 25px 30px;
     border-bottom: 1px solid #e7e4df;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+}
+
+.card-header-content {
+    flex: 1;
+}
+
+.card-header .btn-mapping-config {
+    flex-shrink: 0;
 }
 
 /* 卡片標題行（左右分布） */
@@ -1533,6 +1545,17 @@ body {
     }
 
     .action-buttons-top {
+        justify-content: center;
+    }
+
+    .card-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+    }
+
+    .card-header .btn-mapping-config {
+        width: 100%;
         justify-content: center;
     }
 
@@ -2927,4 +2950,64 @@ kbd {
         width: 100%;
         justify-content: center;
     }
+}
+
+/* ========================================
+   迷你版 Toggle Switch（用於表格內）
+   ======================================== */
+
+.toggle-cell {
+    text-align: center;
+    vertical-align: middle;
+}
+
+.toggle-switch-mini {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 22px;
+    cursor: pointer;
+}
+
+.toggle-switch-mini input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider-mini {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: 0.3s;
+    border-radius: 22px;
+}
+
+.toggle-slider-mini:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.3s;
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-switch-mini input:checked + .toggle-slider-mini {
+    background-color: #28a745;
+}
+
+.toggle-switch-mini input:checked + .toggle-slider-mini:before {
+    transform: translateX(18px);
+}
+
+.toggle-switch-mini input:focus + .toggle-slider-mini {
+    box-shadow: 0 0 1px #28a745;
 }
