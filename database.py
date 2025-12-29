@@ -583,6 +583,428 @@ def init_default_processing_rules(cursor, user_id):
     print(f"✅ 已初始化預設處理規則 (user_id: {user_id})")
 
 
+def init_pegatron_processing_rules(cursor, user_id):
+    """
+    初始化和碩 (Pegatron) 的處理規則
+
+    和碩與廣達的主要差異：
+    1. 上傳階段：Forecast 支援多檔案，保留多個檔案分別處理
+    2. 映射階段：使用複合鍵 (customer + region + delivery_location)
+    3. 在途檢查：根據 requires_transit 欄位決定是否需要提醒
+    4. ERP 匹配：使用 Line_PO 前4字 + Ordered_Item 雙欄位
+    5. Transit 匹配：使用 Line_PO + Ordered_Item 雙欄位
+    6. 輸出階段：多個 Forecast 檔案產生多個結果檔案
+
+    參數:
+        cursor: 資料庫游標
+        user_id: 和碩客戶的用戶 ID
+    """
+    import json
+
+    pegatron_rules = [
+        # ==================== 階段一：上傳文件 ====================
+        {
+            'rule_name': '上傳文件流程',
+            'rule_category': 'upload',
+            'rule_description': '上傳系統所需的 Excel 檔案，Forecast 支援多檔案上傳',
+            'rule_config': json.dumps({
+                'upload_steps': [
+                    {
+                        'step': 1,
+                        'name': '上傳 Forecast 檔案',
+                        'description': '選擇並上傳客戶提供的 Forecast Excel 檔案，支援多檔案上傳',
+                        'file_type': 'Excel (.xlsx)',
+                        'required': True,
+                        'multiple_files': True,
+                        'merge_mode': 'separate',
+                        'validation': True,
+                        'notes': '多個 Forecast 檔案會保留為獨立檔案分別處理，每個檔案產生對應的結果'
+                    },
+                    {
+                        'step': 2,
+                        'name': '上傳 ERP 淨需求檔案',
+                        'description': '選擇並上傳 ERP 匯出的淨需求資料',
+                        'file_type': 'Excel (.xlsx)',
+                        'required': True,
+                        'validation': True
+                    },
+                    {
+                        'step': 3,
+                        'name': '上傳在途資料檔案',
+                        'description': '選擇並上傳在途貨物清單（根據廠區 requires_transit 設定決定是否必要）',
+                        'file_type': 'Excel (.xlsx)',
+                        'required': False,
+                        'conditional': True,
+                        'condition_field': 'requires_transit',
+                        'validation': True,
+                        'notes': '系統會檢查 Forecast 的 Plant 欄位與映射表的 requires_transit 設定，提醒哪些廠區需要上傳在途資料'
+                    },
+                    {
+                        'step': 4,
+                        'name': '在途需求檢查',
+                        'description': '根據 Forecast 的廠區 (F欄 Plant) 自動檢查是否需要上傳在途資料',
+                        'auto': True,
+                        'trigger': 'after_forecast_upload',
+                        'check_logic': {
+                            'source': 'Forecast F欄 (Plant值)',
+                            'reference': 'customer_mappings.requires_transit',
+                            'action': '提醒但不卡控'
+                        }
+                    },
+                    {
+                        'step': 5,
+                        'name': '檔案格式驗證',
+                        'description': '系統自動檢查每個檔案的欄位格式是否符合規範',
+                        'auto': True,
+                        'validation': True
+                    }
+                ]
+            }, ensure_ascii=False),
+            'display_order': 0
+        },
+        # ==================== 階段二：清理舊資料 ====================
+        {
+            'rule_name': 'Forecast 清理規則',
+            'rule_category': 'cleanup',
+            'rule_description': '處理前清理 Forecast 的舊資料（支援多檔案）',
+            'rule_config': json.dumps({
+                'cleanup_rules': [
+                    {
+                        'name': 'ETA QTY 清理',
+                        'condition': '找到 WEEK# 標記後的 ETA QTY 行',
+                        'action': '清空對應日期欄位的數值',
+                        'purpose': '移除舊的預測資料'
+                    }
+                ],
+                'multiple_files': True,
+                'output_format': 'cleaned_forecast_{index}.xlsx',
+                'notes': '每個上傳的 Forecast 檔案會產生對應的清理後檔案'
+            }, ensure_ascii=False),
+            'display_order': 1
+        },
+        # ==================== 階段三：客戶映射 ====================
+        {
+            'rule_name': '客戶映射規則',
+            'rule_category': 'mapping',
+            'rule_description': '客戶資料的多維度映射對應設定',
+            'rule_config': json.dumps({
+                'mapping_fields': {
+                    '客戶簡稱': '匹配原始資料中的客戶名稱',
+                    '客戶廠區 (region)': '對應到 Forecast 的 Plant 欄位',
+                    '送貨地點 (delivery_location)': '送貨目的地資訊',
+                    '排程出貨日期斷點': '決定週期計算的基準日',
+                    'ETD': '預計出發日期',
+                    'ETA': '預計到達日期',
+                    '是否需要在途 (requires_transit)': '控制該廠區是否需要上傳在途資料'
+                },
+                'unique_key': 'user_id + customer_name + region',
+                'matching_mode': 'multi_dimension',
+                'matching_priority': [
+                    '完整匹配: (customer, region, delivery_location)',
+                    '簡化匹配: (customer, region)'
+                ],
+                'notes': '和碩使用複合鍵進行多維度映射，支援更精細的廠區控制'
+            }, ensure_ascii=False),
+            'display_order': 2
+        },
+        # ==================== 階段四：ERP 處理 ====================
+        {
+            'rule_name': 'ERP 資料匹配規則',
+            'rule_category': 'erp',
+            'rule_description': 'ERP 淨需求文件與 Forecast 的匹配方式（使用 Line_PO + Ordered_Item）',
+            'rule_config': json.dumps({
+                'match_keys': ['Line_PO前4字', 'Ordered_Item（客戶料號）'],
+                'source_columns': {
+                    '客戶簡稱': 'E欄位',
+                    'Line_PO': 'M欄位（取前4字作為區域識別）',
+                    'Ordered_Item': 'N欄位（對應客戶料號）',
+                    '排程出貨日期': 'P欄位',
+                    '淨需求數量': 'Q欄位'
+                },
+                'region_extraction': 'Line_PO[:4] 取前4個字元作為廠區識別',
+                'description': '使用 Line_PO 前4字 + Ordered_Item 作為複合匹配鍵'
+            }, ensure_ascii=False),
+            'display_order': 3
+        },
+        {
+            'rule_name': 'ERP 日期計算規則',
+            'rule_category': 'erp',
+            'rule_description': '從排程出貨日期計算目標週期',
+            'rule_config': json.dumps({
+                'date_field': '排程出貨日期 (P欄)',
+                'breakpoint_field': '排程出貨日期斷點',
+                'eta_field': 'ETA',
+                'calculation_steps': {
+                    'step1': '取得排程出貨日期',
+                    'step2': '根據排程出貨日期斷點計算該週的週末（禮拜六）',
+                    'step3': '從週末加上 ETA 天數得到目標日期',
+                    'step4': '在 Forecast 的日期欄位中找到符合的週期'
+                },
+                'notes': '和碩使用三步計算：排程日期 → 週末 → +ETA → 目標日期'
+            }, ensure_ascii=False),
+            'display_order': 4
+        },
+        {
+            'rule_name': 'ERP 數值轉換規則',
+            'rule_category': 'erp',
+            'rule_description': '淨需求數值的轉換計算',
+            'rule_config': json.dumps({
+                'source_field': '淨需求數量 (Q欄)',
+                'multiplier': 1000,
+                'description': '淨需求值 × 1000 = 實際填入值',
+                'example': '淨需求 = 5，填入 Forecast = 5000'
+            }, ensure_ascii=False),
+            'display_order': 5
+        },
+        # ==================== 階段五：Transit 處理 ====================
+        {
+            'rule_name': 'Transit 資料匹配規則',
+            'rule_category': 'transit',
+            'rule_description': '在途文件與 Forecast 的匹配方式（使用 Line_PO + Ordered_Item）',
+            'rule_config': json.dumps({
+                'match_keys': ['Line_PO (L欄)', 'Ordered_Item (E欄)'],
+                'source_columns': {
+                    'Line': 'L欄位（客戶採購單號，對應 ERP M欄）',
+                    'Ordered_Item': 'E欄位（對應客戶料號，對應 ERP N欄）',
+                    'Qty': 'H欄位（數量）',
+                    'ETA': 'I欄位（預計到達日期）'
+                },
+                'description': '使用 Line_PO + Ordered_Item 雙欄位複合匹配',
+                'notes': '在途資料的 Line 欄位需與 ERP 的 Line_PO 欄位對應'
+            }, ensure_ascii=False),
+            'display_order': 6
+        },
+        {
+            'rule_name': 'Transit 日期處理規則',
+            'rule_category': 'transit',
+            'rule_description': '在途文件的 ETA 日期處理',
+            'rule_config': json.dumps({
+                'date_field': 'ETA (I欄位)',
+                'date_formats': ['YYYY/MM/DD', 'YYYY-MM-DD', 'YYYYMMDD'],
+                'description': '直接使用 I 欄位的 ETA 日期作為目標日期，找到 Forecast 對應的週期欄位'
+            }, ensure_ascii=False),
+            'display_order': 7
+        },
+        {
+            'rule_name': 'Transit 數值轉換規則',
+            'rule_category': 'transit',
+            'rule_description': '在途數量的轉換計算',
+            'rule_config': json.dumps({
+                'source_field': 'Qty (H欄位)',
+                'multiplier': 1000,
+                'description': 'Qty 值 × 1000 = 實際填入值',
+                'example': 'Qty = 3，填入 Forecast = 3000'
+            }, ensure_ascii=False),
+            'display_order': 8
+        },
+        # ==================== 階段六：Forecast 處理 ====================
+        {
+            'rule_name': 'Forecast 資料區塊識別規則',
+            'rule_category': 'forecast',
+            'rule_description': '如何在 Forecast 中識別資料區塊',
+            'rule_config': json.dumps({
+                'block_identification': {
+                    'marker': 'M欄位 = "WEEK#"',
+                    'method': '掃描 M 欄找到 WEEK# 標記，該行即為資料區塊起始',
+                    'notes': '和碩使用 WEEK# 作為區塊標記，與廣達不同'
+                },
+                'data_range': {
+                    'eta_qty_row': '區塊起始行 + 4',
+                    'date_columns': '根據欄位標題判斷日期範圍'
+                }
+            }, ensure_ascii=False),
+            'display_order': 9
+        },
+        {
+            'rule_name': 'Forecast 目標欄位定位規則',
+            'rule_category': 'forecast',
+            'rule_description': '如何找到要填入數值的位置',
+            'rule_config': json.dumps({
+                'row_finding': {
+                    'target_row': '區塊起始行 + 4 (ETA QTY 行)',
+                    'description': 'WEEK# 標記行往下 4 行即為 ETA QTY 填入行'
+                },
+                'column_finding': {
+                    'method': '掃描日期欄位標題，找到目標日期對應的欄位',
+                    'date_format': '週期格式'
+                }
+            }, ensure_ascii=False),
+            'display_order': 10
+        },
+        {
+            'rule_name': 'Forecast 數值累加與追蹤規則',
+            'rule_category': 'forecast',
+            'rule_description': 'ERP 和 Transit 數值的累加邏輯與已分配追蹤',
+            'rule_config': json.dumps({
+                'accumulation_logic': {
+                    'rule': '相同位置的數值會累加，不會覆蓋',
+                    'example': {
+                        'ERP填入': 5000,
+                        'Transit填入': 3000,
+                        '最終結果': 8000
+                    }
+                },
+                'allocation_tracking': {
+                    'method': 'DataFrame 欄位追蹤',
+                    'marker': "'Y' 標記已分配的資料行",
+                    'notes': '防止同一筆資料被重複分配到多個 Forecast 檔案'
+                }
+            }, ensure_ascii=False),
+            'display_order': 11
+        },
+        # ==================== 階段七：輸出結果 ====================
+        {
+            'rule_name': '輸出與下載',
+            'rule_category': 'output',
+            'rule_description': '處理完成後的輸出流程（支援多檔案）',
+            'rule_config': json.dumps({
+                'output_steps': [
+                    {
+                        'step': 1,
+                        'name': '驗證處理結果',
+                        'description': '系統自動檢查所有資料是否正確填入',
+                        'auto': True
+                    },
+                    {
+                        'step': 2,
+                        'name': '產生處理報告',
+                        'description': '統計每個檔案的成功匹配筆數、失敗筆數等資訊',
+                        'auto': True,
+                        'statistics': ['total_erp_filled', 'total_transit_filled', 'processed_files']
+                    },
+                    {
+                        'step': 3,
+                        'name': '下載處理結果',
+                        'description': '下載已填入數據的 Forecast Excel 檔案（多檔案模式會產生多個結果）',
+                        'file_type': 'Excel (.xlsx)',
+                        'output': True,
+                        'multiple_output': True,
+                        'output_format': 'forecast_result_{index}.xlsx'
+                    }
+                ],
+                'notes': '每個上傳的 Forecast 檔案會對應產生一個結果檔案'
+            }, ensure_ascii=False),
+            'display_order': 12
+        }
+    ]
+
+    for rule in pegatron_rules:
+        cursor.execute("""
+            INSERT INTO processing_rules (user_id, rule_name, rule_category, rule_description, rule_config, display_order)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (user_id, rule['rule_name'], rule['rule_category'], rule['rule_description'],
+              rule['rule_config'], rule['display_order']))
+
+    print(f"[OK] 已初始化和碩處理規則 (user_id: {user_id})")
+
+
+def update_quanta_processing_rules(user_id):
+    """
+    更新廣達 (Quanta) 的處理規則，加入多檔案合併說明
+
+    參數:
+        user_id: 廣達客戶的用戶 ID
+    """
+    import json
+    connection = get_db_connection()
+    if not connection:
+        return False, "資料庫連線失敗"
+
+    try:
+        with connection.cursor() as cursor:
+            # 更新上傳規則，加入多檔案合併說明
+            upload_config = json.dumps({
+                'upload_steps': [
+                    {
+                        'step': 1,
+                        'name': '上傳 Forecast 檔案',
+                        'description': '選擇並上傳客戶提供的 Forecast Excel 檔案，支援多檔案上傳並自動合併',
+                        'file_type': 'Excel (.xlsx)',
+                        'required': True,
+                        'multiple_files': True,
+                        'merge_mode': 'combine',
+                        'validation': True,
+                        'notes': '多個 Forecast 檔案會自動合併成單一檔案 (forecast_data.xlsx) 進行處理'
+                    },
+                    {
+                        'step': 2,
+                        'name': '上傳 ERP 淨需求檔案',
+                        'description': '選擇並上傳 ERP 匯出的淨需求資料',
+                        'file_type': 'Excel (.xlsx)',
+                        'required': True,
+                        'validation': True
+                    },
+                    {
+                        'step': 3,
+                        'name': '上傳在途資料檔案',
+                        'description': '選擇並上傳在途貨物清單（選填，可跳過）',
+                        'file_type': 'Excel (.xlsx)',
+                        'required': False,
+                        'validation': True,
+                        'notes': '廣達的在途資料為選填，後續處理允許跳過'
+                    },
+                    {
+                        'step': 4,
+                        'name': '檔案格式驗證',
+                        'description': '系統自動檢查每個檔案的欄位格式是否符合規範，驗證通過後才能進行下一步處理',
+                        'auto': True,
+                        'validation': True
+                    }
+                ]
+            }, ensure_ascii=False)
+
+            cursor.execute("""
+                UPDATE processing_rules
+                SET rule_config = %s,
+                    rule_description = '上傳系統所需的 Excel 檔案，Forecast 支援多檔案上傳並自動合併'
+                WHERE user_id = %s AND rule_category = 'upload' AND rule_name = '上傳文件流程'
+            """, (upload_config, user_id))
+
+            connection.commit()
+            print(f"[OK] 已更新廣達處理規則 (user_id: {user_id})")
+            return True, "規則更新成功"
+    except Exception as e:
+        print(f"[ERROR] 更新廣達處理規則失敗: {e}")
+        return False, str(e)
+    finally:
+        connection.close()
+
+
+def init_processing_rules_for_user(user_id, company_type='default'):
+    """
+    為指定用戶初始化處理規則
+
+    參數:
+        user_id: 用戶 ID
+        company_type: 公司類型 ('quanta', 'pegatron', 'default')
+
+    返回: (success, message)
+    """
+    connection = get_db_connection()
+    if not connection:
+        return False, "資料庫連線失敗"
+
+    try:
+        with connection.cursor() as cursor:
+            # 先清除該用戶現有的規則
+            cursor.execute("DELETE FROM processing_rules WHERE user_id = %s", (user_id,))
+
+            # 根據公司類型初始化規則
+            if company_type.lower() == 'pegatron':
+                init_pegatron_processing_rules(cursor, user_id)
+            else:
+                # 預設使用廣達的規則
+                init_default_processing_rules(cursor, user_id)
+
+            connection.commit()
+            return True, f"已初始化 {company_type} 處理規則"
+    except Exception as e:
+        print(f"[ERROR] 初始化處理規則失敗: {e}")
+        return False, str(e)
+    finally:
+        connection.close()
+
+
 def update_processing_rules_enum():
     """
     更新 processing_rules 表的 rule_category ENUM

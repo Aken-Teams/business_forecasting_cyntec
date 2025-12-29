@@ -13,7 +13,8 @@
       "Bash(dir \"d:\\\\github\\\\business_forecasting_pc\\\\uploads\\\\5\\\\20251224_121650\"\")",
       "Bash(dir:*)",
       "Bash(chcp 65001)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(python init_processing_rules.py:*)"
     ]
   }
 }
