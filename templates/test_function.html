@@ -697,6 +697,11 @@
                 if (result.success) {
                     const select = document.getElementById('customer-select');
                     result.customers.forEach(customer => {
+                        // 暫時只顯示和碩（開發測試用，正式上線前移除此過濾）
+                        if (customer.username !== 'pegatron' && !customer.company?.includes('和碩')) {
+                            return; // 跳過非和碩的客戶
+                        }
+
                         const option = document.createElement('option');
                         option.value = JSON.stringify(customer);
                         option.textContent = `${customer.company} - ${customer.display_name}`;
