@@ -535,113 +535,12 @@ def is_xls_format(file_path):
 
 def cleanup_xls_file(file_path, output_path, username):
     """
-    清理 .xls 格式的檔案（使用 xlwings 自動化）
+    清理 .xls 格式的檔案（使用 LibreOffice 跨平台方案）
     完整保留格式、公式，只修改指定儲存格的值為 0
-    xlwings 比 pywin32 COM 更穩定，不會卡住
+    支援 Windows 和 Linux 環境
     """
-    import shutil
-    import xlwings as xw
-
-    print(f"  🔄 開始清理 .xls 檔案...")
-    print(f"  📂 輸入: {file_path}")
-    print(f"  📂 輸出: {output_path}")
-
-    # 先複製原始檔案到輸出位置
-    shutil.copy2(file_path, output_path)
-
-    # 使用絕對路徑
-    abs_output_path = os.path.abspath(output_path)
-
-    cleaned_count = 0
-    app = None
-
-    try:
-        # 啟動 Excel（隱藏視窗）
-        print(f"  🚀 啟動 Excel (xlwings)...")
-        app = xw.App(visible=False, add_book=False)
-        app.display_alerts = False
-        app.screen_updating = False
-
-        # 開啟複製後的檔案（直接修改輸出檔案）
-        print(f"  📖 開啟檔案...")
-        wb = app.books.open(abs_output_path)
-        ws = wb.sheets[0]
-
-        # 嘗試取消工作表保護
-        try:
-            if ws.api.ProtectContents:
-                ws.api.Unprotect()
-                print(f"  🔓 已取消工作表保護")
-        except Exception as unprotect_err:
-            print(f"  ⚠️ 無法取消工作表保護（可能沒有保護或有密碼）: {unprotect_err}")
-
-        # 取得資料範圍
-        used_range = ws.used_range
-        max_row = used_range.last_cell.row
-        max_col = used_range.last_cell.column
-
-        print(f"  📊 檔案大小: {max_row} 行 x {max_col} 欄")
-        print(f"  🧹 開始清理資料（用戶: {username}）...")
-
-        # 掃描並清理
-        for row_idx in range(1, max_row + 1):
-            if row_idx % 50 == 0:
-                print(f"    處理進度: {row_idx}/{max_row} 行...")
-
-            if username == 'pegatron':
-                # 檢查M欄位（第13欄）是否為 "ETA QTY"
-                m_value = ws.range((row_idx, 13)).value
-                if m_value and str(m_value).strip() == "ETA QTY":
-                    # 清空N~DN欄位（第14欄到第118欄）設為 0
-                    for col_idx in range(14, min(119, max_col + 1)):
-                        cell = ws.range((row_idx, col_idx))
-                        cell_value = cell.value
-                        if cell_value is not None and cell_value != 0 and cell_value != '':
-                            cell.value = 0
-                            cleaned_count += 1
-            else:
-                # quanta 清理邏輯
-                k_value = ws.range((row_idx, 11)).value
-                if k_value and str(k_value) == "供應數量":
-                    for col_idx in range(12, min(50, max_col + 1)):
-                        cell = ws.range((row_idx, col_idx))
-                        cell_value = cell.value
-                        if cell_value != 0 and cell_value != '':
-                            cell.value = 0
-                            cleaned_count += 1
-
-                i_value = ws.range((row_idx, 9)).value
-                if i_value and "庫存數量" in str(i_value):
-                    if row_idx + 1 <= max_row:
-                        next_cell = ws.range((row_idx + 1, 9))
-                        next_value = next_cell.value
-                        if next_value != 0 and next_value != '':
-                            next_cell.value = 0
-                            cleaned_count += 1
-
-        # 保存檔案
-        print(f"  💾 儲存檔案...")
-        wb.save()
-        print(f"  ✅ 清理完成，共清理 {cleaned_count} 個儲存格")
-
-        # 關閉工作簿
-        wb.close()
-
-    except Exception as e:
-        print(f"  ❌ 清理失敗: {e}")
-        import traceback
-        traceback.print_exc()
-        raise e
-    finally:
-        # 關閉 Excel
-        print(f"  🔒 關閉 Excel...")
-        try:
-            if app:
-                app.quit()
-        except Exception as close_error:
-            print(f"  ⚠️ 關閉 Excel 時發生錯誤: {close_error}")
-
-    return cleaned_count
+    from libreoffice_utils import cleanup_xls_file_libreoffice
+    return cleanup_xls_file_libreoffice(file_path, output_path, username)
 
 def get_or_create_session_folder(user_id, folder_type='uploads', upload_session_id=None):
     """
@@ -1451,118 +1350,46 @@ def upload_forecast():
 
             # ========== 根據合併選項處理 ==========
             if merge_files:
-                # 合併模式：使用 xlwings 操作 Excel 原生複製貼上，保留格式且速度快
+                # 合併模式：使用 LibreOffice 跨平台方案，保留格式
                 import shutil
                 import time
+                from libreoffice_utils import merge_excel_files_libreoffice
 
-                print(f"開始合併 {len(temp_files)} 個 Forecast 檔案（使用 Excel 原生複製貼上保留格式）...")
+                print(f"開始合併 {len(temp_files)} 個 Forecast 檔案（使用 LibreOffice 保留格式）...")
                 merge_start = time.time()
 
-                # ===== 步驟 1：直接複製第一個檔案作為基礎（保留原始副檔名）=====
-                first_temp_path = temp_files[0][1]
+                # 準備檔案路徑列表
+                file_paths = [temp_path for _, temp_path, _ in temp_files]
                 final_filename = 'forecast_data' + first_file_ext
                 final_filepath = os.path.join(upload_folder, final_filename)
-                shutil.copy2(first_temp_path, final_filepath)
-                print(f"  複製第一個檔案完成，耗時 {time.time() - merge_start:.2f} 秒")
 
-                # ===== 步驟 2：使用 xlwings 進行真正的 Excel 複製貼上 =====
+                # 使用 LibreOffice 合併檔案
                 if len(temp_files) > 1:
-                    import xlwings as xw
-
-                    # 啟動 Excel（隱藏模式）
-                    app = xw.App(visible=False, add_book=False)
-                    app.display_alerts = False
-                    app.screen_updating = False
-
                     try:
-                        # 打開目標檔案
-                        dest_wb = app.books.open(final_filepath)
-                        dest_ws = dest_wb.sheets[0]
-
-                        # 嘗試取消目標工作表保護
-                        try:
-                            if dest_ws.api.ProtectContents:
-                                dest_ws.api.Unprotect()
-                                print(f"  已取消目標工作表保護")
-                        except Exception as unprotect_err:
-                            # 如果有密碼保護，無法取消
-                            app.quit()
+                        success = merge_excel_files_libreoffice(file_paths, final_filepath, skip_header=True)
+                        if not success:
                             # 清理暫存檔案
                             for _, temp_path, _ in temp_files:
                                 if os.path.exists(temp_path):
                                     os.remove(temp_path)
                             return jsonify({
                                 'success': False,
-                                'message': 'Forecast 檔案的工作表有密碼保護，無法進行合併',
-                                'details': '請先手動在 Excel 中取消工作表保護（檢閱 → 取消保護工作表），然後再重新上傳。'
+                                'message': '合併 Forecast 檔案失敗',
+                                'details': '請確認 LibreOffice 已正確安裝'
                             })
-
-                        # 取得第一個檔案的欄數（用於複製範圍）
-                        first_max_col = dest_ws.used_range.last_cell.column
-
-                        for file_idx in range(1, len(temp_files)):
-                            src_path = temp_files[file_idx][1]
-
-                            # 打開來源檔案
-                            src_wb = app.books.open(src_path)
-                            src_ws = src_wb.sheets[0]
-
-                            # 嘗試取消來源工作表保護
-                            try:
-                                if src_ws.api.ProtectContents:
-                                    src_ws.api.Unprotect()
-                                    print(f"  已取消來源檔案 {file_idx + 1} 工作表保護")
-                            except Exception as src_unprotect_err:
-                                src_wb.close()
-                                app.quit()
-                                # 清理暫存檔案
-                                for _, temp_path, _ in temp_files:
-                                    if os.path.exists(temp_path):
-                                        os.remove(temp_path)
-                                return jsonify({
-                                    'success': False,
-                                    'message': f'第 {file_idx + 1} 個 Forecast 檔案的工作表有密碼保護，無法進行合併',
-                                    'details': '請先手動在 Excel 中取消工作表保護（檢閱 → 取消保護工作表），然後再重新上傳。'
-                                })
-
-                            # 取得來源資料範圍（跳過標題，從第2行開始）
-                            src_last_row = src_ws.used_range.last_cell.row
-                            src_last_col = src_ws.used_range.last_cell.column
-
-                            if src_last_row < 2:
-                                # 只有標題，沒有資料
-                                src_wb.close()
-                                print(f"  檔案 {file_idx + 1} 沒有資料行，跳過")
-                                continue
-
-                            # 複製來源資料區域（從第2行到最後一行）
-                            src_range = src_ws.range(f'A2:{xw.utils.col_name(src_last_col)}{src_last_row}')
-
-                            # 找到目標的下一個空白行
-                            dest_last_row = dest_ws.used_range.last_cell.row
-                            dest_start_row = dest_last_row + 1
-
-                            # 複製並貼上（保留格式）
-                            src_range.copy()
-                            dest_cell = dest_ws.range(f'A{dest_start_row}')
-                            dest_cell.paste(paste='all')
-
-                            # 清除剪貼簿
-                            app.api.CutCopyMode = False
-
-                            rows_copied = src_last_row - 1  # 減去標題行
-                            print(f"  合併檔案 {file_idx + 1} 完成（{rows_copied} 行），耗時 {time.time() - merge_start:.2f} 秒")
-
-                            # 關閉來源檔案（不儲存）
-                            src_wb.close()
-
-                        # 儲存並關閉目標檔案
-                        dest_wb.save()
-                        dest_wb.close()
-
-                    finally:
-                        # 確保 Excel 應用程式關閉
-                        app.quit()
+                    except Exception as merge_err:
+                        # 清理暫存檔案
+                        for _, temp_path, _ in temp_files:
+                            if os.path.exists(temp_path):
+                                os.remove(temp_path)
+                        return jsonify({
+                            'success': False,
+                            'message': f'合併 Forecast 檔案失敗: {str(merge_err)}',
+                            'details': '請確認 LibreOffice 已正確安裝'
+                        })
+                else:
+                    # 只有一個檔案，直接複製
+                    shutil.copy2(file_paths[0], final_filepath)
 
                 # 計算總行數
                 total_rows = sum(df.shape[0] for df in all_dataframes)
@@ -1723,78 +1550,32 @@ def merge_forecast_files():
 
         print(f"  找到 {len(multi_files)} 個待合併檔案")
 
-        # 使用 xlwings 進行合併
+        # 使用 LibreOffice 進行合併（跨平台方案）
         import shutil
         import time
-        import xlwings as xw
+        from libreoffice_utils import merge_excel_files_libreoffice
 
         merge_start = time.time()
 
-        # 複製第一個檔案作為基礎
-        first_file = multi_files[0]
+        # 設定輸出檔案路徑
         final_filename = 'forecast_data' + first_file_ext
         final_filepath = os.path.join(upload_folder, final_filename)
-        shutil.copy2(first_file, final_filepath)
-        print(f"  複製第一個檔案完成")
 
-        # 使用 xlwings 合併其他檔案
-        app = xw.App(visible=False, add_book=False)
-        app.display_alerts = False
-        app.screen_updating = False
-
+        # 使用 LibreOffice 合併檔案
         try:
-            # 打開目標檔案
-            dest_wb = app.books.open(final_filepath)
-            dest_ws = dest_wb.sheets[0]
-
-            # 嘗試取消保護
-            try:
-                if dest_ws.api.ProtectContents:
-                    dest_ws.api.Unprotect()
-            except:
-                pass
-
-            # 取得第一個檔案的欄數
-            first_max_col = dest_ws.used_range.last_cell.column
-
-            for file_idx in range(1, len(multi_files)):
-                src_path = multi_files[file_idx]
-                src_wb = app.books.open(src_path)
-                src_ws = src_wb.sheets[0]
-
-                # 嘗試取消來源保護
-                try:
-                    if src_ws.api.ProtectContents:
-                        src_ws.api.Unprotect()
-                except:
-                    pass
-
-                # 取得來源範圍（跳過標題）
-                src_last_row = src_ws.used_range.last_cell.row
-                src_max_col = src_ws.used_range.last_cell.column
-                use_col = min(first_max_col, src_max_col)
-
-                if src_last_row > 1:
-                    src_range = src_ws.range(f'A2:{xw.utils.col_name(use_col)}{src_last_row}')
-                    dest_last_row = dest_ws.used_range.last_cell.row
-                    dest_start_row = dest_last_row + 1
-
-                    # 複製貼上
-                    src_range.copy()
-                    dest_cell = dest_ws.range(f'A{dest_start_row}')
-                    dest_cell.paste(paste='all')
-                    app.api.CutCopyMode = False
-
-                    print(f"  合併檔案 {file_idx + 1} 完成（{src_last_row - 1} 行）")
-
-                src_wb.close()
-
-            # 儲存並關閉
-            dest_wb.save()
-            dest_wb.close()
-
-        finally:
-            app.quit()
+            success = merge_excel_files_libreoffice(multi_files, final_filepath, skip_header=True)
+            if not success:
+                return jsonify({
+                    'success': False,
+                    'message': '合併檔案失敗',
+                    'details': '請確認 LibreOffice 已正確安裝'
+                })
+        except Exception as merge_err:
+            return jsonify({
+                'success': False,
+                'message': f'合併檔案失敗: {str(merge_err)}',
+                'details': '請確認 LibreOffice 已正確安裝'
+            })
 
         # 刪除原來的分開檔案
         for filepath in multi_files:
@@ -2344,105 +2125,40 @@ def process_forecast_cleanup():
                         'message': '檔案不存在'
                     })
 
-            # ========== 批次處理所有 .xls 檔案（使用單一 Excel 實例）==========
+            # ========== 批次處理所有 .xls 檔案（使用 LibreOffice 跨平台方案）==========
             if xls_files:
-                print(f"  📁 批次處理 {len(xls_files)} 個 .xls 檔案...")
-                import shutil
-                import xlwings as xw
+                print(f"  📁 批次處理 {len(xls_files)} 個 .xls 檔案（使用 LibreOffice）...")
+                from libreoffice_utils import cleanup_xls_file_libreoffice
 
-                app = None
-                try:
-                    # 啟動單一 Excel 實例
-                    app = xw.App(visible=False, add_book=False)
-                    app.display_alerts = False
-                    app.screen_updating = False
-                    print(f"  🚀 Excel 已啟動")
+                for idx, file_path in xls_files:
+                    original_name = os.path.basename(file_path)
+                    print(f"  清理檔案 {idx + 1}/{len(forecast_files_list)}: {original_name}")
 
-                    for idx, file_path in xls_files:
-                        original_name = os.path.basename(file_path)
-                        print(f"  清理檔案 {idx + 1}/{len(forecast_files_list)}: {original_name}")
+                    try:
+                        # 設定輸出檔案路徑（輸出為 .xlsx 格式）
+                        cleaned_filename = f'cleaned_forecast_{idx + 1}.xlsx'
+                        cleaned_file = os.path.join(processed_folder, cleaned_filename)
 
-                        try:
-                            # 複製檔案到輸出位置
-                            cleaned_filename = f'cleaned_forecast_{idx + 1}.xls'
-                            cleaned_file = os.path.join(processed_folder, cleaned_filename)
-                            shutil.copy2(file_path, cleaned_file)
-                            abs_output_path = os.path.abspath(cleaned_file)
+                        # 使用 LibreOffice 清理（輸出為 xlsx）
+                        cleaned_count = cleanup_xls_file_libreoffice(file_path, cleaned_file, username)
 
-                            # 開啟檔案
-                            wb = app.books.open(abs_output_path)
-                            ws = wb.sheets[0]
+                        total_cleaned_count += cleaned_count
+                        cleaned_files_info.append({
+                            'name': original_name,
+                            'cleaned_cells': cleaned_count,
+                            'status': 'success',
+                            'cleaned_path': cleaned_file
+                        })
+                        print(f"    ✅ 清理了 {cleaned_count} 個單元格")
 
-                            # 嘗試取消保護
-                            try:
-                                if ws.api.ProtectContents:
-                                    ws.api.Unprotect()
-                            except:
-                                pass
-
-                            # 取得範圍
-                            used_range = ws.used_range
-                            max_row = used_range.last_cell.row
-                            max_col = used_range.last_cell.column
-                            cleaned_count = 0
-
-                            # 清理資料
-                            for row_idx in range(1, max_row + 1):
-                                if username == 'pegatron':
-                                    m_value = ws.range((row_idx, 13)).value
-                                    if m_value and str(m_value).strip() == "ETA QTY":
-                                        for col_idx in range(14, min(119, max_col + 1)):
-                                            cell = ws.range((row_idx, col_idx))
-                                            if cell.value is not None and cell.value != 0 and cell.value != '':
-                                                cell.value = 0
-                                                cleaned_count += 1
-                                else:
-                                    k_value = ws.range((row_idx, 11)).value
-                                    if k_value and str(k_value) == "供應數量":
-                                        for col_idx in range(12, min(50, max_col + 1)):
-                                            cell = ws.range((row_idx, col_idx))
-                                            if cell.value != 0 and cell.value != '':
-                                                cell.value = 0
-                                                cleaned_count += 1
-
-                                    i_value = ws.range((row_idx, 9)).value
-                                    if i_value and "庫存數量" in str(i_value):
-                                        if row_idx + 1 <= max_row:
-                                            next_cell = ws.range((row_idx + 1, 9))
-                                            if next_cell.value != 0 and next_cell.value != '':
-                                                next_cell.value = 0
-                                                cleaned_count += 1
-
-                            # 保存並關閉工作簿
-                            wb.save()
-                            wb.close()
-
-                            total_cleaned_count += cleaned_count
-                            cleaned_files_info.append({
-                                'name': original_name,
-                                'cleaned_cells': cleaned_count,
-                                'status': 'success',
-                                'cleaned_path': cleaned_file
-                            })
-                            print(f"    ✅ 清理了 {cleaned_count} 個單元格")
-
-                        except Exception as file_error:
-                            print(f"    ❌ 清理失敗: {str(file_error)}")
-                            cleaned_files_info.append({
-                                'name': original_name,
-                                'cleaned_cells': 0,
-                                'status': 'error',
-                                'message': str(file_error)
-                            })
-
-                finally:
-                    # 關閉 Excel
-                    if app:
-                        try:
-                            app.quit()
-                            print(f"  🔒 Excel 已關閉")
-                        except:
-                            pass
+                    except Exception as file_error:
+                        print(f"    ❌ 清理失敗: {str(file_error)}")
+                        cleaned_files_info.append({
+                            'name': original_name,
+                            'cleaned_cells': 0,
+                            'status': 'error',
+                            'message': str(file_error)
+                        })
 
             # ========== 處理 .xlsx 檔案 ==========
             for idx, file_path in xlsx_files:
@@ -2532,9 +2248,10 @@ def process_forecast_cleanup():
             print("開始清理Forecast數據，保持原始格式...")
 
             if is_xls:
-                # ========== .xls 格式：使用 pywin32 COM 保留格式 ==========
-                print(f"ℹ️ 檔案為 .xls 格式，使用 pywin32 COM 處理以保留格式和公式")
-                cleaned_file = os.path.join(processed_folder, 'cleaned_forecast.xls')
+                # ========== .xls 格式：使用 LibreOffice 跨平台方案保留格式 ==========
+                # 注意：輸出會是 .xlsx 格式（避免轉換回 .xls 失敗）
+                print(f"ℹ️ 檔案為 .xls 格式，使用 LibreOffice 處理以保留格式和公式")
+                cleaned_file = os.path.join(processed_folder, 'cleaned_forecast.xlsx')
                 cleaned_count = cleanup_xls_file(forecast_file, cleaned_file, username)
             else:
                 # ========== .xlsx 格式：使用 openpyxl 保持格式 ==========
@@ -3153,9 +2870,8 @@ def run_forecast():
                     match = re.search(r'cleaned_forecast_(\d+)\.xlsx?', file_basename)
                     file_num = match.group(1) if match else str(idx)
 
-                    # 決定輸出檔名（保持原始格式）
-                    input_ext = os.path.splitext(forecast_file)[1].lower()
-                    output_filename = f'forecast_result_{file_num}{input_ext}'
+                    # 決定輸出檔名（統一輸出 .xlsx 格式）
+                    output_filename = f'forecast_result_{file_num}.xlsx'
 
                     print(f"\n--- 處理檔案 {idx}/{len(multi_cleaned_files)}: {file_basename} ---")
 
@@ -3171,12 +2887,13 @@ def run_forecast():
                         success = processor.process_all_blocks()
 
                         if success:
-                            result_file = os.path.join(processed_folder, output_filename)
+                            # 使用 processor.output_filename 確保檔名正確
+                            result_file = os.path.join(processed_folder, processor.output_filename)
                             if os.path.exists(result_file):
                                 file_size = os.path.getsize(result_file)
                                 processed_files.append({
                                     'input': file_basename,
-                                    'output': output_filename,
+                                    'output': processor.output_filename,
                                     'erp_filled': processor.total_filled,
                                     'transit_filled': processor.total_transit_filled,
                                     'file_size': file_size
@@ -3185,6 +2902,7 @@ def run_forecast():
                                 total_transit_filled += processor.total_transit_filled
                                 print(f"  ✅ 成功: ERP填入 {processor.total_filled}, Transit填入 {processor.total_transit_filled}")
                             else:
+                                print(f"  ❌ 結果文件未找到: {result_file}")
                                 failed_files.append({'input': file_basename, 'error': '結果文件未生成'})
                         else:
                             failed_files.append({'input': file_basename, 'error': '處理失敗'})
@@ -3229,9 +2947,8 @@ def run_forecast():
                     log_process(user['id'], 'forecast', 'failed', '請先完成Forecast數據清理')
                     return jsonify({'success': False, 'message': '請先完成Forecast數據清理'})
 
-                # 決定輸出檔名（保持 .xls 格式）
-                input_ext = os.path.splitext(cleaned_forecast)[1].lower()
-                output_filename = 'forecast_result.xls' if input_ext == '.xls' else 'forecast_result.xlsx'
+                # 決定輸出檔名（統一輸出 .xlsx 格式，避免轉換問題）
+                output_filename = 'forecast_result.xlsx'
 
                 print("開始 Pegatron FORECAST 處理...")
                 print(f"清理後的Forecast文件: {cleaned_forecast}")
@@ -3250,7 +2967,8 @@ def run_forecast():
                 success = processor.process_all_blocks()
 
                 if success:
-                    result_file = os.path.join(processed_folder, output_filename)
+                    # 注意：PegatronForecastProcessor 會強制輸出 .xlsx
+                    result_file = os.path.join(processed_folder, processor.output_filename)
                     if os.path.exists(result_file):
                         file_size = os.path.getsize(result_file)
                         duration = time.time() - start_time
@@ -3264,7 +2982,7 @@ def run_forecast():
                         result_data = {
                             'success': True,
                             'message': 'FORECAST處理完成',
-                            'file': output_filename,
+                            'file': processor.output_filename,
                             'erp_filled': processor.total_filled,
                             'erp_skipped': processor.total_skipped,
                             'transit_filled': processor.total_transit_filled,
@@ -3275,6 +2993,7 @@ def run_forecast():
                         return jsonify(result_data)
                     else:
                         duration = time.time() - start_time
+                        print(f"錯誤：結果文件未找到: {result_file}")
                         log_process(user['id'], 'forecast', 'failed', '結果文件未生成', duration)
                         return jsonify({'success': False, 'message': 'FORECAST處理完成但結果文件未生成'})
                 else:
@@ -4394,8 +4113,8 @@ def api_run_test():
         # 根據檔案類型選擇處理方式
         is_xls = is_xls_format(forecast_file)
         if is_xls:
-            # .xls 格式使用 pywin32 COM
-            cleaned_file = os.path.join(processed_folder, 'cleaned_forecast.xls')
+            # .xls 格式使用 LibreOffice 跨平台方案（輸出為 xlsx）
+            cleaned_file = os.path.join(processed_folder, 'cleaned_forecast.xlsx')
             cleaned_count = cleanup_xls_file(forecast_file, cleaned_file, customer_username)
         else:
             # .xlsx 格式使用 openpyxl

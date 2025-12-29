@@ -2,13 +2,12 @@
 """
 Pegatron Forecast Processor
 專門處理 Pegatron 的 Transit + ERP -> Forecast 邏輯
-使用 pywin32 COM 保留 .xls 格式和公式
+使用 LibreOffice 跨平台方案保留 .xls/.xlsx 格式和公式
+支援 Windows 和 Linux 環境
 """
 import pandas as pd
 import os
 import shutil
-import pythoncom
-from win32com import client as win32
 from datetime import datetime, timedelta
 
 
@@ -16,7 +15,7 @@ class PegatronForecastProcessor:
     """
     Pegatron 專用 Forecast 處理器
     - Transit 和 ERP 都填入 ETA QTY 行
-    - 使用 pywin32 COM 保留格式和公式
+    - 使用 LibreOffice 跨平台方案保留格式和公式
     - 支援累加邏輯
     - 追蹤已分配狀態，避免重複分配
     """
@@ -26,7 +25,11 @@ class PegatronForecastProcessor:
         self.erp_file = erp_file
         self.transit_file = transit_file
         self.output_folder = output_folder
-        self.output_filename = output_filename or "forecast_result.xls"
+        # 確保輸出為 xlsx 格式（避免轉換失敗）
+        if output_filename:
+            self.output_filename = os.path.splitext(output_filename)[0] + '.xlsx'
+        else:
+            self.output_filename = "forecast_result.xlsx"
 
         # 統計資料
         self.total_filled = 0
@@ -382,74 +385,25 @@ class PegatronForecastProcessor:
         return updates
 
     def _write_to_excel(self, updates):
-        """使用 COM 寫入 Excel，保留格式和公式"""
+        """使用 LibreOffice 跨平台方案寫入 Excel，保留格式和公式"""
+        from libreoffice_utils import write_to_excel_libreoffice
+
         # 決定輸出路徑
         if self.output_folder:
             output_path = os.path.join(self.output_folder, self.output_filename)
         else:
             output_path = self.output_filename
 
-        # 複製原始檔案
-        shutil.copy2(self.forecast_file, output_path)
-        abs_path = os.path.abspath(output_path)
-
-        pythoncom.CoInitialize()
-        excel = None
-        wb = None
-
         try:
-            excel = win32.DispatchEx('Excel.Application')
-            excel.Visible = False
-            excel.DisplayAlerts = False
-            excel.ScreenUpdating = False
-
-            wb = excel.Workbooks.Open(abs_path)
-            ws = wb.Sheets(1)
-
-            # 合併相同位置的值（累加）
-            update_dict = {}
-            for row, col, value in updates:
-                key = (row, col)
-                if key in update_dict:
-                    update_dict[key] += value
-                else:
-                    update_dict[key] = value
-
-            # 更新儲存格
-            for (row, col), value in update_dict.items():
-                current_val = ws.Cells(row, col).Value
-                if current_val is None or current_val == '' or current_val == 0:
-                    ws.Cells(row, col).Value = value
-                else:
-                    ws.Cells(row, col).Value = float(current_val) + value
-                print(f"  更新 Row {row}, Col {col} = {ws.Cells(row, col).Value}")
-
-            # 保存
-            wb.SaveCopyAs(abs_path + ".tmp")
-            wb.Close(SaveChanges=False)
-            wb = None
-
-            if os.path.exists(abs_path):
-                os.remove(abs_path)
-            os.rename(abs_path + ".tmp", abs_path)
-
-            print(f"\n已輸出到: {output_path}")
-            return True
-
+            success = write_to_excel_libreoffice(self.forecast_file, updates, output_path)
+            if success:
+                print(f"\n已輸出到: {output_path}")
+            return success
         except Exception as e:
             print(f"寫入 Excel 失敗: {e}")
             import traceback
             traceback.print_exc()
             return False
-        finally:
-            try:
-                if wb:
-                    wb.Close(SaveChanges=False)
-                if excel:
-                    excel.Quit()
-            except:
-                pass
-            pythoncom.CoUninitialize()
 
     def _save_allocation_status(self):
         """保存已分配狀態到 ERP 和 Transit 檔案"""

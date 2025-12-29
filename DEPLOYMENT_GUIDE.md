@@ -149,6 +149,75 @@ sudo systemctl restart business-forecasting
 - 修改彈窗內容：模態框HTML結構
 - 修改樣式：CSS中的 `.modal` 相關樣式
 
+## LibreOffice 安裝說明（重要）
+
+系統使用 LibreOffice 處理 Excel 檔案（.xls/.xlsx），需要在 Linux 伺服器上安裝 LibreOffice。
+
+### Ubuntu/Debian 安裝
+
+```bash
+# 更新套件列表
+sudo apt-get update
+
+# 安裝 LibreOffice Calc 和無頭模式支援
+sudo apt-get install -y libreoffice-calc libreoffice-headless
+
+# 驗證安裝
+libreoffice --version
+```
+
+### CentOS/RHEL 安裝
+
+```bash
+# 安裝 LibreOffice
+sudo yum install -y libreoffice-calc
+
+# 或使用 dnf（CentOS 8+）
+sudo dnf install -y libreoffice-calc
+
+# 驗證安裝
+libreoffice --version
+```
+
+### 1Panel 環境安裝
+
+在 1Panel 終端中執行：
+
+```bash
+# Ubuntu/Debian 系統
+apt-get update && apt-get install -y libreoffice-calc libreoffice-headless
+
+# CentOS 系統
+yum install -y libreoffice-calc
+```
+
+### 驗證 LibreOffice 安裝
+
+安裝完成後，執行以下命令驗證：
+
+```bash
+# 檢查版本
+libreoffice --version
+
+# 測試轉換功能（可選）
+echo "test" > /tmp/test.txt
+libreoffice --headless --convert-to xlsx /tmp/test.txt --outdir /tmp/
+ls /tmp/test.xlsx
+```
+
+### 常見問題
+
+1. **權限問題**：確保運行應用的用戶有執行 libreoffice 的權限
+2. **路徑問題**：如果 libreoffice 不在 PATH 中，可能需要使用完整路徑
+3. **字體問題**：如果 Excel 中有中文字體顯示異常，安裝中文字體：
+   ```bash
+   # Ubuntu/Debian
+   sudo apt-get install fonts-wqy-zenhei fonts-wqy-microhei
+
+   # CentOS
+   sudo yum install wqy-zenhei-fonts wqy-microhei-fonts
+   ```
+
 ## 注意事項
 
 1. 每次代碼更新後，版本號會自動更新，無需手動操作
@@ -156,3 +225,4 @@ sudo systemctl restart business-forecasting
 3. 生產環境建議關閉Flask的debug模式
 4. 定期檢查和清理uploads和processed目錄中的舊文件
 5. Chrome阻擋功能會影響用戶體驗，請根據實際需求決定是否啟用
+6. **必須安裝 LibreOffice**：系統需要 LibreOffice 來處理 Excel 檔案，特別是 .xls 格式的公式保留

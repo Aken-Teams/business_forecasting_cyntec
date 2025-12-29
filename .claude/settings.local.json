@@ -14,7 +14,8 @@
       "Bash(dir:*)",
       "Bash(chcp 65001)",
       "Bash(wc:*)",
-      "Bash(python init_processing_rules.py:*)"
+      "Bash(python init_processing_rules.py:*)",
+      "Bash(\"C:\\\\Program Files\\\\LibreOffice\\\\program\\\\soffice.exe\" --headless --help)"
     ]
   }
 }
