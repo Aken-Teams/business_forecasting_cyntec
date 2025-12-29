@@ -535,99 +535,97 @@ def is_xls_format(file_path):
 
 def cleanup_xls_file(file_path, output_path, username):
     """
-    清理 .xls 格式的檔案（使用 pywin32 COM 自動化）
+    清理 .xls 格式的檔案（使用 xlwings 自動化）
     完整保留格式、公式，只修改指定儲存格的值為 0
-    使用 SaveCopyAs 保存（因為 Save/SaveAs 在某些文件上會失敗）
+    xlwings 比 pywin32 COM 更穩定，不會卡住
     """
     import shutil
-    import pythoncom
-    from win32com import client as win32
+    import xlwings as xw
 
     print(f"  🔄 開始清理 .xls 檔案...")
     print(f"  📂 輸入: {file_path}")
     print(f"  📂 輸出: {output_path}")
 
-    # 先複製原始檔案到輸出位置（作為備份）
+    # 先複製原始檔案到輸出位置
     shutil.copy2(file_path, output_path)
 
     # 使用絕對路徑
-    abs_input_path = os.path.abspath(file_path)
     abs_output_path = os.path.abspath(output_path)
 
-    # 初始化 COM
-    pythoncom.CoInitialize()
-
-    excel = None
-    wb = None
     cleaned_count = 0
+    app = None
 
     try:
         # 啟動 Excel（隱藏視窗）
-        print(f"  🚀 啟動 Excel...")
-        excel = win32.DispatchEx('Excel.Application')
-        excel.Visible = False
-        excel.DisplayAlerts = False
-        excel.ScreenUpdating = False
+        print(f"  🚀 啟動 Excel (xlwings)...")
+        app = xw.App(visible=False, add_book=False)
+        app.display_alerts = False
+        app.screen_updating = False
 
-        # 開啟原始檔案
+        # 開啟複製後的檔案（直接修改輸出檔案）
         print(f"  📖 開啟檔案...")
-        wb = excel.Workbooks.Open(abs_input_path)
-        ws = wb.Sheets(1)
+        wb = app.books.open(abs_output_path)
+        ws = wb.sheets[0]
 
         # 嘗試取消工作表保護
         try:
-            ws.Unprotect()
-        except:
-            pass
+            if ws.api.ProtectContents:
+                ws.api.Unprotect()
+                print(f"  🔓 已取消工作表保護")
+        except Exception as unprotect_err:
+            print(f"  ⚠️ 無法取消工作表保護（可能沒有保護或有密碼）: {unprotect_err}")
 
         # 取得資料範圍
-        used_range = ws.UsedRange
-        max_row = used_range.Rows.Count
-        max_col = used_range.Columns.Count
+        used_range = ws.used_range
+        max_row = used_range.last_cell.row
+        max_col = used_range.last_cell.column
 
         print(f"  📊 檔案大小: {max_row} 行 x {max_col} 欄")
         print(f"  🧹 開始清理資料（用戶: {username}）...")
 
         # 掃描並清理
         for row_idx in range(1, max_row + 1):
-            if row_idx % 10 == 0:
+            if row_idx % 50 == 0:
                 print(f"    處理進度: {row_idx}/{max_row} 行...")
 
             if username == 'pegatron':
                 # 檢查M欄位（第13欄）是否為 "ETA QTY"
-                m_value = ws.Cells(row_idx, 13).Value
+                m_value = ws.range((row_idx, 13)).value
                 if m_value and str(m_value).strip() == "ETA QTY":
                     # 清空N~DN欄位（第14欄到第118欄）設為 0
                     for col_idx in range(14, min(119, max_col + 1)):
-                        cell = ws.Cells(row_idx, col_idx)
-                        cell_value = cell.Value
+                        cell = ws.range((row_idx, col_idx))
+                        cell_value = cell.value
                         if cell_value is not None and cell_value != 0 and cell_value != '':
-                            cell.Value = 0
+                            cell.value = 0
                             cleaned_count += 1
             else:
                 # quanta 清理邏輯
-                k_value = ws.Cells(row_idx, 11).Value
+                k_value = ws.range((row_idx, 11)).value
                 if k_value and str(k_value) == "供應數量":
                     for col_idx in range(12, min(50, max_col + 1)):
-                        cell = ws.Cells(row_idx, col_idx)
-                        cell_value = cell.Value
+                        cell = ws.range((row_idx, col_idx))
+                        cell_value = cell.value
                         if cell_value != 0 and cell_value != '':
-                            cell.Value = 0
+                            cell.value = 0
                             cleaned_count += 1
 
-                i_value = ws.Cells(row_idx, 9).Value
+                i_value = ws.range((row_idx, 9)).value
                 if i_value and "庫存數量" in str(i_value):
                     if row_idx + 1 <= max_row:
-                        next_cell = ws.Cells(row_idx + 1, 9)
-                        next_value = next_cell.Value
+                        next_cell = ws.range((row_idx + 1, 9))
+                        next_value = next_cell.value
                         if next_value != 0 and next_value != '':
-                            next_cell.Value = 0
+                            next_cell.value = 0
                             cleaned_count += 1
 
-        # 使用 SaveCopyAs 保存（保留公式和格式）
+        # 保存檔案
         print(f"  💾 儲存檔案...")
-        wb.SaveCopyAs(abs_output_path)
+        wb.save()
         print(f"  ✅ 清理完成，共清理 {cleaned_count} 個儲存格")
+
+        # 關閉工作簿
+        wb.close()
 
     except Exception as e:
         print(f"  ❌ 清理失敗: {e}")
@@ -635,16 +633,13 @@ def cleanup_xls_file(file_path, output_path, username):
         traceback.print_exc()
         raise e
     finally:
-        # 關閉工作簿和 Excel
+        # 關閉 Excel
         print(f"  🔒 關閉 Excel...")
         try:
-            if wb:
-                wb.Close(SaveChanges=False)
-            if excel:
-                excel.Quit()
+            if app:
+                app.quit()
         except Exception as close_error:
             print(f"  ⚠️ 關閉 Excel 時發生錯誤: {close_error}")
-        pythoncom.CoUninitialize()
 
     return cleaned_count
 
@@ -2330,10 +2325,17 @@ def process_forecast_cleanup():
             total_cleaned_count = 0
             cleaned_files_info = []
 
+            # 分離 .xls 和 .xlsx 檔案
+            xls_files = []
+            xlsx_files = []
             for idx, file_path in enumerate(forecast_files_list):
-                original_name = os.path.basename(file_path)
-
-                if not file_path or not os.path.exists(file_path):
+                if file_path and os.path.exists(file_path):
+                    if is_xls_format(file_path):
+                        xls_files.append((idx, file_path))
+                    else:
+                        xlsx_files.append((idx, file_path))
+                else:
+                    original_name = os.path.basename(file_path) if file_path else f'file_{idx}'
                     print(f"  ⚠️ 檔案不存在: {file_path}")
                     cleaned_files_info.append({
                         'name': original_name,
@@ -2341,64 +2343,145 @@ def process_forecast_cleanup():
                         'status': 'error',
                         'message': '檔案不存在'
                     })
-                    continue
 
+            # ========== 批次處理所有 .xls 檔案（使用單一 Excel 實例）==========
+            if xls_files:
+                print(f"  📁 批次處理 {len(xls_files)} 個 .xls 檔案...")
+                import shutil
+                import xlwings as xw
+
+                app = None
+                try:
+                    # 啟動單一 Excel 實例
+                    app = xw.App(visible=False, add_book=False)
+                    app.display_alerts = False
+                    app.screen_updating = False
+                    print(f"  🚀 Excel 已啟動")
+
+                    for idx, file_path in xls_files:
+                        original_name = os.path.basename(file_path)
+                        print(f"  清理檔案 {idx + 1}/{len(forecast_files_list)}: {original_name}")
+
+                        try:
+                            # 複製檔案到輸出位置
+                            cleaned_filename = f'cleaned_forecast_{idx + 1}.xls'
+                            cleaned_file = os.path.join(processed_folder, cleaned_filename)
+                            shutil.copy2(file_path, cleaned_file)
+                            abs_output_path = os.path.abspath(cleaned_file)
+
+                            # 開啟檔案
+                            wb = app.books.open(abs_output_path)
+                            ws = wb.sheets[0]
+
+                            # 嘗試取消保護
+                            try:
+                                if ws.api.ProtectContents:
+                                    ws.api.Unprotect()
+                            except:
+                                pass
+
+                            # 取得範圍
+                            used_range = ws.used_range
+                            max_row = used_range.last_cell.row
+                            max_col = used_range.last_cell.column
+                            cleaned_count = 0
+
+                            # 清理資料
+                            for row_idx in range(1, max_row + 1):
+                                if username == 'pegatron':
+                                    m_value = ws.range((row_idx, 13)).value
+                                    if m_value and str(m_value).strip() == "ETA QTY":
+                                        for col_idx in range(14, min(119, max_col + 1)):
+                                            cell = ws.range((row_idx, col_idx))
+                                            if cell.value is not None and cell.value != 0 and cell.value != '':
+                                                cell.value = 0
+                                                cleaned_count += 1
+                                else:
+                                    k_value = ws.range((row_idx, 11)).value
+                                    if k_value and str(k_value) == "供應數量":
+                                        for col_idx in range(12, min(50, max_col + 1)):
+                                            cell = ws.range((row_idx, col_idx))
+                                            if cell.value != 0 and cell.value != '':
+                                                cell.value = 0
+                                                cleaned_count += 1
+
+                                    i_value = ws.range((row_idx, 9)).value
+                                    if i_value and "庫存數量" in str(i_value):
+                                        if row_idx + 1 <= max_row:
+                                            next_cell = ws.range((row_idx + 1, 9))
+                                            if next_cell.value != 0 and next_cell.value != '':
+                                                next_cell.value = 0
+                                                cleaned_count += 1
+
+                            # 保存並關閉工作簿
+                            wb.save()
+                            wb.close()
+
+                            total_cleaned_count += cleaned_count
+                            cleaned_files_info.append({
+                                'name': original_name,
+                                'cleaned_cells': cleaned_count,
+                                'status': 'success',
+                                'cleaned_path': cleaned_file
+                            })
+                            print(f"    ✅ 清理了 {cleaned_count} 個單元格")
+
+                        except Exception as file_error:
+                            print(f"    ❌ 清理失敗: {str(file_error)}")
+                            cleaned_files_info.append({
+                                'name': original_name,
+                                'cleaned_cells': 0,
+                                'status': 'error',
+                                'message': str(file_error)
+                            })
+
+                finally:
+                    # 關閉 Excel
+                    if app:
+                        try:
+                            app.quit()
+                            print(f"  🔒 Excel 已關閉")
+                        except:
+                            pass
+
+            # ========== 處理 .xlsx 檔案 ==========
+            for idx, file_path in xlsx_files:
+                original_name = os.path.basename(file_path)
                 print(f"  清理檔案 {idx + 1}/{len(forecast_files_list)}: {original_name}")
 
                 try:
-                    # 檢查檔案格式
-                    is_xls = is_xls_format(file_path)
+                    wb = load_workbook(file_path)
+                    ws = wb.active
+                    cleaned_count = 0
 
-                    if is_xls:
-                        # ========== .xls 格式：使用 xlrd + xlutils 保留格式 ==========
-                        print(f"  ℹ️ 檔案為 .xls 格式，使用 xlrd 處理以保留格式")
-                        cleaned_filename = f'cleaned_forecast_{idx + 1}.xls'
-                        cleaned_file = os.path.join(processed_folder, cleaned_filename)
-                        cleaned_count = cleanup_xls_file(file_path, cleaned_file, username)
-                    else:
-                        # ========== .xlsx 格式：使用 openpyxl 保持格式 ==========
-                        wb = load_workbook(file_path)
-                        ws = wb.active
-
-                        # 清理數據
-                        cleaned_count = 0
-
-                        for row_idx in range(1, ws.max_row + 1):
-                            # ========== pegatron 專屬清理邏輯 ==========
-                            if username == 'pegatron':
-                                # 檢查M欄位（第13列）是否為 "ETA QTY"
-                                m_cell = ws.cell(row=row_idx, column=13)
-                                if m_cell.value and str(m_cell.value).strip() == "ETA QTY":
-                                    # 清空N~DN欄位（第14列到第118列）設為 0
-                                    for col_idx in range(14, min(119, ws.max_column + 1)):
-                                        cell = ws.cell(row=row_idx, column=col_idx)
-                                        if cell.value is not None and cell.value != 0:
-                                            cell.value = 0
-                                            cleaned_count += 1
-                            # ========== quanta 原有清理邏輯 ==========
-                            else:
-                                # 檢查K欄位（第11列）是否為"供應數量"
-                                k_cell = ws.cell(row=row_idx, column=11)
-                                if k_cell.value and str(k_cell.value) == "供應數量":
-                                    # 清空L~AW欄位（第12列到第49列）
-                                    for col_idx in range(12, min(50, ws.max_column + 1)):
-                                        cell = ws.cell(row=row_idx, column=col_idx)
-                                        if cell.value != 0:
-                                            cell.value = 0
-                                            cleaned_count += 1
-
-                                # 檢查I欄位（第9列）是否包含"庫存數量"
-                                i_cell = ws.cell(row=row_idx, column=9)
-                                if i_cell.value and "庫存數量" in str(i_cell.value):
-                                    next_row_i_cell = ws.cell(row=row_idx + 1, column=9)
-                                    if next_row_i_cell.value != 0:
-                                        next_row_i_cell.value = 0
+                    for row_idx in range(1, ws.max_row + 1):
+                        if username == 'pegatron':
+                            m_cell = ws.cell(row=row_idx, column=13)
+                            if m_cell.value and str(m_cell.value).strip() == "ETA QTY":
+                                for col_idx in range(14, min(119, ws.max_column + 1)):
+                                    cell = ws.cell(row=row_idx, column=col_idx)
+                                    if cell.value is not None and cell.value != 0:
+                                        cell.value = 0
+                                        cleaned_count += 1
+                        else:
+                            k_cell = ws.cell(row=row_idx, column=11)
+                            if k_cell.value and str(k_cell.value) == "供應數量":
+                                for col_idx in range(12, min(50, ws.max_column + 1)):
+                                    cell = ws.cell(row=row_idx, column=col_idx)
+                                    if cell.value != 0:
+                                        cell.value = 0
                                         cleaned_count += 1
 
-                        # 保存清理後的文件
-                        cleaned_filename = f'cleaned_forecast_{idx + 1}.xlsx'
-                        cleaned_file = os.path.join(processed_folder, cleaned_filename)
-                        wb.save(cleaned_file)
+                            i_cell = ws.cell(row=row_idx, column=9)
+                            if i_cell.value and "庫存數量" in str(i_cell.value):
+                                next_row_i_cell = ws.cell(row=row_idx + 1, column=9)
+                                if next_row_i_cell.value != 0:
+                                    next_row_i_cell.value = 0
+                                    cleaned_count += 1
+
+                    cleaned_filename = f'cleaned_forecast_{idx + 1}.xlsx'
+                    cleaned_file = os.path.join(processed_folder, cleaned_filename)
+                    wb.save(cleaned_file)
 
                     total_cleaned_count += cleaned_count
                     cleaned_files_info.append({
@@ -2418,7 +2501,7 @@ def process_forecast_cleanup():
                         'message': str(file_error)
                     })
 
-            # 統計成功清理的檔案數量（不存儲完整路徑到 session，避免 cookie 超限）
+            # 統計成功清理的檔案數量
             cleaned_paths = [f for f in cleaned_files_info if f['status'] == 'success']
 
             duration = time.time() - start_time
