@@ -3,6 +3,25 @@ let mappingList = [];  // 新格式：列表形式，每筆為一個 mapping 記
 let customers = [];    // 舊格式相容
 let mappingData = {};  // 舊格式相容
 
+// 從 URL 參數初始化 IT 測試模式
+(function initITTestModeFromURL() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const testMode = urlParams.get('test_mode') === 'true';
+    const customerId = urlParams.get('customer_id');
+    const customerName = urlParams.get('customer_name');
+
+    if (testMode && customerId) {
+        window.IT_TEST_MODE = {
+            enabled: true,
+            selectedCustomer: {
+                id: parseInt(customerId),
+                display_name: customerName ? decodeURIComponent(customerName) : ''
+            }
+        };
+        console.log('📋 映射頁面 IT 測試模式已啟用，客戶:', window.IT_TEST_MODE.selectedCustomer);
+    }
+})();
+
 // 分頁設定
 let currentPage = 1;
 const PAGE_SIZE = 10;  // 每頁顯示 10 筆
@@ -70,9 +89,36 @@ function generateSelectOptions(options, selectedValue) {
 
 // 初始化
 document.addEventListener('DOMContentLoaded', function() {
+    // 顯示 IT 測試模式提示
+    if (window.IT_TEST_MODE && window.IT_TEST_MODE.enabled && window.IT_TEST_MODE.selectedCustomer) {
+        showITTestModeBanner();
+    }
     loadMappingData();
     initializeEventListeners();
 });
+
+// 顯示 IT 測試模式提示橫幅
+function showITTestModeBanner() {
+    const banner = document.createElement('div');
+    banner.className = 'it-test-mode-banner';
+    banner.innerHTML = `
+        <i class="fas fa-flask"></i>
+        IT 測試模式 - 正在編輯 <strong>${window.IT_TEST_MODE.selectedCustomer.display_name}</strong> 的映射配置
+    `;
+    banner.style.cssText = `
+        background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+        color: white;
+        padding: 12px 20px;
+        text-align: center;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        box-shadow: 0 2px 10px rgba(39, 174, 96, 0.3);
+    `;
+    document.body.insertBefore(banner, document.body.firstChild);
+}
 
 // 事件監聽器
 function initializeEventListeners() {
@@ -85,7 +131,12 @@ async function loadMappingData() {
     try {
         showLoading();
 
-        const response = await fetch('/get_mapping_data');
+        // 檢查是否為 IT 測試模式
+        let url = '/get_mapping_data';
+        if (window.IT_TEST_MODE && window.IT_TEST_MODE.enabled && window.IT_TEST_MODE.selectedCustomer) {
+            url += `?test_mode=true&customer_id=${window.IT_TEST_MODE.selectedCustomer.id}`;
+        }
+        const response = await fetch(url);
         const result = await response.json();
 
         if (result.success) {
@@ -541,12 +592,19 @@ async function saveMapping() {
         }
 
         // 發送到服務器（使用新的列表格式 API）
+        // 構建請求數據，包含 IT 測試模式參數
+        const requestData = { mapping_list: mappingListToSave };
+        if (window.IT_TEST_MODE && window.IT_TEST_MODE.enabled && window.IT_TEST_MODE.selectedCustomer) {
+            requestData.test_mode = true;
+            requestData.customer_id = window.IT_TEST_MODE.selectedCustomer.id;
+        }
+
         const response = await fetch('/save_mapping_list', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ mapping_list: mappingListToSave })
+            body: JSON.stringify(requestData)
         });
 
         const result = await response.json();

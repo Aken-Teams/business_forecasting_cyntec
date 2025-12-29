@@ -9,6 +9,126 @@ let uploadedFiles = {
 // 在途文件是否為必填項目
 let transitRequired = true;
 
+// ========================================
+// IT 測試模式支援
+// ========================================
+
+// 檢查是否為 IT 測試模式
+function isITTestMode() {
+    return window.IT_TEST_MODE && window.IT_TEST_MODE.enabled && window.IT_TEST_MODE.selectedCustomer;
+}
+
+// 獲取測試模式的客戶 ID
+function getTestCustomerId() {
+    if (isITTestMode()) {
+        return window.IT_TEST_MODE.selectedCustomer.id;
+    }
+    return null;
+}
+
+// 獲取測試模式的客戶資訊
+function getTestCustomerInfo() {
+    if (isITTestMode()) {
+        return window.IT_TEST_MODE.selectedCustomer;
+    }
+    return null;
+}
+
+// 為 FormData 添加測試模式參數
+function appendTestModeParams(formData) {
+    if (isITTestMode()) {
+        formData.append('test_mode', 'true');
+        formData.append('customer_id', getTestCustomerId());
+        console.log('🧪 測試模式：添加 test_mode=true, customer_id=' + getTestCustomerId());
+    }
+}
+
+// 為 JSON 請求添加測試模式參數
+function getTestModeJsonParams() {
+    if (isITTestMode()) {
+        const params = {
+            test_mode: true,
+            customer_id: getTestCustomerId()
+        };
+        console.log('🧪 測試模式：添加 JSON 參數', params);
+        return params;
+    }
+    return {};
+}
+
+// 重置所有狀態（供 IT 測試模式使用）
+function resetAllStates() {
+    // 重置上傳 Session ID
+    resetUploadSessionId();
+
+    // 重置上傳狀態
+    uploadedFiles = {
+        erp: false,
+        forecast: false,
+        transit: false
+    };
+
+    // 重置上傳檔案資訊
+    uploadedFileInfo = {
+        erp: null,
+        forecast: null,
+        transit: null
+    };
+
+    // 重置在途需求檢查結果
+    forecastTransitCheck = null;
+
+    // 重置在途必填狀態
+    transitRequired = true;
+    const transitCheckbox = document.getElementById('transit-required-checkbox');
+    if (transitCheckbox) {
+        transitCheckbox.checked = true;
+    }
+
+    // 重置UI - 上傳區域
+    ['erp', 'forecast', 'transit'].forEach(type => {
+        const uploadBox = document.getElementById(`${type}-upload-box`);
+        const status = document.getElementById(`${type}-status`);
+        const fileInput = document.getElementById(`${type}-file`);
+
+        if (uploadBox) uploadBox.style.display = 'block';
+        if (status) status.style.display = 'none';
+        if (fileInput) fileInput.value = '';
+    });
+
+    // 重置 checklist 狀態
+    if (typeof updateUploadChecklist === 'function') {
+        updateUploadChecklist();
+    }
+
+    // 重置下一步按鈕狀態
+    const nextBtn = document.getElementById('upload-next-btn');
+    if (nextBtn) {
+        nextBtn.disabled = true;
+    }
+
+    // 隱藏所有處理結果
+    const resultIds = ['cleanup-result', 'mapping-result', 'forecast-result'];
+    resultIds.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.style.display = 'none';
+            element.innerHTML = '';
+        }
+    });
+
+    // 重置步驟
+    currentStep = 1;
+    if (typeof updateProgress === 'function') {
+        updateProgress();
+    }
+    if (typeof showSection === 'function') {
+        showSection('upload');
+    }
+
+    console.log('🔄 所有狀態已重置');
+}
+
 // 儲存上傳檔案的詳細資訊
 let uploadedFileInfo = {
     erp: null,
@@ -111,10 +231,12 @@ async function handleErpUpload(event) {
     formData.append('file', file);
     // 傳遞前端產生的 upload session id，確保檔案存到同一個資料夾
     formData.append('upload_session_id', getUploadSessionId());
+    // 添加測試模式參數（如果是 IT 測試模式）
+    appendTestModeParams(formData);
 
     try {
         showLoading('erp');
-        console.log('開始上傳ERP文件:', file.name, '大小:', file.size, 'bytes', 'sessionId:', getUploadSessionId());
+        console.log('開始上傳ERP文件:', file.name, '大小:', file.size, 'bytes', 'sessionId:', getUploadSessionId(), 'testMode:', isITTestMode());
 
         const response = await fetch('/upload_erp', {
             method: 'POST',
@@ -183,9 +305,11 @@ async function handleForecastUpload(event) {
     formData.append('merge_files', shouldMerge ? 'true' : 'false');
     // 傳遞前端產生的 upload session id，確保檔案存到同一個資料夾
     formData.append('upload_session_id', getUploadSessionId());
+    // 添加測試模式參數（如果是 IT 測試模式）
+    appendTestModeParams(formData);
 
     try {
-        console.log(`開始上傳 ${files.length} 個 Forecast 文件，合併模式: ${shouldMerge}, sessionId: ${getUploadSessionId()}`);
+        console.log(`開始上傳 ${files.length} 個 Forecast 文件，合併模式: ${shouldMerge}, sessionId: ${getUploadSessionId()}, testMode: ${isITTestMode()}`);
 
         // 模擬每個檔案的進度更新
         for (let i = 0; i < files.length; i++) {
@@ -408,10 +532,12 @@ async function handleTransitUpload(event) {
     formData.append('file', file);
     // 傳遞前端產生的 upload session id，確保檔案存到同一個資料夾
     formData.append('upload_session_id', getUploadSessionId());
+    // 添加測試模式參數（如果是 IT 測試模式）
+    appendTestModeParams(formData);
 
     try {
         showLoading('transit');
-        console.log('開始上傳在途文件:', file.name, '大小:', file.size, 'bytes', 'sessionId:', getUploadSessionId());
+        console.log('開始上傳在途文件:', file.name, '大小:', file.size, 'bytes', 'sessionId:', getUploadSessionId(), 'testMode:', isITTestMode());
 
         const response = await fetch('/upload_transit', {
             method: 'POST',
@@ -1279,7 +1405,8 @@ async function confirmAndProceed() {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    upload_session_id: getUploadSessionId()
+                    upload_session_id: getUploadSessionId(),
+                    ...getTestModeJsonParams()
                 })
             });
 
@@ -1350,7 +1477,8 @@ async function handleCleanup() {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                upload_session_id: getUploadSessionId()
+                upload_session_id: getUploadSessionId(),
+                ...getTestModeJsonParams()
             })
         });
 
@@ -1430,10 +1558,16 @@ function showMultiFileCleanupResult(result) {
 
 // 打開映射配置
 function openMappingConfig() {
+    // 構建 URL，包含 IT 測試模式參數
+    let url = '/mapping';
+    if (isITTestMode()) {
+        url += `?test_mode=true&customer_id=${getTestCustomerId()}&customer_name=${encodeURIComponent(window.IT_TEST_MODE.selectedCustomer.display_name)}`;
+    }
+
     // 在新窗口打開映射配置頁面
-    const mappingWindow = window.open('/mapping', '_blank', 'width=1200,height=800,scrollbars=yes,resizable=yes');
-    
-    // 監聽窗口關閉事件
+    const mappingWindow = window.open(url, '_blank', 'width=1200,height=800,scrollbars=yes,resizable=yes');
+
+    // 監聯窗口關閉事件
     const checkClosed = setInterval(() => {
         if (mappingWindow.closed) {
             clearInterval(checkClosed);
@@ -1446,7 +1580,11 @@ function openMappingConfig() {
 // 檢查映射數據
 async function checkMappingData() {
     try {
-        const response = await fetch('/get_mapping_data');
+        let url = '/get_mapping_data';
+        if (isITTestMode()) {
+            url += `?test_mode=true&customer_id=${getTestCustomerId()}`;
+        }
+        const response = await fetch(url);
         const result = await response.json();
         
         if (result.success && result.source === 'mapping_table') {
@@ -1491,7 +1629,8 @@ async function handleMappingProcess() {
             },
             body: JSON.stringify({
                 upload_session_id: getUploadSessionId(),
-                transit_required: transitRequired
+                transit_required: transitRequired,
+                ...getTestModeJsonParams()
             })
         });
 
@@ -1573,7 +1712,8 @@ async function handleForecast() {
             },
             body: JSON.stringify({
                 upload_session_id: getUploadSessionId(),
-                transit_required: transitRequired
+                transit_required: transitRequired,
+                ...getTestModeJsonParams()
             })
         });
         
@@ -1799,9 +1939,20 @@ function updateCompletionInfo() {
     // 更新顯示
     const dateElement = document.getElementById('completion-date');
     const timeElement = document.getElementById('completion-time');
+    const customerElement = document.getElementById('completion-customer');
 
     if (dateElement) dateElement.textContent = dateStr;
     if (timeElement) timeElement.textContent = timeStr;
+
+    // 如果是 IT 測試模式，顯示測試客戶名稱
+    if (customerElement) {
+        if (isITTestMode()) {
+            const customer = getTestCustomerInfo();
+            customerElement.textContent = `${customer.company} - ${customer.display_name}`;
+        } else {
+            customerElement.textContent = '-';
+        }
+    }
 }
 
 // 更新進度

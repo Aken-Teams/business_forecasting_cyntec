@@ -1159,7 +1159,21 @@ def upload_erp():
         print(f"📥 ERP 上傳 - 前端傳來的 session_id: {upload_session_id}")
 
         if file and allowed_file(file.filename):
+            # ========== 檢查測試模式 ==========
+            test_mode = request.form.get('test_mode') == 'true'
+            customer_id = request.form.get('customer_id')
+            template_username = user['username']
+            # IT 測試模式：檔案放在 IT 人員的資料夾，但使用客戶的模板驗證
+
+            if test_mode and customer_id and user['role'] in ['admin', 'it']:
+                # 測試模式：使用被測試客戶的模板進行驗證，但檔案仍放在 IT 人員資料夾
+                test_customer = get_user_by_id(int(customer_id))
+                if test_customer:
+                    template_username = test_customer['username']
+                    print(f"[IT測試模式] ERP: 使用客戶 {template_username} 的模板驗證，檔案放在 IT 人員 (ID: {user['id']}) 資料夾")
+
             # 使用資料夾管理結構：uploads/{user_id}/{session_timestamp}/erp_data.xlsx/.xls
+            # IT 測試模式下也使用 IT 人員的 user_id
             upload_folder, session_timestamp = get_or_create_session_folder(user['id'], 'uploads', upload_session_id)
             original_ext = get_file_extension(original_filename)  # 保留原始副檔名
             filename = 'erp_data' + original_ext
@@ -1177,17 +1191,6 @@ def upload_erp():
                 return jsonify({'success': False, 'message': '文件保存失敗'})
 
             # ========== 格式驗證 ==========
-            # 檢查是否為測試模式，如果是則使用被測試客戶的 username
-            test_mode = request.form.get('test_mode') == 'true'
-            customer_id = request.form.get('customer_id')
-            template_username = user['username']
-
-            if test_mode and customer_id and user['role'] in ['admin', 'it']:
-                # 測試模式：取得被測試客戶的 username
-                test_customer = get_user_by_id(int(customer_id))
-                if test_customer:
-                    template_username = test_customer['username']
-                    print(f"[測試模式] 使用客戶 {template_username} 的模板進行驗證")
 
             print(f"開始驗證 ERP 文件格式...（用戶: {template_username}）")
             is_valid, message, details = validate_erp_format(filepath, template_username)
@@ -1287,19 +1290,20 @@ def upload_forecast():
         upload_session_id = request.form.get('upload_session_id')
         print(f"📥 Forecast 上傳 - 前端傳來的 session_id: {upload_session_id}")
 
-        # 使用資料夾管理結構
-        upload_folder, session_timestamp = get_or_create_session_folder(user['id'], 'uploads', upload_session_id)
-
         # 取得測試模式參數
         test_mode = request.form.get('test_mode') == 'true'
         customer_id = request.form.get('customer_id')
         template_username = user['username']
+        # IT 測試模式：檔案放在 IT 人員的資料夾，但使用客戶的模板驗證
 
         if test_mode and customer_id and user['role'] in ['admin', 'it']:
             test_customer = get_user_by_id(int(customer_id))
             if test_customer:
                 template_username = test_customer['username']
-                print(f"[測試模式] 使用客戶 {template_username} 的模板進行驗證")
+                print(f"[IT測試模式] Forecast: 使用客戶 {template_username} 的模板驗證，檔案放在 IT 人員 (ID: {user['id']}) 資料夾")
+
+        # 使用資料夾管理結構（IT 測試模式下也使用 IT 人員的 user_id）
+        upload_folder, session_timestamp = get_or_create_session_folder(user['id'], 'uploads', upload_session_id)
 
         # ========== 處理多檔案上傳 ==========
         if len(files_list) == 1:
@@ -1345,7 +1349,9 @@ def upload_forecast():
                        f"Forecast 文件上傳成功：{original_filename}", get_client_ip(), request.headers.get('User-Agent'))
 
             # 檢查在途需求（方案 C：只提醒不卡控）
-            transit_check = check_transit_requirements_from_forecast(filepath, user['id'], template_username)
+            # IT 測試模式下，使用客戶的 ID 來查詢映射資料
+            mapping_user_id = int(customer_id) if test_mode and customer_id else user['id']
+            transit_check = check_transit_requirements_from_forecast(filepath, mapping_user_id, template_username)
 
             response_data = {
                 'success': True,
@@ -1589,7 +1595,9 @@ def upload_forecast():
                            f"Forecast 多檔案上傳成功：{len(files_list)} 個文件已合併", get_client_ip(), request.headers.get('User-Agent'))
 
                 # 檢查在途需求（方案 C：只提醒不卡控）
-                transit_check = check_transit_requirements_from_forecast(final_filepath, user['id'], template_username)
+                # IT 測試模式下，使用客戶的 ID 來查詢映射資料
+                mapping_user_id = int(customer_id) if test_mode and customer_id else user['id']
+                transit_check = check_transit_requirements_from_forecast(final_filepath, mapping_user_id, template_username)
 
                 response_data = {
                     'success': True,
@@ -1647,8 +1655,10 @@ def upload_forecast():
                            f"Forecast 多檔案上傳成功：{len(files_list)} 個文件（不合併）", get_client_ip(), request.headers.get('User-Agent'))
 
                 # 檢查在途需求（方案 C：只提醒不卡控）- 檢查所有檔案
+                # IT 測試模式下，使用客戶的 ID 來查詢映射資料
                 all_file_paths = [f['path'] for f in saved_files]
-                transit_check = check_transit_requirements_from_forecast(all_file_paths, user['id'], template_username) if saved_files else {'message': ''}
+                mapping_user_id = int(customer_id) if test_mode and customer_id else user['id']
+                transit_check = check_transit_requirements_from_forecast(all_file_paths, mapping_user_id, template_username) if saved_files else {'message': ''}
 
                 response_data = {
                     'success': True,
@@ -1842,7 +1852,21 @@ def upload_transit():
         print(f"📥 Transit 上傳 - 前端傳來的 session_id: {upload_session_id}")
 
         if file and allowed_file(file.filename):
+            # ========== 檢查測試模式 ==========
+            test_mode = request.form.get('test_mode') == 'true'
+            customer_id = request.form.get('customer_id')
+            template_username = user['username']
+            # IT 測試模式：檔案放在 IT 人員的資料夾，但使用客戶的模板驗證
+
+            if test_mode and customer_id and user['role'] in ['admin', 'it']:
+                # 測試模式：使用被測試客戶的模板進行驗證，但檔案仍放在 IT 人員資料夾
+                test_customer = get_user_by_id(int(customer_id))
+                if test_customer:
+                    template_username = test_customer['username']
+                    print(f"[IT測試模式] Transit: 使用客戶 {template_username} 的模板驗證，檔案放在 IT 人員 (ID: {user['id']}) 資料夾")
+
             # 使用資料夾管理結構：uploads/{user_id}/{session_timestamp}/transit_data.xlsx/.xls
+            # IT 測試模式下也使用 IT 人員的 user_id
             upload_folder, session_timestamp = get_or_create_session_folder(user['id'], 'uploads', upload_session_id)
             original_ext = get_file_extension(original_filename)  # 保留原始副檔名
             filename = 'transit_data' + original_ext
@@ -1857,17 +1881,6 @@ def upload_transit():
                 return jsonify({'success': False, 'message': '文件保存失敗'})
 
             # ========== 格式驗證 ==========
-            # 檢查是否為測試模式，如果是則使用被測試客戶的 username
-            test_mode = request.form.get('test_mode') == 'true'
-            customer_id = request.form.get('customer_id')
-            template_username = user['username']
-
-            if test_mode and customer_id and user['role'] in ['admin', 'it']:
-                # 測試模式：取得被測試客戶的 username
-                test_customer = get_user_by_id(int(customer_id))
-                if test_customer:
-                    template_username = test_customer['username']
-                    print(f"[測試模式] 使用客戶 {template_username} 的模板進行驗證")
 
             print(f"開始驗證在途文件格式...（用戶: {template_username}）")
             is_valid, message, details = validate_transit_format(filepath, template_username)
@@ -1954,10 +1967,20 @@ def mapping():
 def get_mapping_data():
     user = get_current_user()
     try:
+        # 檢查是否為 IT 測試模式
+        test_mode = request.args.get('test_mode') == 'true'
+        customer_id = request.args.get('customer_id')
+
+        # 決定使用哪個用戶的 mapping 資料
+        mapping_user_id = user['id']
+        if test_mode and customer_id and user['role'] in ['admin', 'it']:
+            mapping_user_id = int(customer_id)
+            print(f"[IT測試模式] 載入客戶 ID {customer_id} 的 mapping 資料")
+
         # 1. 首先嘗試從資料庫讀取用戶的 mapping 資料（使用 raw 格式以支援多記錄）
-        if has_customer_mappings(user['id']):
-            print(f"從資料庫讀取用戶 {user['username']} 的 mapping 資料...")
-            raw_mappings = get_customer_mappings_raw(user['id'])
+        if has_customer_mappings(mapping_user_id):
+            print(f"從資料庫讀取用戶 ID {mapping_user_id} 的 mapping 資料...")
+            raw_mappings = get_customer_mappings_raw(mapping_user_id)
 
             if raw_mappings:
                 # 返回列表格式，每筆記錄為一行
@@ -2162,11 +2185,20 @@ def save_mapping_list():
         data = request.json
         mapping_list = data.get('mapping_list', [])
 
+        # 檢查是否為 IT 測試模式
+        test_mode = data.get('test_mode', False)
+        customer_id = data.get('customer_id')
+
+        # 決定要保存到哪個用戶的映射資料
+        mapping_user_id = user['id']
+        if test_mode and customer_id and user['role'] in ['admin', 'it']:
+            mapping_user_id = int(customer_id)
+
         if not mapping_list:
             return jsonify({'success': False, 'message': '沒有資料需要保存'})
 
         # 直接儲存列表格式到資料庫
-        if save_customer_mappings_list(user['id'], mapping_list):
+        if save_customer_mappings_list(mapping_user_id, mapping_list):
             print(f"✅ 已儲存 {len(mapping_list)} 筆 mapping 資料到資料庫 (user: {user['username']})")
 
             # 記錄 LOG
@@ -2217,6 +2249,11 @@ def process_forecast_cleanup():
         except:
             pass
         test_mode = data.get('test_mode', False)
+        customer_id = data.get('customer_id')
+        # IT 測試模式：檔案放在 IT 人員的資料夾（與上傳時一致）
+
+        if test_mode and customer_id and user['role'] in ['admin', 'it']:
+            print(f"[IT測試模式] Cleanup: 檔案放在 IT 人員 (ID: {user['id']}) 資料夾")
 
         # 獲取前端傳來的 upload_session_id
         upload_session_id = data.get('upload_session_id')
@@ -2228,11 +2265,11 @@ def process_forecast_cleanup():
             session.modified = True
             print(f"📁 已同步 session_id 到 Flask session: {upload_session_id}")
 
-        # 記錄開始處理
+        # 記錄開始處理（使用 IT 人員的身份記錄 log）
         log_activity(user['id'], user['username'], 'cleanup_start',
-                   f"開始 Forecast 數據清理{' (測試模式)' if test_mode else ''}", get_client_ip(), request.headers.get('User-Agent'))
+                   f"開始 Forecast 數據清理{' (IT測試模式, 客戶ID: ' + str(customer_id) + ')' if test_mode else ''}", get_client_ip(), request.headers.get('User-Agent'))
 
-        # 使用資料夾管理結構（傳遞 upload_session_id）
+        # 使用資料夾管理結構（IT 測試模式下也使用 IT 人員的 user_id）
         processed_folder, session_timestamp = get_or_create_session_folder(user['id'], 'processed', upload_session_id)
 
         # 存儲 processed 資料夾路徑到 session
@@ -2240,6 +2277,7 @@ def process_forecast_cleanup():
 
         # 根據實際上傳的檔案來判斷是否為多檔案模式（不依賴 session 標記）
         # 掃描上傳資料夾，檢查是否有多個 forecast_data_*.xlsx/.xls 檔案
+        # IT 測試模式下也使用 IT 人員的資料夾
         upload_folder = os.path.join(UPLOAD_FOLDER, str(user['id']), session_timestamp)
         print(f"🔍 Cleanup - 掃描上傳資料夾: {upload_folder}")
 
@@ -2276,7 +2314,13 @@ def process_forecast_cleanup():
             return jsonify({'success': False, 'message': '請先上傳Forecast文件'})
 
         # 根據用戶決定清理邏輯
+        # IT 測試模式下，使用客戶的用戶名來決定清理邏輯
         username = user['username']
+        if test_mode and customer_id and user['role'] in ['admin', 'it']:
+            test_customer = get_user_by_id(int(customer_id))
+            if test_customer:
+                username = test_customer['username']
+                print(f"[IT測試模式] Cleanup: 使用客戶 {username} 的清理邏輯")
         print(f"📋 用戶: {username}，使用對應的清理邏輯")
 
         # 多檔案分開模式
@@ -2503,18 +2547,23 @@ def process_erp_mapping():
             print(f"📁 已同步 session_id 到 Flask session: {upload_session_id}")
 
         # 決定使用哪個用戶的 mapping 資料
+        # IT 測試模式：使用客戶的 mapping 資料，但檔案放在 IT 人員資料夾
         mapping_user_id = user['id']
         if test_mode and test_customer_id and (user['role'] in ['admin', 'it']):
             mapping_user_id = test_customer_id
-            print(f"[測試模式] 使用客戶 ID {test_customer_id} 的 mapping 資料")
+            print(f"[IT測試模式] Mapping: 使用客戶 ID {test_customer_id} 的 mapping 資料，檔案放在 IT 人員 (ID: {user['id']}) 資料夾")
 
-        # 記錄開始處理
+        # 記錄開始處理（使用 IT 人員的身份記錄 log）
         log_activity(user['id'], user['username'], 'mapping_start',
-                   f"開始 ERP 和在途數據整合{' (測試模式)' if test_mode else ''}", get_client_ip(), request.headers.get('User-Agent'))
+                   f"開始 ERP 和在途數據整合{' (IT測試模式, 客戶ID: ' + str(test_customer_id) + ')' if test_mode else ''}", get_client_ip(), request.headers.get('User-Agent'))
 
-        # 從 session 獲取當前用戶的檔案路徑
-        erp_file = get_user_file_path('erp')
-        transit_file = get_user_file_path('transit')
+        # 計算檔案路徑（IT 測試模式下使用 IT 人員的資料夾）
+        session_timestamp = session.get('current_session_timestamp')
+        # IT 測試模式：檔案在 IT 人員資料夾
+        upload_folder = os.path.join(UPLOAD_FOLDER, str(user['id']), session_timestamp)
+        erp_file = find_file_with_extensions(upload_folder, 'erp_data')
+        transit_file = find_file_with_extensions(upload_folder, 'transit_data')
+
         mapping_excel_file = os.path.join('mapping', 'mapping表.xlsx')
 
         # 除錯日誌
@@ -2917,6 +2966,7 @@ def run_forecast():
         # 檢查是否為測試模式（silent=True 避免沒有 JSON body 時報錯）
         data = request.get_json(silent=True) or {}
         test_mode = data.get('test_mode', False)
+        test_customer_id = data.get('customer_id')
 
         # 獲取在途文件是否必填的參數（預設為必填）
         transit_required = data.get('transit_required', True)
@@ -2932,14 +2982,21 @@ def run_forecast():
             session.modified = True
             print(f"📁 已同步 session_id 到 Flask session: {upload_session_id}")
 
-        # 記錄開始處理
-        log_activity(user['id'], user['username'], 'forecast_start',
-                   f"開始 FORECAST 處理{' (測試模式)' if test_mode else ''}", get_client_ip(), request.headers.get('User-Agent'))
+        # IT 測試模式：決定使用哪個處理器（根據被測試客戶的 ID）
+        # 但檔案仍放在 IT 人員的資料夾
+        processor_user_id = user['id']  # 用於決定使用哪個處理器（Pegatron 或通用）
+        if test_mode and test_customer_id and (user['role'] in ['admin', 'it']):
+            processor_user_id = int(test_customer_id)
+            print(f"[IT測試模式] Forecast: 使用客戶 ID {test_customer_id} 的處理器，檔案放在 IT 人員 (ID: {user['id']}) 資料夾")
 
-        # 從 session 獲取當前的 processed 資料夾
+        # 記錄開始處理（使用 IT 人員的身份記錄 log）
+        log_activity(user['id'], user['username'], 'forecast_start',
+                   f"開始 FORECAST 處理{' (IT測試模式, 客戶ID: ' + str(test_customer_id) + ')' if test_mode else ''}", get_client_ip(), request.headers.get('User-Agent'))
+
+        # 計算 processed 資料夾路徑（IT 測試模式下使用 IT 人員的資料夾）
         processed_folder = session.get('current_processed_folder')
         if not processed_folder:
-            # 如果有前端傳來的 session_id，直接計算路徑
+            # 如果有前端傳來的 session_id，直接計算路徑（使用 IT 人員的 user_id）
             if upload_session_id:
                 processed_folder = os.path.join(PROCESSED_FOLDER, str(user['id']), upload_session_id)
             else:
@@ -2989,7 +3046,8 @@ def run_forecast():
         from ultra_fast_forecast_processor import UltraFastForecastProcessor
 
         # Pegatron (user_id=5) 使用專用處理器
-        is_pegatron = user['id'] == 5
+        # 在 IT 測試模式下，使用被測試客戶的 ID 來判斷
+        is_pegatron = processor_user_id == 5
 
         if is_pegatron:
             # ===== Pegatron 專用處理：使用 PegatronForecastProcessor =====

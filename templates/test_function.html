@@ -3,8 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>測試功能 - FORECAST 數據處理系統</title>
+    <title>IT 測試功能 - FORECAST 數據處理系統</title>
+
+    <!-- Meta 資料 -->
+    <meta name="description" content="IT 測試功能 - FORECAST數據處理系統">
+    <meta name="robots" content="noindex, nofollow">
+
+    <!-- 頁籤圖標 -->
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
+    <link rel="shortcut icon" type="image/png" href="{{ url_for('static', filename='logo/forecast-analytics.png') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}?v={{ version }}" rel="stylesheet">
     <style>
@@ -69,154 +76,6 @@
             text-decoration: none !important;
         }
 
-        /* 上傳進度條樣式 */
-        .upload-progress {
-            display: none;
-            padding: 30px;
-            text-align: center;
-        }
-
-        .upload-progress.active {
-            display: block;
-        }
-
-        .upload-progress .progress-icon {
-            font-size: 2.5rem;
-            color: #bc773e;
-            margin-bottom: 15px;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-
-        .upload-progress .progress-text {
-            font-size: 1rem;
-            color: #666;
-            margin-bottom: 15px;
-        }
-
-        .upload-progress .progress-bar-container {
-            background: #e0e0e0;
-            border-radius: 10px;
-            height: 8px;
-            overflow: hidden;
-        }
-
-        .upload-progress .progress-bar-fill {
-            background: linear-gradient(135deg, #bc773e 0%, #d4a574 100%);
-            height: 100%;
-            width: 0%;
-            transition: width 0.3s ease;
-            border-radius: 10px;
-        }
-
-        .upload-progress .file-name {
-            font-size: 0.9rem;
-            color: #888;
-            margin-top: 10px;
-            word-break: break-all;
-        }
-
-        /* 回上一步確認彈窗樣式 */
-        .goback-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 10000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: rgba(0, 0, 0, 0.5);
-            backdrop-filter: blur(3px);
-        }
-
-        .goback-modal-content {
-            position: relative;
-            background: #fff;
-            border-radius: 16px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            max-width: 480px;
-            width: 90%;
-            animation: gobackModalSlideIn 0.3s ease-out;
-            overflow: hidden;
-        }
-
-        @keyframes gobackModalSlideIn {
-            from {
-                opacity: 0;
-                transform: scale(0.9) translateY(-20px);
-            }
-            to {
-                opacity: 1;
-                transform: scale(1) translateY(0);
-            }
-        }
-
-        .goback-modal-header {
-            background: linear-gradient(135deg, #f39c12, #e67e22);
-            color: white;
-            padding: 20px 24px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            font-size: 1.2em;
-            font-weight: 600;
-        }
-
-        .goback-modal-header i {
-            font-size: 1.5em;
-        }
-
-        .goback-modal-header h3 {
-            margin: 0;
-            font-size: 1.2rem;
-        }
-
-        .goback-modal-body {
-            padding: 24px;
-        }
-
-        .goback-modal-body p {
-            font-size: 1.1em;
-            color: #333;
-            margin: 0 0 16px 0;
-            line-height: 1.5;
-        }
-
-        .goback-modal-body #goback-step-name {
-            color: #c87941;
-            font-weight: 600;
-        }
-
-        .goback-warning {
-            background: #fff3cd;
-            border: 1px solid #ffc107;
-            border-radius: 8px;
-            padding: 12px 16px;
-            color: #856404;
-            font-weight: 500;
-            font-size: 0.95rem;
-            margin: 0;
-        }
-
-        .goback-modal-footer {
-            padding: 16px 24px 24px;
-            display: flex;
-            justify-content: flex-end;
-            gap: 12px;
-        }
-
-        .goback-modal-footer .btn {
-            padding: 12px 24px;
-            font-size: 1em;
-            font-weight: 600;
-        }
-
         /* 測試模式標籤 */
         .test-mode-banner {
             background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
@@ -267,6 +126,72 @@
             background: rgba(255,255,255,0.3);
         }
 
+        /* 右側按鈕群組（配置映射表 + 開始整合） */
+        .action-buttons-right {
+            display: flex;
+            gap: 12px;
+            margin-left: auto;
+        }
+
+        /* Modal 彈跳視窗樣式 */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            backdrop-filter: blur(3px);
+        }
+
+        .modal-overlay .modal-content {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+            animation: modalSlideIn 0.3s ease-out;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: scale(0.9) translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+
+        .modal-overlay .modal-header {
+            padding: 20px 24px;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .modal-overlay .modal-header i {
+            font-size: 1.3rem;
+        }
+
+        .modal-overlay .modal-body {
+            padding: 24px;
+        }
+
+        .modal-overlay .modal-footer {
+            padding: 16px 24px 24px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+
         /* 隱藏的操作區塊 */
         .workflow-section {
             display: none;
@@ -296,7 +221,7 @@
                         <img src="{{ url_for('static', filename='logo/logo.png') }}" alt="FORECAST Logo" class="logo-image">
                     </div>
                     <div class="header-text">
-                        <h1>測試功能</h1>
+                        <h1>IT 測試功能</h1>
                         <p class="header-subtitle">模擬用戶操作流程</p>
                     </div>
                 </div>
@@ -336,8 +261,8 @@
                                 <span>使用該客戶已配置的映射表進行資料整合</span>
                             </div>
                             <div class="info-item">
-                                <i class="fas fa-tools"></i>
-                                <span>這是模擬用戶操作的功能，方便 IT/管理員排查問題</span>
+                                <i class="fas fa-clipboard-list"></i>
+                                <span>所有操作記錄將以 IT 人員身份記錄在系統日誌中</span>
                             </div>
                         </div>
 
@@ -380,7 +305,7 @@
                         <span class="user-name" id="header-customer-name">-</span>
                         <span class="user-role" id="header-customer-company">(-)</span>
                     </div>
-                    <button class="logout-btn" onclick="handleLogout()" style="background: #6c757d;">
+                    <button class="logout-btn" onclick="handleBackToSelect()" style="background: #6c757d;">
                         <i class="fas fa-arrow-left"></i> 返回選擇
                     </button>
                 </div>
@@ -392,7 +317,7 @@
             <div class="info">
                 <i class="fas fa-flask"></i>
                 <span class="mode-label">測試模式</span>
-                <span class="customer-name" id="test-customer-name">-</span>
+                <span class="customer-name" id="test-customer-name">廣達電腦 - 廣達用戶</span>
             </div>
             <button class="btn-change-customer" onclick="changeCustomer()">
                 <i class="fas fa-exchange-alt"></i> 更換客戶
@@ -408,21 +333,21 @@
                     </div>
                     <div class="step-label">文件上傳</div>
                 </div>
-                <div class="step-line" id="line-1"></div>
+                <div class="step-line"></div>
                 <div class="step" data-step="2">
                     <div class="step-circle">
                         <i class="fas fa-cogs"></i>
                     </div>
                     <div class="step-label">數據清理</div>
                 </div>
-                <div class="step-line" id="line-2"></div>
+                <div class="step-line"></div>
                 <div class="step" data-step="3">
                     <div class="step-circle">
                         <i class="fas fa-link"></i>
                     </div>
                     <div class="step-label">映射整合</div>
                 </div>
-                <div class="step-line" id="line-3"></div>
+                <div class="step-line"></div>
                 <div class="step" data-step="4">
                     <div class="step-circle">
                         <i class="fas fa-magic"></i>
@@ -438,8 +363,13 @@
             <section class="upload-section" id="upload-section">
                 <div class="card">
                     <div class="card-header">
-                        <h2><i class="fas fa-upload"></i> 文件上傳</h2>
-                        <p>請上傳以下 3 個文件（必須全部上傳才能進入下一步）</p>
+                        <div class="card-header-content">
+                            <h2><i class="fas fa-upload"></i> 文件上傳</h2>
+                            <p>請上傳以下 3 個文件（必須全部上傳才能進入下一步）</p>
+                        </div>
+                        <button class="btn btn-secondary btn-mapping-config" id="upload-mapping-config-btn">
+                            <i class="fas fa-cog"></i> 配置映射表
+                        </button>
                     </div>
                     <div class="card-body">
                         <div class="upload-grid">
@@ -454,14 +384,6 @@
                                         <i class="fas fa-plus"></i> 選擇文件
                                     </button>
                                 </div>
-                                <div class="upload-progress" id="erp-upload-progress">
-                                    <i class="fas fa-spinner progress-icon"></i>
-                                    <div class="progress-text">上傳中...</div>
-                                    <div class="progress-bar-container">
-                                        <div class="progress-bar-fill" id="erp-upload-progress-fill"></div>
-                                    </div>
-                                    <div class="file-name" id="erp-upload-file-name"></div>
-                                </div>
                                 <div class="upload-status" id="erp-status" style="display: none;">
                                     <div class="status-content">
                                         <i class="fas fa-check-circle status-icon success"></i>
@@ -473,24 +395,17 @@
                                 </div>
                             </div>
 
-                            <!-- Forecast文件上傳 -->
-                            <div class="upload-item">
+                            <!-- Forecast文件上傳（支援多檔案） -->
+                            <div class="upload-item forecast-multi-upload">
                                 <div class="upload-box" id="forecast-upload-box">
                                     <i class="fas fa-chart-bar upload-icon"></i>
                                     <h3>Forecast文件</h3>
                                     <p>上傳 ForecastDataFile_ALL.xlsx</p>
-                                    <input type="file" id="forecast-file" accept=".xlsx,.xls" style="display: none;">
+                                    <p class="upload-hint"><i class="fas fa-layer-group"></i> 支援上傳多個檔案</p>
+                                    <input type="file" id="forecast-file" accept=".xlsx,.xls" multiple style="display: none;">
                                     <button class="btn btn-primary" onclick="document.getElementById('forecast-file').click()">
                                         <i class="fas fa-plus"></i> 選擇文件
                                     </button>
-                                </div>
-                                <div class="upload-progress" id="forecast-upload-progress">
-                                    <i class="fas fa-spinner progress-icon"></i>
-                                    <div class="progress-text">上傳中...</div>
-                                    <div class="progress-bar-container">
-                                        <div class="progress-bar-fill" id="forecast-upload-progress-fill"></div>
-                                    </div>
-                                    <div class="file-name" id="forecast-upload-file-name"></div>
                                 </div>
                                 <div class="upload-status" id="forecast-status" style="display: none;">
                                     <div class="status-content">
@@ -505,6 +420,13 @@
 
                             <!-- 在途文件上傳 -->
                             <div class="upload-item">
+                                <div class="transit-optional-checkbox">
+                                    <label class="optional-checkbox-label">
+                                        <input type="checkbox" id="transit-required-checkbox" checked>
+                                        <span class="checkmark-small"></span>
+                                        <span class="optional-text">必填項目</span>
+                                    </label>
+                                </div>
                                 <div class="upload-box" id="transit-upload-box">
                                     <i class="fas fa-truck upload-icon"></i>
                                     <h3>在途文件</h3>
@@ -513,14 +435,6 @@
                                     <button class="btn btn-primary" onclick="document.getElementById('transit-file').click()">
                                         <i class="fas fa-plus"></i> 選擇文件
                                     </button>
-                                </div>
-                                <div class="upload-progress" id="transit-upload-progress">
-                                    <i class="fas fa-spinner progress-icon"></i>
-                                    <div class="progress-text">上傳中...</div>
-                                    <div class="progress-bar-container">
-                                        <div class="progress-bar-fill" id="transit-upload-progress-fill"></div>
-                                    </div>
-                                    <div class="file-name" id="transit-upload-file-name"></div>
                                 </div>
                                 <div class="upload-status" id="transit-status" style="display: none;">
                                     <div class="status-content">
@@ -532,6 +446,48 @@
                                     </div>
                                 </div>
                             </div>
+                        </div>
+
+                        <!-- Forecast 合併選項 - 獨立醒目區塊 -->
+                        <div class="merge-option-banner" id="merge-option-banner">
+                            <div class="merge-option-content">
+                                <div class="merge-option-icon">
+                                    <i class="fas fa-object-group"></i>
+                                </div>
+                                <div class="merge-option-text">
+                                    <label class="merge-checkbox">
+                                        <input type="checkbox" id="merge-forecast-files">
+                                        <span class="checkmark"></span>
+                                        <span class="merge-label">下載時合併 Forecast 檔案</span>
+                                    </label>
+                                    <p class="merge-description">
+                                        <i class="fas fa-info-circle"></i>
+                                        上傳多個 Forecast 檔案時，勾選此選項可在最終下載時自動合併為單一檔案
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 上傳狀態摘要和下一步按鈕 -->
+                        <div class="upload-summary" id="upload-summary">
+                            <div class="upload-checklist">
+                                <div class="checklist-item" id="check-erp">
+                                    <i class="fas fa-circle"></i>
+                                    <span>ERP淨需求文件</span>
+                                </div>
+                                <div class="checklist-item" id="check-forecast">
+                                    <i class="fas fa-circle"></i>
+                                    <span>Forecast文件</span>
+                                </div>
+                                <div class="checklist-item" id="check-transit">
+                                    <i class="fas fa-circle"></i>
+                                    <span>在途文件</span>
+                                </div>
+                            </div>
+                            <button class="btn btn-next" id="upload-next-btn" onclick="goToNextStep()" disabled>
+                                <span>下一步：數據清理</span>
+                                <i class="fas fa-arrow-right"></i>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -548,18 +504,18 @@
                         <div class="process-info">
                             <div class="info-item">
                                 <i class="fas fa-info-circle"></i>
-                                <span>當K欄位是"供應數量"時，清空L~AW欄位的數值</span>
+                                <span>清理 Forecast 文件中不需要的數據欄位</span>
                             </div>
                             <div class="info-item">
                                 <i class="fas fa-info-circle"></i>
-                                <span>當I欄位有"庫存數量"時，清空下一列I欄位的數值</span>
+                                <span>根據客戶規則自動處理特定欄位數據</span>
                             </div>
                         </div>
                         <div class="action-buttons-row">
                             <button class="btn btn-back" id="cleanup-back-btn" onclick="confirmGoBack(1)">
                                 <i class="fas fa-arrow-left"></i> 回上一步
                             </button>
-                            <button class="btn btn-secondary" id="cleanup-btn" onclick="runCleanup()">
+                            <button class="btn btn-secondary" id="cleanup-btn">
                                 <i class="fas fa-play"></i> 開始清理
                             </button>
                         </div>
@@ -583,29 +539,31 @@
                                 <h2><i class="fas fa-link"></i> 映射整合</h2>
                                 <p>整合 ERP 和在途數據與映射表的關係</p>
                             </div>
-                            <button class="btn btn-secondary" id="mapping-config-btn" onclick="openMappingConfig()">
-                                <i class="fas fa-cog"></i> 配置映射表
-                            </button>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="process-info">
                             <div class="info-item">
                                 <i class="fas fa-file-excel"></i>
-                                <span>ERP 數據：根據客戶簡稱整合地區、排程斷點、ETD、ETA</span>
+                                <span>ERP 數據：根據映射表配置整合地區、排程斷點、ETD、ETA</span>
                             </div>
                             <div class="info-item">
                                 <i class="fas fa-truck"></i>
-                                <span>在途數據：根據 E 欄位與映射表 A 欄位比對，整合 B、D、E、F 欄位資訊</span>
+                                <span>在途數據：根據映射表配置整合對應欄位資訊</span>
                             </div>
                         </div>
                         <div class="action-buttons-row">
                             <button class="btn btn-back" id="mapping-back-btn" onclick="confirmGoBack(2)">
                                 <i class="fas fa-arrow-left"></i> 回上一步
                             </button>
-                            <button class="btn btn-primary" id="mapping-process-btn" onclick="runMapping()">
-                                <i class="fas fa-play"></i> 開始整合
-                            </button>
+                            <div class="action-buttons-right">
+                                <button class="btn btn-secondary" id="mapping-config-btn">
+                                    <i class="fas fa-cog"></i> 配置映射表
+                                </button>
+                                <button class="btn btn-primary" id="mapping-process-btn">
+                                    <i class="fas fa-play"></i> 開始整合
+                                </button>
+                            </div>
                         </div>
                         <div class="progress-container" id="mapping-progress" style="display: none;">
                             <div class="progress-bar">
@@ -644,7 +602,7 @@
                             <button class="btn btn-back" id="forecast-back-btn" onclick="confirmGoBack(3)">
                                 <i class="fas fa-arrow-left"></i> 回上一步
                             </button>
-                            <button class="btn btn-success" id="forecast-btn" onclick="runForecast()">
+                            <button class="btn btn-success" id="forecast-btn">
                                 <i class="fas fa-play"></i> 開始FORECAST處理
                             </button>
                         </div>
@@ -675,11 +633,6 @@
                                 <span class="completion-value" id="completion-customer">-</span>
                             </div>
                             <div class="completion-item">
-                                <i class="fas fa-upload"></i>
-                                <span class="completion-label">上傳時間：</span>
-                                <span class="completion-value" id="completion-upload-time">-</span>
-                            </div>
-                            <div class="completion-item">
                                 <i class="fas fa-calendar-alt"></i>
                                 <span class="completion-label">完成日期：</span>
                                 <span class="completion-value" id="completion-date">-</span>
@@ -697,7 +650,7 @@
                                     <div class="download-title">FORECAST處理結果</div>
                                     <div class="download-desc">forecast_result.xlsx</div>
                                 </div>
-                                <button class="btn btn-primary" onclick="downloadResult()">
+                                <button class="btn btn-primary" onclick="downloadFile('forecast_result.xlsx')">
                                     <i class="fas fa-download"></i> 下載
                                 </button>
                             </div>
@@ -706,7 +659,7 @@
                             <button class="btn btn-back" onclick="confirmGoBack(4)">
                                 <i class="fas fa-arrow-left"></i> 回上一步
                             </button>
-                            <button class="btn btn-secondary" onclick="restartTest()">
+                            <button class="btn btn-secondary" onclick="confirmRestart()">
                                 <i class="fas fa-redo"></i> 重新開始
                             </button>
                         </div>
@@ -721,74 +674,19 @@
         </footer>
     </div>
 
-    <!-- 自製確認彈跳視窗 -->
-    <div class="custom-modal-overlay" id="confirm-modal">
-        <div class="custom-modal">
-            <div class="custom-modal-header">
-                <i class="fas fa-exclamation-triangle warning-icon"></i>
-                <h3 id="modal-title">確認操作</h3>
-            </div>
-            <div class="custom-modal-body">
-                <p id="modal-message">確定要執行此操作嗎？</p>
-                <p class="warning-text" id="modal-warning">目前的進度將會清除</p>
-            </div>
-            <div class="custom-modal-footer">
-                <button class="btn btn-secondary" onclick="closeConfirmModal()">
-                    <i class="fas fa-times"></i> 取消
-                </button>
-                <button class="btn btn-danger" id="modal-confirm-btn">
-                    <i class="fas fa-check"></i> 確定
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- 回上一步確認彈跳視窗 -->
-    <div class="goback-modal" id="goback-modal" style="display: none;">
-        <div class="goback-modal-content">
-            <div class="goback-modal-header">
-                <i class="fas fa-arrow-left"></i>
-                <h3>確認返回</h3>
-            </div>
-            <div class="goback-modal-body">
-                <p>確定要返回「<span id="goback-step-name">文件上傳</span>」步驟嗎？</p>
-                <p class="goback-warning">返回後，目前步驟的處理結果將會清除</p>
-            </div>
-            <div class="goback-modal-footer">
-                <button class="btn btn-secondary" onclick="closeGoBackModal()">
-                    <i class="fas fa-times"></i> 取消
-                </button>
-                <button class="btn btn-primary" id="goback-confirm-btn">
-                    <i class="fas fa-arrow-left"></i> 確認返回
-                </button>
-            </div>
-        </div>
-    </div>
-
+    <!-- IT 測試模式初始化腳本（必須在 main.js 之前） -->
     <script>
-        // 全局變數
-        let selectedCustomer = null;
-        let currentStep = 1;
-        let uploadedFiles = {
-            erp: false,
-            forecast: false,
-            transit: false
+        // IT 測試模式全域設定
+        window.IT_TEST_MODE = {
+            enabled: true,
+            selectedCustomer: null,
+            itUser: {
+                id: {{ user.id }},
+                username: '{{ user.username }}',
+                display_name: '{{ user.display_name }}',
+                role: '{{ user.role }}'
+            }
         };
-        let uploadStartTime = null;  // 記錄上傳開始時間
-
-        // 步驟名稱映射
-        const stepNames = {
-            1: '文件上傳',
-            2: '數據清理',
-            3: '映射整合',
-            4: 'FORECAST處理'
-        };
-
-        // 初始化
-        document.addEventListener('DOMContentLoaded', function() {
-            loadCustomers();
-            setupFileInputs();
-        });
 
         // 載入客戶列表
         async function loadCustomers() {
@@ -823,578 +721,118 @@
                 return;
             }
 
-            selectedCustomer = JSON.parse(select.value);
+            const customer = JSON.parse(select.value);
+            window.IT_TEST_MODE.selectedCustomer = customer;
 
             // 更新顯示的客戶名稱
             document.getElementById('test-customer-name').textContent =
-                `${selectedCustomer.company} - ${selectedCustomer.display_name}`;
-            document.getElementById('header-customer-name').textContent = selectedCustomer.display_name;
-            document.getElementById('header-customer-company').textContent = `(${selectedCustomer.company})`;
+                `${customer.company} - ${customer.display_name}`;
+            document.getElementById('header-customer-name').textContent = customer.display_name;
+            document.getElementById('header-customer-company').textContent = `(${customer.company})`;
 
             // 切換到工作流程區塊
             document.getElementById('customer-select-section').style.display = 'none';
             document.getElementById('workflow-section').classList.add('active');
 
-            // 重置狀態
-            resetWorkflow();
+            // 觸發 main.js 的初始化（重置狀態）
+            if (typeof resetUploadSessionId === 'function') {
+                resetUploadSessionId();
+            }
+            if (typeof resetAllStates === 'function') {
+                resetAllStates();
+            }
+
+            console.log('🧪 IT 測試模式啟動，測試客戶:', customer.display_name, 'ID:', customer.id);
         }
 
-        // 更換客戶 / 返回選擇
+        // 更換客戶（使用自訂彈跳視窗）
         function changeCustomer() {
-            showConfirmModal(
-                '更換客戶',
-                '確定要更換客戶嗎？',
-                '目前的進度將會清除',
-                function() {
-                    document.getElementById('customer-select-section').style.display = 'block';
-                    document.getElementById('workflow-section').classList.remove('active');
-                    resetWorkflow();
-                    closeConfirmModal();
-                }
-            );
+            showChangeCustomerModal();
         }
 
-        // 登出 / 返回
-        function handleLogout() {
+        // 顯示更換客戶確認彈跳視窗
+        function showChangeCustomerModal() {
+            // 移除已存在的彈窗
+            const existingModal = document.getElementById('change-customer-modal');
+            if (existingModal) {
+                existingModal.remove();
+            }
+
+            const modalHtml = `
+                <div id="change-customer-modal" class="modal-overlay" style="display: flex;">
+                    <div class="modal-content" style="max-width: 450px;">
+                        <div class="modal-header" style="background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);">
+                            <i class="fas fa-exchange-alt"></i>
+                            <span>更換測試客戶</span>
+                        </div>
+                        <div class="modal-body" style="padding: 25px;">
+                            <div style="text-align: center; margin-bottom: 20px;">
+                                <i class="fas fa-exclamation-triangle" style="font-size: 48px; color: #f39c12;"></i>
+                            </div>
+                            <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 15px; margin-bottom: 20px;">
+                                <div style="font-weight: 600; color: #856404; margin-bottom: 8px;">
+                                    <i class="fas fa-info-circle"></i> 確定要更換客戶嗎？
+                                </div>
+                                <div style="color: #856404; font-size: 0.9rem;">
+                                    目前的進度將會清除，包括已上傳的檔案和處理結果。
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer" style="justify-content: flex-end; gap: 12px;">
+                            <button class="btn btn-secondary" onclick="closeChangeCustomerModal()" style="padding: 10px 20px;">
+                                <i class="fas fa-times"></i> 取消
+                            </button>
+                            <button class="btn btn-primary" onclick="confirmChangeCustomer()" style="padding: 10px 20px; background: linear-gradient(135deg, #f39c12, #e67e22);">
+                                <i class="fas fa-check"></i> 確定更換
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+        }
+
+        // 關閉更換客戶彈跳視窗
+        function closeChangeCustomerModal() {
+            const modal = document.getElementById('change-customer-modal');
+            if (modal) {
+                modal.remove();
+            }
+        }
+
+        // 確認更換客戶
+        function confirmChangeCustomer() {
+            closeChangeCustomerModal();
+
+            // 重置狀態
+            if (typeof resetAllStates === 'function') {
+                resetAllStates();
+            }
+
+            // 切換回客戶選擇畫面
+            document.getElementById('customer-select-section').style.display = 'block';
+            document.getElementById('workflow-section').classList.remove('active');
+
+            // 重置選擇
+            document.getElementById('customer-select').value = '';
+            document.getElementById('confirm-btn').disabled = true;
+            window.IT_TEST_MODE.selectedCustomer = null;
+        }
+
+        // 返回客戶選擇
+        function handleBackToSelect() {
             changeCustomer();
         }
 
-        // 顯示自製確認彈跳視窗
-        function showConfirmModal(title, message, warning, onConfirm) {
-            document.getElementById('modal-title').textContent = title;
-            document.getElementById('modal-message').textContent = message;
-            document.getElementById('modal-warning').textContent = warning;
-
-            const confirmBtn = document.getElementById('modal-confirm-btn');
-            confirmBtn.onclick = onConfirm;
-
-            const modal = document.getElementById('confirm-modal');
-            modal.style.display = 'flex';
-            setTimeout(() => modal.classList.add('show'), 10);
-        }
-
-        // 關閉確認彈跳視窗
-        function closeConfirmModal() {
-            const modal = document.getElementById('confirm-modal');
-            modal.classList.remove('show');
-            setTimeout(() => modal.style.display = 'none', 300);
-        }
-
-        // 確認回上一步
-        function confirmGoBack(targetStep) {
-            const stepName = stepNames[targetStep];
-            showGoBackModal(targetStep, stepName);
-        }
-
-        // 顯示回上一步確認彈窗
-        function showGoBackModal(targetStep, stepName) {
-            document.getElementById('goback-step-name').textContent = stepName;
-
-            const confirmBtn = document.getElementById('goback-confirm-btn');
-            confirmBtn.onclick = function() {
-                // 根據目標步驟重置對應狀態
-                resetStepState(targetStep);
-                goToStep(targetStep);
-                closeGoBackModal();
-            };
-
-            const modal = document.getElementById('goback-modal');
-            modal.style.display = 'flex';
-        }
-
-        // 重置特定步驟的狀態
-        function resetStepState(targetStep) {
-            if (targetStep === 1) {
-                // 重置上傳狀態
-                uploadedFiles = { erp: false, forecast: false, transit: false };
-                uploadStartTime = null;  // 重置上傳時間
-                ['erp', 'forecast', 'transit'].forEach(type => {
-                    document.getElementById(`${type}-upload-box`).style.display = 'flex';
-                    document.getElementById(`${type}-upload-progress`).classList.remove('active');
-                    document.getElementById(`${type}-status`).style.display = 'none';
-                    document.getElementById(`${type}-file`).value = '';
-                });
-            }
-
-            if (targetStep <= 2) {
-                // 重置清理結果
-                const cleanupResult = document.getElementById('cleanup-result');
-                cleanupResult.classList.remove('success', 'error');
-                cleanupResult.style.display = 'none';
-                document.getElementById('cleanup-progress').style.display = 'none';
-                document.getElementById('cleanup-btn').disabled = false;
-            }
-
-            if (targetStep <= 3) {
-                // 重置映射結果
-                const mappingResult = document.getElementById('mapping-result');
-                mappingResult.classList.remove('success', 'error');
-                mappingResult.style.display = 'none';
-                document.getElementById('mapping-progress').style.display = 'none';
-                document.getElementById('mapping-process-btn').disabled = false;
-            }
-
-            if (targetStep <= 4) {
-                // 重置 FORECAST 結果
-                const forecastResult = document.getElementById('forecast-result');
-                forecastResult.classList.remove('success', 'error');
-                forecastResult.style.display = 'none';
-                document.getElementById('forecast-progress').style.display = 'none';
-                document.getElementById('forecast-btn').disabled = false;
-            }
-        }
-
-        // 關閉回上一步確認彈窗
-        function closeGoBackModal() {
-            const modal = document.getElementById('goback-modal');
-            modal.style.display = 'none';
-        }
-
-        // 重置工作流程
-        function resetWorkflow() {
-            currentStep = 1;
-            uploadedFiles = { erp: false, forecast: false, transit: false };
-            uploadStartTime = null;  // 重置上傳時間
-
-            // 重置進度指示器
-            updateStepIndicator(1);
-
-            // 重置上傳狀態
-            ['erp', 'forecast', 'transit'].forEach(type => {
-                document.getElementById(`${type}-upload-box`).style.display = 'flex';
-                document.getElementById(`${type}-upload-progress`).classList.remove('active');
-                document.getElementById(`${type}-status`).style.display = 'none';
-                document.getElementById(`${type}-file`).value = '';
-            });
-
-            // 隱藏所有區塊，只顯示上傳區塊
-            document.getElementById('upload-section').style.display = 'block';
-            document.getElementById('cleanup-section').style.display = 'none';
-            document.getElementById('mapping-section').style.display = 'none';
-            document.getElementById('forecast-section').style.display = 'none';
-            document.getElementById('download-section').style.display = 'none';
-
-            // 重置結果區塊
-            ['cleanup', 'mapping', 'forecast'].forEach(type => {
-                const result = document.getElementById(`${type}-result`);
-                result.classList.remove('success', 'error');
-                result.style.display = 'none';
-
-                const progress = document.getElementById(`${type}-progress`);
-                if (progress) progress.style.display = 'none';
-            });
-        }
-
-        // 設置文件輸入
-        function setupFileInputs() {
-            ['erp', 'forecast', 'transit'].forEach(type => {
-                const input = document.getElementById(`${type}-file`);
-                const box = document.getElementById(`${type}-upload-box`);
-
-                // 文件選擇事件
-                input.addEventListener('change', function(e) {
-                    if (e.target.files.length > 0) {
-                        handleFileUpload(type, e.target.files[0]);
-                    }
-                });
-
-                // 拖放事件
-                box.addEventListener('dragover', function(e) {
-                    e.preventDefault();
-                    box.classList.add('dragover');
-                });
-
-                box.addEventListener('dragleave', function(e) {
-                    e.preventDefault();
-                    box.classList.remove('dragover');
-                });
-
-                box.addEventListener('drop', function(e) {
-                    e.preventDefault();
-                    box.classList.remove('dragover');
-                    if (e.dataTransfer.files.length > 0) {
-                        handleFileUpload(type, e.dataTransfer.files[0]);
-                    }
-                });
-            });
-        }
-
-        // 處理文件上傳
-        async function handleFileUpload(type, file) {
-            const formData = new FormData();
-            formData.append('file', file);
-            formData.append('test_mode', 'true');
-            formData.append('customer_id', selectedCustomer.id);
-
-            // 根據文件類型選擇對應的上傳 API
-            const uploadUrls = {
-                'erp': '/upload_erp',
-                'forecast': '/upload_forecast',
-                'transit': '/upload_transit'
-            };
-
-            // 顯示進度條
-            const uploadBox = document.getElementById(`${type}-upload-box`);
-            const progressBox = document.getElementById(`${type}-upload-progress`);
-            const progressFill = document.getElementById(`${type}-upload-progress-fill`);
-            const fileName = document.getElementById(`${type}-upload-file-name`);
-
-            uploadBox.style.display = 'none';
-            progressBox.classList.add('active');
-            fileName.textContent = file.name;
-            progressFill.style.width = '0%';
-
-            try {
-                // 使用 XMLHttpRequest 來取得上傳進度
-                const result = await new Promise((resolve, reject) => {
-                    const xhr = new XMLHttpRequest();
-
-                    xhr.upload.addEventListener('progress', function(e) {
-                        if (e.lengthComputable) {
-                            const percent = Math.round((e.loaded / e.total) * 100);
-                            progressFill.style.width = percent + '%';
-                        }
-                    });
-
-                    xhr.addEventListener('load', function() {
-                        if (xhr.status >= 200 && xhr.status < 300) {
-                            resolve(JSON.parse(xhr.responseText));
-                        } else {
-                            reject(new Error('上傳失敗'));
-                        }
-                    });
-
-                    xhr.addEventListener('error', function() {
-                        reject(new Error('網路錯誤'));
-                    });
-
-                    xhr.open('POST', uploadUrls[type]);
-                    xhr.send(formData);
-                });
-
-                // 完成進度到 100%
-                progressFill.style.width = '100%';
-
-                // 短暫延遲後顯示成功狀態
-                await new Promise(r => setTimeout(r, 300));
-
-                if (result.success) {
-                    uploadedFiles[type] = true;
-                    console.log(`✅ ${type} 上傳成功，當前狀態:`, JSON.stringify(uploadedFiles));
-
-                    // 第一個檔案上傳成功時，記錄上傳開始時間
-                    if (!uploadStartTime) {
-                        uploadStartTime = new Date();
-                        console.log('📅 記錄上傳時間:', uploadStartTime.toLocaleString('zh-TW'));
-                    }
-
-                    // 隱藏進度條，顯示成功狀態
-                    progressBox.classList.remove('active');
-                    const status = document.getElementById(`${type}-status`);
-                    status.style.display = 'flex';
-                    document.getElementById(`${type}-details`).textContent = file.name;
-
-                    // 檢查是否全部上傳完成
-                    checkAllUploaded();
-                } else {
-                    // 隱藏進度條，恢復上傳框
-                    progressBox.classList.remove('active');
-                    uploadBox.style.display = 'flex';
-                    alert(`上傳失敗：${result.message}`);
-                }
-            } catch (error) {
-                console.error('上傳失敗:', error);
-                // 隱藏進度條，恢復上傳框
-                progressBox.classList.remove('active');
-                uploadBox.style.display = 'flex';
-                alert('上傳失敗：' + error.message);
-            }
-        }
-
-        // 檢查是否全部上傳完成
-        function checkAllUploaded() {
-            console.log('檢查上傳狀態:', JSON.stringify(uploadedFiles));
-            if (uploadedFiles.erp && uploadedFiles.forecast && uploadedFiles.transit) {
-                console.log('✅ 所有檔案已上傳，準備進入下一步');
-                // 自動進入下一步
-                setTimeout(() => {
-                    goToStep(2);
-                }, 500);
-            } else {
-                console.log('⏳ 尚有檔案未上傳');
-            }
-        }
-
-        // 更新進度指示器
-        function updateStepIndicator(step) {
-            for (let i = 1; i <= 4; i++) {
-                const stepEl = document.querySelector(`.step[data-step="${i}"]`);
-                const lineEl = document.getElementById(`line-${i}`);
-
-                stepEl.classList.remove('active', 'completed');
-                if (lineEl) lineEl.classList.remove('completed');
-
-                if (i < step) {
-                    stepEl.classList.add('completed');
-                    if (lineEl) lineEl.classList.add('completed');
-                } else if (i === step) {
-                    stepEl.classList.add('active');
-                }
-            }
-        }
-
-        // 跳轉到指定步驟
-        function goToStep(step) {
-            currentStep = step;
-            updateStepIndicator(step);
-
-            // 隱藏所有區塊
-            document.getElementById('upload-section').style.display = 'none';
-            document.getElementById('cleanup-section').style.display = 'none';
-            document.getElementById('mapping-section').style.display = 'none';
-            document.getElementById('forecast-section').style.display = 'none';
-            document.getElementById('download-section').style.display = 'none';
-
-            // 顯示對應區塊
-            switch (step) {
-                case 1:
-                    document.getElementById('upload-section').style.display = 'block';
-                    break;
-                case 2:
-                    document.getElementById('cleanup-section').style.display = 'block';
-                    break;
-                case 3:
-                    document.getElementById('mapping-section').style.display = 'block';
-                    break;
-                case 4:
-                    document.getElementById('forecast-section').style.display = 'block';
-                    break;
-                case 5:
-                    document.getElementById('download-section').style.display = 'block';
-                    break;
-            }
-        }
-
-        // 執行清理
-        async function runCleanup() {
-            const btn = document.getElementById('cleanup-btn');
-            const progress = document.getElementById('cleanup-progress');
-            const progressFill = document.getElementById('cleanup-progress-fill');
-            const progressText = document.getElementById('cleanup-progress-text');
-            const result = document.getElementById('cleanup-result');
-
-            btn.disabled = true;
-            progress.style.display = 'block';
-            progressFill.style.width = '0%';
-            result.style.display = 'none';
-
-            try {
-                // 模擬進度
-                let percent = 0;
-                const interval = setInterval(() => {
-                    percent += 10;
-                    progressFill.style.width = `${Math.min(percent, 90)}%`;
-                    progressText.textContent = `處理中... ${Math.min(percent, 90)}%`;
-                }, 200);
-
-                const response = await fetch('/process_forecast_cleanup', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        test_mode: true,
-                        customer_id: selectedCustomer.id
-                    })
-                });
-
-                clearInterval(interval);
-                const data = await response.json();
-
-                if (data.success) {
-                    progressFill.style.width = '100%';
-                    progressText.textContent = '處理完成！';
-                    result.className = 'process-result success';
-                    result.innerHTML = `
-                        <i class="fas fa-check-circle" style="color: #27ae60; margin-right: 10px;"></i>
-                        數據清理完成！
-                    `;
-                    result.style.display = 'block';
-
-                    // 自動進入下一步
-                    setTimeout(() => goToStep(3), 1000);
-                } else {
-                    throw new Error(data.message);
-                }
-            } catch (error) {
-                // 失敗時隱藏進度條
-                progress.style.display = 'none';
-                result.className = 'process-result error';
-                result.innerHTML = `
-                    <i class="fas fa-times-circle" style="color: #e74c3c; margin-right: 10px;"></i>
-                    清理失敗：${error.message}
-                `;
-                result.style.display = 'block';
-            } finally {
-                btn.disabled = false;
-            }
-        }
-
-        // 執行映射整合
-        async function runMapping() {
-            const btn = document.getElementById('mapping-process-btn');
-            const progress = document.getElementById('mapping-progress');
-            const progressFill = document.getElementById('mapping-progress-fill');
-            const progressText = document.getElementById('mapping-progress-text');
-            const result = document.getElementById('mapping-result');
-
-            btn.disabled = true;
-            progress.style.display = 'block';
-            progressFill.style.width = '0%';
-            result.style.display = 'none';
-
-            try {
-                let percent = 0;
-                const interval = setInterval(() => {
-                    percent += 10;
-                    progressFill.style.width = `${Math.min(percent, 90)}%`;
-                    progressText.textContent = `處理中... ${Math.min(percent, 90)}%`;
-                }, 200);
-
-                const response = await fetch('/process_erp_mapping', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        test_mode: true,
-                        customer_id: selectedCustomer.id
-                    })
-                });
-
-                clearInterval(interval);
-                const data = await response.json();
-
-                if (data.success) {
-                    progressFill.style.width = '100%';
-                    progressText.textContent = '處理完成！';
-                    result.className = 'process-result success';
-                    result.innerHTML = `
-                        <i class="fas fa-check-circle" style="color: #27ae60; margin-right: 10px;"></i>
-                        映射整合完成！
-                    `;
-                    result.style.display = 'block';
-
-                    setTimeout(() => goToStep(4), 1000);
-                } else {
-                    throw new Error(data.message);
-                }
-            } catch (error) {
-                // 失敗時隱藏進度條
-                progress.style.display = 'none';
-                result.className = 'process-result error';
-                result.innerHTML = `
-                    <i class="fas fa-times-circle" style="color: #e74c3c; margin-right: 10px;"></i>
-                    整合失敗：${error.message}
-                `;
-                result.style.display = 'block';
-            } finally {
-                btn.disabled = false;
-            }
-        }
-
-        // 執行 FORECAST 處理
-        async function runForecast() {
-            const btn = document.getElementById('forecast-btn');
-            const progress = document.getElementById('forecast-progress');
-            const progressFill = document.getElementById('forecast-progress-fill');
-            const progressText = document.getElementById('forecast-progress-text');
-            const result = document.getElementById('forecast-result');
-
-            btn.disabled = true;
-            progress.style.display = 'block';
-            progressFill.style.width = '0%';
-            result.style.display = 'none';
-
-            try {
-                let percent = 0;
-                const interval = setInterval(() => {
-                    percent += 5;
-                    progressFill.style.width = `${Math.min(percent, 90)}%`;
-                    progressText.textContent = `處理中... ${Math.min(percent, 90)}%`;
-                }, 300);
-
-                const response = await fetch('/run_forecast', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        test_mode: true,
-                        customer_id: selectedCustomer.id
-                    })
-                });
-
-                clearInterval(interval);
-                const data = await response.json();
-
-                if (data.success) {
-                    progressFill.style.width = '100%';
-                    progressText.textContent = '處理完成！';
-                    result.className = 'process-result success';
-                    result.innerHTML = `
-                        <i class="fas fa-check-circle" style="color: #27ae60; margin-right: 10px;"></i>
-                        FORECAST 處理完成！
-                    `;
-                    result.style.display = 'block';
-
-                    // 更新完成資訊
-                    const now = new Date();
-                    document.getElementById('completion-customer').textContent =
-                        `${selectedCustomer.company} - ${selectedCustomer.display_name}`;
-                    document.getElementById('completion-upload-time').textContent =
-                        uploadStartTime ? uploadStartTime.toLocaleString('zh-TW') : '-';
-                    document.getElementById('completion-date').textContent =
-                        now.toLocaleDateString('zh-TW');
-                    document.getElementById('completion-time').textContent =
-                        now.toLocaleTimeString('zh-TW');
-
-                    setTimeout(() => goToStep(5), 1000);
-                } else {
-                    throw new Error(data.message);
-                }
-            } catch (error) {
-                // 失敗時隱藏進度條
-                progress.style.display = 'none';
-                result.className = 'process-result error';
-                result.innerHTML = `
-                    <i class="fas fa-times-circle" style="color: #e74c3c; margin-right: 10px;"></i>
-                    處理失敗：${error.message}
-                `;
-                result.style.display = 'block';
-            } finally {
-                btn.disabled = false;
-            }
-        }
-
-        // 下載結果
-        function downloadResult() {
-            window.location.href = `/download/forecast_result.xlsx`;
-        }
-
-        // 開啟映射配置
-        function openMappingConfig() {
-            window.open(`/mapping?customer_id=${selectedCustomer.id}`, '_blank');
-        }
-
-        // 重新開始測試
-        function restartTest() {
-            showConfirmModal(
-                '重新開始',
-                '確定要重新開始測試嗎？',
-                '所有已上傳的檔案和處理結果將會清除',
-                function() {
-                    resetWorkflow();
-                    goToStep(1);
-                    closeConfirmModal();
-                }
-            );
-        }
+        // 頁面載入時初始化客戶列表
+        document.addEventListener('DOMContentLoaded', function() {
+            loadCustomers();
+        });
     </script>
+
+    <!-- 載入共用的 main.js -->
+    <script src="{{ url_for('static', filename='js/main.js') }}?v={{ version }}"></script>
 
     <!-- 瀏覽器檢測腳本 -->
     <script src="{{ url_for('static', filename='js/browser-check.js') }}?v={{ version }}"></script>
