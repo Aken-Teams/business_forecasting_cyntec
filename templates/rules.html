@@ -702,6 +702,595 @@
             font-size: 0.8rem;
         }
 
+        /* ========== 流程圖視覺化樣式 ========== */
+        .process-flowchart {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 25px;
+        }
+
+        .flowchart-title {
+            text-align: center;
+            margin-bottom: 25px;
+        }
+
+        .flowchart-title h3 {
+            font-size: 1.1rem;
+            color: #2c3e50;
+            margin-bottom: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .flowchart-title h3 i {
+            color: #3498db;
+        }
+
+        .flowchart-title p {
+            font-size: 0.85rem;
+            color: #666;
+        }
+
+        /* 流程步驟容器 */
+        .flowchart-steps {
+            display: flex;
+            align-items: stretch;
+            justify-content: center;
+            gap: 0;
+            flex-wrap: nowrap;
+            max-width: 100%;
+            overflow: visible;
+            padding: 30px 0 40px;
+        }
+
+        /* 單個步驟 */
+        .flow-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            flex: 0 0 auto;
+        }
+
+        .flow-step-box {
+            background: white;
+            border-radius: 12px;
+            padding: 15px;
+            width: 120px;
+            height: 100%;
+            min-height: 140px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            border: 2px solid transparent;
+            transition: box-shadow 0.3s, border-color 0.3s;
+            cursor: pointer;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .flow-step-box:hover {
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+
+        .flow-step-box.upload { border-color: #17a2b8; }
+        .flow-step-box.upload:hover { background: #e8f7f9; }
+        .flow-step-box.cleanup { border-color: #f39c12; }
+        .flow-step-box.cleanup:hover { background: #fef9e7; }
+        .flow-step-box.mapping { border-color: #9b59b6; }
+        .flow-step-box.mapping:hover { background: #f5eef8; }
+        .flow-step-box.forecast { border-color: #e74c3c; }
+        .flow-step-box.forecast:hover { background: #fdedec; }
+        .flow-step-box.output { border-color: #27ae60; }
+        .flow-step-box.output:hover { background: #e8f8f0; }
+
+        .flow-step-icon {
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 10px;
+            font-size: 1.2rem;
+            color: white;
+        }
+
+        .flow-step-icon.upload { background: linear-gradient(135deg, #17a2b8 0%, #138496 100%); }
+        .flow-step-icon.cleanup { background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%); }
+        .flow-step-icon.mapping { background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%); }
+        .flow-step-icon.forecast { background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); }
+        .flow-step-icon.output { background: linear-gradient(135deg, #27ae60 0%, #1e8449 100%); }
+
+        .flow-step-name {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 5px;
+            line-height: 1.3;
+        }
+
+        .flow-step-desc {
+            font-size: 0.75rem;
+            color: #888;
+            line-height: 1.4;
+            flex: 1;
+        }
+
+        /* 箭頭連接 */
+        .flow-arrow {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 5px;
+            color: #bdc3c7;
+            font-size: 1.2rem;
+            flex: 0 0 auto;
+        }
+
+        /* 子流程指示 */
+        .flow-substeps {
+            display: flex;
+            gap: 5px;
+            margin-top: 8px;
+            justify-content: center;
+        }
+
+        .flow-substep-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ddd;
+        }
+
+        .flow-substep-dot.active {
+            background: #3498db;
+        }
+
+        /* 點擊查看詳情提示 */
+        .flow-step-hint {
+            position: absolute;
+            bottom: -22px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.7rem;
+            color: #999;
+            white-space: nowrap;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .flow-step-box:hover .flow-step-hint {
+            opacity: 1;
+        }
+
+        /* 箭頭垂直置中對齊 */
+        .flow-arrow {
+            align-self: center;
+        }
+
+        /* 檢視模式切換 */
+        .view-toggle {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .view-toggle-btn {
+            padding: 8px 20px;
+            border: 2px solid #ddd;
+            background: white;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: #666;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .view-toggle-btn:hover {
+            border-color: #3498db;
+            color: #3498db;
+        }
+
+        .view-toggle-btn.active {
+            background: #3498db;
+            border-color: #3498db;
+            color: white;
+        }
+
+        /* 詳細規則區塊（摺疊式） */
+        .detail-sections {
+            display: none;
+        }
+
+        .detail-sections.show {
+            display: block;
+        }
+
+        /* ========== 子流程卡片樣式 ========== */
+        .substep-flowchart {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            overflow: visible;
+        }
+
+        .substep-flowchart:last-child {
+            margin-bottom: 0;
+        }
+
+        .substep-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .substep-header-icon {
+            width: 40px;
+            height: 40px;
+            min-width: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1rem;
+        }
+
+        .substep-header-icon.upload { background: linear-gradient(135deg, #17a2b8 0%, #138496 100%); }
+        .substep-header-icon.cleanup { background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%); }
+        .substep-header-icon.mapping { background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%); }
+        .substep-header-icon.erp { background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); }
+        .substep-header-icon.transit { background: linear-gradient(135deg, #27ae60 0%, #1e8449 100%); }
+        .substep-header-icon.forecast { background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); }
+        .substep-header-icon.output { background: linear-gradient(135deg, #6f42c1 0%, #5a32a3 100%); }
+
+        .substep-header-text {
+            text-align: left;
+        }
+
+        .substep-header-text h4 {
+            font-size: 1.05rem;
+            color: #2c3e50;
+            margin: 0 0 2px 0;
+            text-align: left;
+        }
+
+        .substep-header-text p {
+            font-size: 0.85rem;
+            color: #666;
+            margin: 0;
+            text-align: left;
+        }
+
+        .substep-status {
+            margin-left: auto;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: #d4edda;
+            color: #155724;
+            flex-shrink: 0;
+        }
+
+        /* 子流程步驟 - 使用 Grid 實現等高卡片 */
+        .substep-flow {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 20px;
+            padding-top: 15px;
+        }
+
+        .substep-item {
+            background: white;
+            border-radius: 10px;
+            padding: 18px 15px 15px;
+            border: 1px solid #e0e0e0;
+            position: relative;
+            transition: box-shadow 0.3s, border-color 0.3s;
+            display: flex;
+            flex-direction: column;
+            text-align: left;
+        }
+
+        .substep-item:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            border-color: #3498db;
+        }
+
+        .substep-item-num {
+            position: absolute;
+            top: -12px;
+            left: 15px;
+            width: 24px;
+            height: 24px;
+            background: #3498db;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+
+        .substep-item-title {
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: 0.9rem;
+            margin-bottom: 6px;
+            margin-top: 0;
+            text-align: left;
+        }
+
+        .substep-item-desc {
+            font-size: 0.8rem;
+            color: #666;
+            line-height: 1.5;
+            text-align: left;
+            flex: 1;
+        }
+
+        .substep-item-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 12px;
+            justify-content: flex-start;
+        }
+
+        .substep-tag {
+            font-size: 0.7rem;
+            padding: 3px 8px;
+            border-radius: 10px;
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+        }
+
+        .substep-tag.field { background: #e8f4f8; color: #2980b9; }
+        .substep-tag.required { background: #ffeeba; color: #856404; }
+        .substep-tag.auto { background: #d4edda; color: #155724; }
+        .substep-tag.file { background: #e8f4f8; color: #2980b9; }
+
+        /* 流程箭頭（子步驟之間） */
+        .substep-arrow {
+            display: flex;
+            align-items: center;
+            color: #bdc3c7;
+            font-size: 1rem;
+            padding: 0 5px;
+        }
+
+        /* 垂直流程（用於步驟較多時） */
+        .substep-flow.vertical {
+            flex-direction: column;
+        }
+
+        .substep-flow.vertical .substep-item {
+            max-width: 100%;
+            min-width: auto;
+        }
+
+        .substep-flow.vertical .substep-arrow {
+            justify-content: center;
+            transform: rotate(90deg);
+        }
+
+        /* 配置項目顯示 */
+        .substep-config {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px dashed #e0e0e0;
+        }
+
+        .substep-config-item {
+            display: flex;
+            gap: 8px;
+            font-size: 0.8rem;
+            margin-bottom: 4px;
+            color: #555;
+        }
+
+        .substep-config-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .substep-config-label {
+            color: #888;
+            min-width: 60px;
+        }
+
+        .substep-config-value {
+            color: #2c3e50;
+            font-weight: 500;
+        }
+
+        .substep-config-value code {
+            background: #e8f4f8;
+            color: #2980b9;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            margin-right: 4px;
+        }
+
+        /* ========== Mermaid 風格子流程圖 ========== */
+        .mermaid-flowchart {
+            display: none;
+            padding: 20px;
+        }
+
+        .mermaid-flowchart.show {
+            display: block;
+        }
+
+        .mermaid-category {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 20px;
+        }
+
+        .mermaid-category:last-child {
+            margin-bottom: 0;
+        }
+
+        .mermaid-category-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .mermaid-category-icon {
+            width: 45px;
+            height: 45px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.1rem;
+        }
+
+        .mermaid-category-icon.upload { background: linear-gradient(135deg, #17a2b8 0%, #138496 100%); }
+        .mermaid-category-icon.cleanup { background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%); }
+        .mermaid-category-icon.mapping { background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%); }
+        .mermaid-category-icon.erp { background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); }
+        .mermaid-category-icon.transit { background: linear-gradient(135deg, #27ae60 0%, #1e8449 100%); }
+        .mermaid-category-icon.forecast { background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); }
+        .mermaid-category-icon.output { background: linear-gradient(135deg, #6f42c1 0%, #5a32a3 100%); }
+
+        .mermaid-category-title {
+            font-size: 1.1rem;
+            color: #2c3e50;
+            font-weight: 600;
+        }
+
+        /* Mermaid 風格流程線 */
+        .mermaid-flow {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0;
+        }
+
+        .mermaid-node {
+            background: white;
+            border: 2px solid #3498db;
+            border-radius: 8px;
+            padding: 12px 24px;
+            min-width: 200px;
+            max-width: 300px;
+            text-align: center;
+            position: relative;
+        }
+
+        .mermaid-node.start {
+            border-radius: 25px;
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+            border: none;
+        }
+
+        .mermaid-node.end {
+            border-radius: 25px;
+            background: linear-gradient(135deg, #27ae60 0%, #1e8449 100%);
+            color: white;
+            border: none;
+        }
+
+        .mermaid-node.process {
+            border-color: #9b59b6;
+        }
+
+        .mermaid-node-title {
+            font-weight: 600;
+            font-size: 0.9rem;
+            margin-bottom: 4px;
+        }
+
+        .mermaid-node-desc {
+            font-size: 0.8rem;
+            color: #666;
+        }
+
+        .mermaid-node.start .mermaid-node-desc,
+        .mermaid-node.end .mermaid-node-desc {
+            color: rgba(255,255,255,0.9);
+        }
+
+        /* 連接線 */
+        .mermaid-connector {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 5px 0;
+        }
+
+        .mermaid-line {
+            width: 2px;
+            height: 20px;
+            background: #bdc3c7;
+        }
+
+        .mermaid-arrow {
+            width: 0;
+            height: 0;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-top: 8px solid #bdc3c7;
+        }
+
+        .mermaid-connector-label {
+            font-size: 0.75rem;
+            color: #888;
+            background: #f8f9fa;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin: 5px 0;
+        }
+
+        /* 響應式 */
+        @media (max-width: 900px) {
+            .flowchart-steps {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .flow-arrow {
+                transform: rotate(90deg);
+                height: auto;
+                padding: 10px 0;
+                margin-top: 0;
+            }
+
+            .flow-step {
+                width: 100%;
+                max-width: 200px;
+            }
+
+            .flow-step-box {
+                min-width: 100%;
+                max-width: 100%;
+            }
+        }
+
         /* Toast 通知 */
         .toast-container {
             position: fixed;
@@ -1009,7 +1598,7 @@
                 if (categories.transit.rules.length > 0) fileTypes.push({ name: '在途資料', icon: 'file-excel' });
                 if (categories.forecast.rules.length > 0) fileTypes.push({ name: 'Forecast', icon: 'file-excel' });
 
-                // 生成說明區塊
+                // 生成流程圖和詳細規則
                 let html = `
                     <div class="rules-intro">
                         <div class="rules-intro-header">
@@ -1022,25 +1611,41 @@
                     </div>
                 `;
 
+                // 生成流程圖
+                html += renderProcessFlowchart(categories);
+
+                // 視圖切換按鈕 - 三種模式
+                html += `
+                    <div class="view-toggle">
+                        <button class="view-toggle-btn active" onclick="toggleView('flowchart', this)">
+                            <i class="fas fa-project-diagram"></i> 流程總覽
+                        </button>
+                        <button class="view-toggle-btn" onclick="toggleView('subflow', this)">
+                            <i class="fas fa-sitemap"></i> 子流程圖
+                        </button>
+                        <button class="view-toggle-btn" onclick="toggleView('detail', this)">
+                            <i class="fas fa-list-alt"></i> 詳細規則
+                        </button>
+                    </div>
+                `;
+
+                // 子流程圖區塊（預設隱藏）- 卡片式流程圖
+                html += '<div class="detail-sections" id="subflowSections">';
                 for (const [key, category] of Object.entries(categories)) {
                     if (category.rules.length > 0) {
-                        html += `
-                            <div class="rule-category-section">
-                                <div class="category-header">
-                                    <div class="category-icon ${key}">
-                                        <i class="fas fa-${category.icon}"></i>
-                                    </div>
-                                    <span class="category-title">${category.name}</span>
-                                </div>
-                        `;
-
-                        category.rules.forEach(rule => {
-                            html += renderRuleItem(rule);
-                        });
-
-                        html += '</div>';
+                        html += renderCategoryFlowchart(key, category);
                     }
                 }
+                html += '</div>';
+
+                // 詳細規則區塊（預設隱藏）- 原始文字格式
+                html += '<div class="detail-sections" id="detailSections">';
+                for (const [key, category] of Object.entries(categories)) {
+                    if (category.rules.length > 0) {
+                        html += renderDetailCategory(key, category);
+                    }
+                }
+                html += '</div>';
 
                 document.getElementById('modalBody').innerHTML = html;
 
@@ -1053,6 +1658,242 @@
                     </div>
                 `;
             }
+        }
+
+        // 渲染類別流程圖卡片
+        function renderCategoryFlowchart(key, category) {
+            let html = `
+                <div class="substep-flowchart" id="category-${key}">
+                    <div class="substep-header">
+                        <div class="substep-header-icon ${key}">
+                            <i class="fas fa-${category.icon}"></i>
+                        </div>
+                        <div class="substep-header-text">
+                            <h4>${category.name}</h4>
+                            <p>${getCategoryDescription(key)}</p>
+                        </div>
+                        <span class="substep-status">啟用中</span>
+                    </div>
+                    <div class="substep-flow">
+            `;
+
+            // 將規則轉換為流程步驟
+            const steps = convertRulesToSteps(key, category.rules);
+
+            steps.forEach((step, index) => {
+                html += `
+                    <div class="substep-item">
+                        <div class="substep-item-num">${index + 1}</div>
+                        <div class="substep-item-title">${escapeHtml(step.title)}</div>
+                        <div class="substep-item-desc">${escapeHtml(step.desc)}</div>
+                        ${step.tags ? `<div class="substep-item-tags">${step.tags}</div>` : ''}
+                    </div>
+                `;
+            });
+
+            html += `
+                    </div>
+                </div>
+            `;
+            return html;
+        }
+
+        // 獲取類別描述
+        function getCategoryDescription(key) {
+            const descriptions = {
+                'upload': '上傳系統所需的 Excel 檔案',
+                'cleanup': '清除多餘的標題行、空白行和不需要的資料',
+                'mapping': '將廠區代碼映射至對應的客戶名稱',
+                'erp': '處理 ERP 淨需求數據，整合地區與排程資訊',
+                'transit': '處理在途資料，計算到貨時間',
+                'forecast': '處理 Forecast 數據，進行資料匹配與整合',
+                'output': '產生處理後的報表檔案供下載'
+            };
+            return descriptions[key] || '';
+        }
+
+        // 將規則轉換為流程步驟
+        function convertRulesToSteps(categoryKey, rules) {
+            const steps = [];
+
+            rules.forEach(rule => {
+                const config = rule.rule_config || {};
+
+                // 處理上傳步驟
+                if (config.upload_steps && Array.isArray(config.upload_steps)) {
+                    config.upload_steps.forEach(step => {
+                        let tags = '';
+                        if (step.file_type) tags += `<span class="substep-tag file"><i class="fas fa-file"></i> ${escapeHtml(step.file_type)}</span>`;
+                        if (step.required) tags += `<span class="substep-tag required"><i class="fas fa-asterisk"></i> 必要</span>`;
+                        if (step.auto) tags += `<span class="substep-tag auto"><i class="fas fa-magic"></i> 自動</span>`;
+
+                        steps.push({
+                            title: step.name || '',
+                            desc: step.description || '',
+                            tags: tags
+                        });
+                    });
+                    return;
+                }
+
+                // 處理輸出步驟
+                if (config.output_steps && Array.isArray(config.output_steps)) {
+                    config.output_steps.forEach(step => {
+                        let tags = '';
+                        if (step.auto) tags += `<span class="substep-tag auto"><i class="fas fa-magic"></i> 自動</span>`;
+                        if (step.output) tags += `<span class="substep-tag file"><i class="fas fa-download"></i> 輸出</span>`;
+
+                        steps.push({
+                            title: step.name || '',
+                            desc: step.description || '',
+                            tags: tags
+                        });
+                    });
+                    return;
+                }
+
+                // 處理清理規則
+                if (config.cleanup_rules && Array.isArray(config.cleanup_rules)) {
+                    config.cleanup_rules.forEach(cr => {
+                        steps.push({
+                            title: cr.name || cr.action || '',
+                            desc: cr.purpose || cr.condition || '',
+                            tags: `<span class="substep-tag auto"><i class="fas fa-broom"></i> 清理</span>`
+                        });
+                    });
+                    return;
+                }
+
+                // 一般規則 - 根據配置項目生成步驟
+                const stepInfo = getStepFromConfig(rule.rule_name, config, categoryKey);
+                if (stepInfo) {
+                    steps.push(stepInfo);
+                }
+            });
+
+            return steps.length > 0 ? steps : [{
+                title: rules[0]?.rule_name || '處理規則',
+                desc: rules[0]?.rule_description || '依據配置進行資料處理',
+                tags: ''
+            }];
+        }
+
+        // 從配置中提取步驟資訊
+        function getStepFromConfig(ruleName, config, categoryKey) {
+            let tags = '';
+            let desc = '';
+
+            // 根據類別生成適當的標籤
+            if (categoryKey === 'erp') {
+                if (config.match_keys) {
+                    const keys = Array.isArray(config.match_keys) ? config.match_keys : [config.match_keys];
+                    tags += keys.slice(0, 2).map(k => `<span class="substep-tag field"><i class="fas fa-key"></i> ${escapeHtml(k)}</span>`).join('');
+                }
+                desc = config.description || '處理 ERP 淨需求數據';
+            } else if (categoryKey === 'transit') {
+                if (config.eta_field) {
+                    tags += `<span class="substep-tag field"><i class="fas fa-calendar"></i> ${escapeHtml(config.eta_field)}</span>`;
+                }
+                desc = config.description || '處理在途資料';
+            } else if (categoryKey === 'forecast') {
+                if (config.source_columns) {
+                    const cols = Array.isArray(config.source_columns) ? config.source_columns : [config.source_columns];
+                    tags += cols.slice(0, 2).map(c => `<span class="substep-tag field"><i class="fas fa-columns"></i> ${escapeHtml(c)}</span>`).join('');
+                }
+                desc = config.description || '處理 Forecast 數據';
+            } else if (categoryKey === 'mapping') {
+                if (config.mapping_fields) {
+                    tags += `<span class="substep-tag field"><i class="fas fa-exchange-alt"></i> 欄位映射</span>`;
+                }
+                desc = config.description || '建立欄位對應關係';
+            }
+
+            return {
+                title: ruleName,
+                desc: desc,
+                tags: tags
+            };
+        }
+
+        // 渲染 Mermaid 風格流程圖
+        function renderMermaidFlowchart(key, category) {
+            const steps = convertRulesToSteps(key, category.rules);
+
+            let html = `
+                <div class="mermaid-category" id="mermaid-${key}">
+                    <div class="mermaid-category-header">
+                        <div class="mermaid-category-icon ${key}">
+                            <i class="fas fa-${category.icon}"></i>
+                        </div>
+                        <span class="mermaid-category-title">${category.name}</span>
+                    </div>
+                    <div class="mermaid-flow">
+            `;
+
+            // 開始節點
+            html += `
+                <div class="mermaid-node start">
+                    <div class="mermaid-node-title">開始</div>
+                    <div class="mermaid-node-desc">${getCategoryDescription(key)}</div>
+                </div>
+            `;
+
+            // 處理步驟
+            steps.forEach((step, index) => {
+                // 連接線
+                html += `
+                    <div class="mermaid-connector">
+                        <div class="mermaid-line"></div>
+                        <div class="mermaid-arrow"></div>
+                    </div>
+                `;
+
+                // 節點
+                html += `
+                    <div class="mermaid-node process">
+                        <div class="mermaid-node-title">${escapeHtml(step.title)}</div>
+                        <div class="mermaid-node-desc">${escapeHtml(step.desc)}</div>
+                    </div>
+                `;
+            });
+
+            // 結束連接線和節點
+            html += `
+                <div class="mermaid-connector">
+                    <div class="mermaid-line"></div>
+                    <div class="mermaid-arrow"></div>
+                </div>
+                <div class="mermaid-node end">
+                    <div class="mermaid-node-title">完成</div>
+                    <div class="mermaid-node-desc">進入下一階段</div>
+                </div>
+            `;
+
+            html += `
+                    </div>
+                </div>
+            `;
+            return html;
+        }
+
+        // 渲染詳細規則區塊（原始文字格式）
+        function renderDetailCategory(key, category) {
+            let html = `
+                <div class="rule-category-section" id="detail-${key}">
+                    <div class="category-header">
+                        <div class="category-icon ${key}">
+                            <i class="fas fa-${category.icon}"></i>
+                        </div>
+                        <span class="category-title">${category.name}</span>
+                    </div>
+            `;
+
+            category.rules.forEach(rule => {
+                html += renderRuleItem(rule);
+            });
+
+            html += '</div>';
+            return html;
         }
 
         // 渲染規則項目
@@ -1313,6 +2154,155 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        // 渲染流程圖
+        function renderProcessFlowchart(categories) {
+            // 定義流程步驟（按實際處理順序）
+            const flowSteps = [
+                {
+                    key: 'upload',
+                    name: '上傳文件',
+                    icon: 'cloud-upload-alt',
+                    shortDesc: '上傳 ERP、在途、Forecast 等資料',
+                    hasRules: categories.upload && categories.upload.rules.length > 0
+                },
+                {
+                    key: 'cleanup',
+                    name: '資料清理',
+                    icon: 'broom',
+                    shortDesc: '清除多餘標題行與空白',
+                    hasRules: categories.cleanup && categories.cleanup.rules.length > 0
+                },
+                {
+                    key: 'mapping',
+                    name: '客戶映射',
+                    icon: 'project-diagram',
+                    shortDesc: '將廠區代碼映射至客戶名稱',
+                    hasRules: categories.mapping && categories.mapping.rules.length > 0
+                },
+                {
+                    key: 'forecast',
+                    name: '整合處理',
+                    icon: 'chart-line',
+                    shortDesc: '整合 ERP、在途與 Forecast 資料',
+                    hasRules: categories.erp && categories.erp.rules.length > 0 ||
+                              categories.transit && categories.transit.rules.length > 0 ||
+                              categories.forecast && categories.forecast.rules.length > 0
+                },
+                {
+                    key: 'output',
+                    name: '輸出結果',
+                    icon: 'download',
+                    shortDesc: '產生處理後的報表檔案',
+                    hasRules: categories.output && categories.output.rules.length > 0
+                }
+            ];
+
+            // 只顯示有規則的步驟（或核心必要步驟）
+            const activeSteps = flowSteps.filter(step =>
+                step.hasRules || ['upload', 'forecast', 'output'].includes(step.key)
+            );
+
+            let html = `
+                <div class="process-flowchart">
+                    <div class="flowchart-title">
+                        <h3><i class="fas fa-project-diagram"></i> 處理流程總覽</h3>
+                        <p>點擊下方步驟查看詳細規則說明</p>
+                    </div>
+                    <div class="flowchart-steps">
+            `;
+
+            activeSteps.forEach((step, index) => {
+                // 步驟方塊
+                html += `
+                    <div class="flow-step">
+                        <div class="flow-step-box ${step.key}" onclick="scrollToCategory('${step.key}')">
+                            <div class="flow-step-icon ${step.key}">
+                                <i class="fas fa-${step.icon}"></i>
+                            </div>
+                            <div class="flow-step-name">${step.name}</div>
+                            <div class="flow-step-desc">${step.shortDesc}</div>
+                            ${step.hasRules ? '<span class="flow-step-hint">點擊查看詳情</span>' : ''}
+                        </div>
+                    </div>
+                `;
+
+                // 箭頭（除了最後一個）
+                if (index < activeSteps.length - 1) {
+                    html += `
+                        <div class="flow-arrow">
+                            <i class="fas fa-chevron-right"></i>
+                        </div>
+                    `;
+                }
+            });
+
+            html += `
+                    </div>
+                </div>
+            `;
+
+            return html;
+        }
+
+        // 切換檢視模式 - 三種模式
+        function toggleView(view, btn) {
+            // 更新按鈕狀態
+            document.querySelectorAll('.view-toggle-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            const flowchart = document.querySelector('.process-flowchart');
+            const subflowSections = document.getElementById('subflowSections');
+            const detailSections = document.getElementById('detailSections');
+
+            // 隱藏所有區塊
+            if (flowchart) flowchart.style.display = 'none';
+            if (subflowSections) subflowSections.classList.remove('show');
+            if (detailSections) detailSections.classList.remove('show');
+
+            // 根據選擇顯示對應區塊
+            if (view === 'flowchart') {
+                if (flowchart) flowchart.style.display = 'block';
+            } else if (view === 'subflow') {
+                if (subflowSections) subflowSections.classList.add('show');
+            } else if (view === 'detail') {
+                if (detailSections) detailSections.classList.add('show');
+            }
+        }
+
+        // 滾動到指定分類並切換到子流程圖視圖
+        function scrollToCategory(category) {
+            // 切換到子流程圖視圖（第二個按鈕）
+            const buttons = document.querySelectorAll('.view-toggle-btn');
+            if (buttons.length >= 2) {
+                toggleView('subflow', buttons[1]);
+            }
+
+            // 找到對應的分類區塊並滾動
+            setTimeout(() => {
+                // 根據 category key 映射到實際的類別
+                const categoryMap = {
+                    'upload': 'upload',
+                    'cleanup': 'cleanup',
+                    'mapping': 'mapping',
+                    'forecast': 'erp',  // forecast 整合處理優先顯示 erp
+                    'output': 'output'
+                };
+                const targetKey = categoryMap[category] || category;
+
+                // 使用新的 substep-flowchart 元素 ID
+                const section = document.getElementById(`category-${targetKey}`);
+                if (section) {
+                    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    // 添加高亮效果
+                    section.style.transition = 'all 0.3s';
+                    section.style.boxShadow = '0 0 0 3px #3498db';
+                    setTimeout(() => {
+                        section.style.boxShadow = '';
+                    }, 2000);
+                }
+            }, 100);
         }
     </script>
 </body>
