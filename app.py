@@ -4741,4 +4741,4 @@ if __name__ == '__main__':
     print(f"正在清理超過 {FILE_RETENTION_DAYS} 天的資料夾...")
     cleanup_old_folders()
 
-    app.run(debug=True, host='0.0.0.0', port=12026, use_reloader=False)
+    app.run(debug=True, host='0.0.0.0', port=12034, use_reloader=False)
