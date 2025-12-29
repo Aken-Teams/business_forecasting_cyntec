@@ -276,9 +276,6 @@
                                 <h2><i class="fas fa-link"></i> 映射整合</h2>
                                 <p>整合 ERP 和在途數據與映射表的關係</p>
                             </div>
-                            <button class="btn btn-secondary" id="mapping-config-btn">
-                                <i class="fas fa-cog"></i> 配置映射表
-                            </button>
                         </div>
                     </div>
                     <div class="card-body">
@@ -296,9 +293,14 @@
                             <button class="btn btn-back" id="mapping-back-btn" onclick="confirmGoBack(2)">
                                 <i class="fas fa-arrow-left"></i> 回上一步
                             </button>
-                            <button class="btn btn-primary" id="mapping-process-btn">
-                                <i class="fas fa-play"></i> 開始整合
-                            </button>
+                            <div class="action-buttons-right">
+                                <button class="btn btn-secondary" id="mapping-config-btn">
+                                    <i class="fas fa-cog"></i> 配置映射表
+                                </button>
+                                <button class="btn btn-primary" id="mapping-process-btn">
+                                    <i class="fas fa-play"></i> 開始整合
+                                </button>
+                            </div>
                         </div>
                         <div class="progress-container" id="mapping-progress" style="display: none;">
                             <div class="progress-bar">

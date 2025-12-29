@@ -73,7 +73,9 @@ def init_database():
                         'forecast_start', 'forecast_success', 'forecast_failed',
                         'download',
                         'mapping_config_save', 'mapping_config_failed',
-                        'user_create', 'user_update', 'user_delete', 'user_toggle_status'
+                        'user_create', 'user_update', 'user_delete', 'user_toggle_status',
+                        'mapping_create', 'mapping_update', 'mapping_delete',
+                        'merge_forecast', 'merge_forecast_failed'
                     ) NOT NULL,
                     action_detail TEXT,
                     ip_address VARCHAR(45),
@@ -800,7 +802,8 @@ def update_activity_logs_enum():
                     'download',
                     'mapping_config_save', 'mapping_config_failed',
                     'user_create', 'user_update', 'user_delete', 'user_toggle_status',
-                    'mapping_create', 'mapping_update', 'mapping_delete'
+                    'mapping_create', 'mapping_update', 'mapping_delete',
+                    'merge_forecast', 'merge_forecast_failed'
                 ) NOT NULL
             """)
             connection.commit()

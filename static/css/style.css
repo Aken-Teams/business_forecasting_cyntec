@@ -1080,6 +1080,13 @@ body {
     flex-shrink: 0;
 }
 
+/* 右側按鈕群組 */
+.action-buttons-right {
+    display: flex;
+    gap: 12px;
+    margin-left: auto;
+}
+
 /* 統一 action-buttons-row 內所有按鈕尺寸 */
 .action-buttons-row .btn {
     min-width: 160px;
