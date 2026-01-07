@@ -521,6 +521,37 @@ def find_file_with_extensions(folder, base_name):
             return filepath
     return None
 
+def extract_plant_mrp_from_forecast(forecast_file):
+    """
+    從 Forecast 檔案中提取 Plant 和 MRP ID
+    F 欄 (col index 5): Plant (例如 3A32)
+    G 欄 (col index 6): MRP ID (例如 A00Y)
+
+    返回: (plant, mrp_id) 或 (None, None) 如果無法提取
+    """
+    try:
+        # 根據檔案格式選擇引擎
+        ext = os.path.splitext(forecast_file)[1].lower()
+        if ext == '.xls':
+            df = pd.read_excel(forecast_file, header=None, engine='xlrd', nrows=20)
+        else:
+            df = pd.read_excel(forecast_file, header=None, nrows=20)
+
+        # 尋找 WEEK# 行來定位資料
+        for row_idx in range(min(15, len(df))):
+            m_val = df.iloc[row_idx, 12] if row_idx < len(df) and 12 < len(df.columns) and pd.notna(df.iloc[row_idx, 12]) else ''
+            if m_val == 'WEEK#':
+                f_val = str(df.iloc[row_idx, 5]).strip() if pd.notna(df.iloc[row_idx, 5]) else ''
+                g_val = str(df.iloc[row_idx, 6]).strip() if pd.notna(df.iloc[row_idx, 6]) else ''
+                if f_val and g_val:
+                    print(f"  📋 提取 Plant={f_val}, MRP_ID={g_val} from {os.path.basename(forecast_file)}")
+                    return f_val, g_val
+
+        return None, None
+    except Exception as e:
+        print(f"  ⚠️ 無法從 {forecast_file} 提取 Plant/MRP ID: {e}")
+        return None, None
+
 def is_xls_format(file_path):
     """
     檢查檔案是否為舊版 .xls 格式
@@ -2970,8 +3001,12 @@ def run_forecast():
                     match = re.search(r'cleaned_forecast_(\d+)\.xlsx?', file_basename)
                     file_num = match.group(1) if match else str(idx)
 
-                    # 決定輸出檔名（統一輸出 .xlsx 格式）
-                    output_filename = f'forecast_result_{file_num}.xlsx'
+                    # 從 Forecast 檔案提取 Plant 和 MRP ID 來生成檔名
+                    plant, mrp_id = extract_plant_mrp_from_forecast(forecast_file)
+                    if plant and mrp_id:
+                        output_filename = f'forecast_{plant}_{mrp_id}.xlsx'
+                    else:
+                        output_filename = f'forecast_result_{file_num}.xlsx'
 
                     print(f"\n--- 處理檔案 {idx}/{len(multi_cleaned_files)}: {file_basename} ---")
 
@@ -3039,16 +3074,28 @@ def run_forecast():
 
             else:
                 # ===== Pegatron 單檔案模式 =====
+                is_merged_forecast = False
                 cleaned_forecast = find_file_with_extensions(processed_folder, 'cleaned_forecast')
-                if not cleaned_forecast:
+                if cleaned_forecast:
+                    is_merged_forecast = True  # 這是合併的檔案
+                else:
                     cleaned_forecast = find_file_with_extensions(processed_folder, 'cleaned_forecast_1')
 
                 if not cleaned_forecast:
                     log_process(user['id'], 'forecast', 'failed', '請先完成Forecast數據清理')
                     return jsonify({'success': False, 'message': '請先完成Forecast數據清理'})
 
-                # 決定輸出檔名（統一輸出 .xlsx 格式，避免轉換問題）
-                output_filename = 'forecast_result.xlsx'
+                # 決定輸出檔名
+                if is_merged_forecast:
+                    # 合併檔案用 forecast_ALL
+                    output_filename = 'forecast_ALL.xlsx'
+                else:
+                    # 分開檔案用 Plant_MRP ID
+                    plant, mrp_id = extract_plant_mrp_from_forecast(cleaned_forecast)
+                    if plant and mrp_id:
+                        output_filename = f'forecast_{plant}_{mrp_id}.xlsx'
+                    else:
+                        output_filename = 'forecast_result.xlsx'
 
                 print("開始 Pegatron FORECAST 處理...")
                 print(f"清理後的Forecast文件: {cleaned_forecast}")
@@ -3104,8 +3151,11 @@ def run_forecast():
         elif not is_multi_file_mode:
             # ===== 單檔案模式：處理單一 cleaned_forecast.xlsx/.xls 或 cleaned_forecast_1.xlsx/.xls =====
             # 先檢查合併檔案，再檢查編號檔案（支援 .xlsx 和 .xls）
+            is_merged_forecast = False
             cleaned_forecast = find_file_with_extensions(processed_folder, 'cleaned_forecast')
-            if not cleaned_forecast:
+            if cleaned_forecast:
+                is_merged_forecast = True  # 這是合併的檔案
+            else:
                 # 嘗試找 cleaned_forecast_1.xlsx/.xls（只有一個檔案的分開模式）
                 cleaned_forecast = find_file_with_extensions(processed_folder, 'cleaned_forecast_1')
 
@@ -3113,8 +3163,16 @@ def run_forecast():
                 log_process(user['id'], 'forecast', 'failed', '請先完成Forecast數據清理')
                 return jsonify({'success': False, 'message': '請先完成Forecast數據清理'})
 
+            # 決定輸出檔名（廣達等非 Pegatron 客戶）
+            if is_merged_forecast:
+                output_filename = 'forecast_ALL.xlsx'
+            else:
+                # 分開模式維持原本檔名格式
+                output_filename = 'forecast_result.xlsx'
+
             print("開始FORECAST處理（單檔案模式）...")
             print(f"清理後的Forecast文件: {cleaned_forecast}")
+            print(f"輸出檔名: {output_filename}")
             print(f"整合後的ERP文件: {integrated_erp}")
             if has_transit:
                 print(f"整合後的Transit文件: {integrated_transit}")
@@ -3125,13 +3183,14 @@ def run_forecast():
                 forecast_file=cleaned_forecast,
                 erp_file=integrated_erp,
                 transit_file=integrated_transit if has_transit else None,
-                output_folder=processed_folder
+                output_folder=processed_folder,
+                output_filename=output_filename
             )
 
             success = processor.process_all_blocks()
 
             if success:
-                result_file = os.path.join(processed_folder, 'forecast_result.xlsx')
+                result_file = os.path.join(processed_folder, output_filename)
                 if os.path.exists(result_file):
                     file_size = os.path.getsize(result_file)
                     duration = time.time() - start_time
@@ -3145,7 +3204,7 @@ def run_forecast():
                     result_data = {
                         'success': True,
                         'message': 'FORECAST處理完成',
-                        'file': 'forecast_result.xlsx',
+                        'file': output_filename,
                         'erp_filled': processor.total_filled,
                         'erp_skipped': processor.total_skipped,
                         'file_size': file_size,
@@ -3211,7 +3270,7 @@ def run_forecast():
                 else:
                     file_num = str(idx)
 
-                # 輸出檔案使用 .xlsx 格式（最終結果總是 xlsx）
+                # 輸出檔案使用 .xlsx 格式（廣達等非 Pegatron 客戶維持原本檔名格式）
                 output_filename = f'forecast_result_{file_num}.xlsx'
 
                 print(f"\n處理檔案 {idx}/{len(forecast_files)}: {file_basename}")

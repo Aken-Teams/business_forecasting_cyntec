@@ -2115,13 +2115,10 @@ function updateCompletionInfo() {
     if (timeElement) timeElement.textContent = timeStr;
 
     // 如果是 IT 測試模式，顯示測試客戶名稱
-    if (customerElement) {
-        if (isITTestMode()) {
-            const customer = getTestCustomerInfo();
-            customerElement.textContent = `${customer.company} - ${customer.display_name}`;
-        } else {
-            customerElement.textContent = '-';
-        }
+    // 非測試模式時保留模板中設定的客戶名稱
+    if (customerElement && isITTestMode()) {
+        const customer = getTestCustomerInfo();
+        customerElement.textContent = `${customer.company} - ${customer.display_name}`;
     }
 }
 
