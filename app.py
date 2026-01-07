@@ -970,6 +970,101 @@ def api_reset_session():
         print(f"❌ 重置 session 失敗: {e}")
         return jsonify({'success': False, 'message': str(e)})
 
+@app.route('/api/delete_upload', methods=['POST'])
+@login_required
+def api_delete_upload():
+    """刪除已上傳的檔案（當用戶想重新上傳時調用）"""
+    user = get_current_user()
+    try:
+        data = request.get_json()
+        file_type = data.get('type')  # 'erp', 'forecast', 'transit'
+        upload_session_id = data.get('upload_session_id')
+        filename = data.get('filename')  # 可選：指定單一檔案名稱
+
+        if not file_type:
+            return jsonify({'success': False, 'message': '未指定檔案類型'})
+
+        if not upload_session_id:
+            return jsonify({'success': False, 'message': '未指定 session ID'})
+
+        # 建立資料夾路徑
+        upload_folder = os.path.join(UPLOAD_FOLDER, str(user['id']), upload_session_id)
+
+        if not os.path.exists(upload_folder):
+            return jsonify({'success': True, 'message': '資料夾不存在，無需刪除'})
+
+        # 根據類型決定要刪除的檔案
+        deleted_files = []
+        remaining_files = []  # 剩餘的檔案（用於 forecast 單檔刪除）
+
+        if file_type == 'erp':
+            # 刪除 erp_data.xlsx 或 erp_data.xls
+            for ext in ['.xlsx', '.xls']:
+                filepath = os.path.join(upload_folder, f'erp_data{ext}')
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                    deleted_files.append(f'erp_data{ext}')
+                    print(f"🗑️ 已刪除 ERP 檔案: {filepath}")
+
+        elif file_type == 'forecast':
+            transit_check = None  # 用於儲存重新檢查的在途需求
+
+            if filename:
+                # 單檔刪除模式：只刪除指定的檔案
+                filepath = os.path.join(upload_folder, filename)
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                    deleted_files.append(filename)
+                    print(f"🗑️ 已刪除單一 Forecast 檔案: {filepath}")
+
+                # 計算剩餘的 forecast 檔案
+                for f in os.listdir(upload_folder):
+                    if f.startswith('forecast_data'):
+                        remaining_files.append(f)
+
+                # 如果還有剩餘檔案，重新檢查在途需求
+                if remaining_files:
+                    remaining_paths = [os.path.join(upload_folder, f) for f in remaining_files]
+                    transit_check = check_transit_requirements_from_forecast(remaining_paths, user['id'], user['username'])
+            else:
+                # 全部刪除模式：刪除所有 forecast_data 開頭的檔案
+                for f in os.listdir(upload_folder):
+                    if f.startswith('forecast_data'):
+                        filepath = os.path.join(upload_folder, f)
+                        os.remove(filepath)
+                        deleted_files.append(f)
+                        print(f"🗑️ 已刪除 Forecast 檔案: {filepath}")
+
+        elif file_type == 'transit':
+            # 刪除 transit_data.xlsx 或 transit_data.xls
+            for ext in ['.xlsx', '.xls']:
+                filepath = os.path.join(upload_folder, f'transit_data{ext}')
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                    deleted_files.append(f'transit_data{ext}')
+                    print(f"🗑️ 已刪除在途檔案: {filepath}")
+
+        else:
+            return jsonify({'success': False, 'message': f'不支援的檔案類型: {file_type}'})
+
+        response_data = {
+            'success': True,
+            'message': f'已刪除 {len(deleted_files)} 個檔案',
+            'deleted_files': deleted_files,
+            'remaining_files': remaining_files,
+            'remaining_count': len(remaining_files)
+        }
+
+        # 如果有重新檢查在途需求，加入回應
+        if file_type == 'forecast' and 'transit_check' in dir() and transit_check:
+            response_data['transit_check'] = transit_check
+
+        return jsonify(response_data)
+
+    except Exception as e:
+        print(f"❌ 刪除上傳檔案失敗: {e}")
+        return jsonify({'success': False, 'message': str(e)})
+
 @app.route('/api/migrate_mapping', methods=['POST'])
 @login_required
 def api_migrate_mapping():
@@ -1481,6 +1576,11 @@ def upload_forecast():
                 all_file_paths = [f['path'] for f in saved_files]
                 mapping_user_id = int(customer_id) if test_mode and customer_id else user['id']
                 transit_check = check_transit_requirements_from_forecast(all_file_paths, mapping_user_id, template_username) if saved_files else {'message': ''}
+
+                # 將 saved_name 加入 files_info 中，方便前端單檔刪除
+                for idx, saved_file in enumerate(saved_files):
+                    if idx < len(files_info):
+                        files_info[idx]['saved_name'] = saved_file['saved_name']
 
                 response_data = {
                     'success': True,

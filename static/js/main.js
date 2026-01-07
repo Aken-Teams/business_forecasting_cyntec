@@ -453,6 +453,11 @@ function showForecastMultiUploadSuccess(result) {
     const fileCount = result.file_count || 1;
     const totalRows = result.total_rows || result.rows || 0;
     const totalSize = result.total_size ? formatFileSize(result.total_size) : (result.file_size ? formatFileSize(result.file_size) : '');
+    const isMergeMode = result.merge_mode !== false; // 預設為合併模式
+
+    // 儲存檔案資訊供單檔刪除使用
+    window.forecastFilesInfo = result.files || [];
+    window.forecastMergeMode = isMergeMode;
 
     let detailsHtml = '';
     if (fileCount === 1) {
@@ -468,14 +473,20 @@ function showForecastMultiUploadSuccess(result) {
 
         // 顯示每個檔案的詳細資訊
         if (result.files && result.files.length > 0) {
-            detailsHtml += '<div class="multi-file-details">';
+            detailsHtml += '<div class="multi-file-details" id="forecast-file-list">';
             result.files.forEach((file, index) => {
-                const shortName = file.name.length > 30 ? file.name.substring(0, 27) + '...' : file.name;
+                const shortName = file.name.length > 25 ? file.name.substring(0, 22) + '...' : file.name;
+                const savedName = file.saved_name || '';
+                // 只有在非合併模式下且有 saved_name 時才顯示單檔刪除按鈕
+                const deleteBtn = (!isMergeMode && savedName)
+                    ? `<button class="btn-delete-single-file" onclick="deleteSingleForecastFile('${savedName}', ${index})" title="刪除此檔案"><i class="fas fa-times"></i></button>`
+                    : '';
                 detailsHtml += `
-                    <div class="file-item">
+                    <div class="file-item" id="forecast-file-${index}">
                         <i class="fas fa-file-excel"></i>
                         <span class="file-name" title="${file.name}">${shortName}</span>
                         <span class="file-rows">${file.rows} 行</span>
+                        ${deleteBtn}
                     </div>`;
             });
             detailsHtml += '</div>';
@@ -504,11 +515,14 @@ function showForecastMultiUploadSuccess(result) {
 
     status.innerHTML = `
         <div class="status-content" style="flex-direction: column; align-items: flex-start; width: 100%;">
-            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px;">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px; width: 100%;">
                 <i class="fas fa-check-circle status-icon success"></i>
-                <div class="status-text">
+                <div class="status-text" style="flex: 1;">
                     <div class="status-title">上傳成功</div>
                 </div>
+                <button class="btn-delete-upload" onclick="resetUpload('forecast')" title="刪除並重新上傳">
+                    <i class="fas fa-trash-alt"></i>
+                </button>
             </div>
             <div class="status-details" style="width: 100%;">${detailsHtml}</div>
             ${transitAlertHtml}
@@ -630,12 +644,15 @@ function showUploadSuccess(type, result) {
     const status = document.getElementById(`${type}-status`);
     const fileSize = result.file_size ? ` (${formatFileSize(result.file_size)})` : '';
     status.innerHTML = `
-        <div class="status-content">
+        <div class="status-content" style="width: 100%;">
             <i class="fas fa-check-circle status-icon success"></i>
-            <div class="status-text">
+            <div class="status-text" style="flex: 1;">
                 <div class="status-title">上傳成功</div>
                 <div class="status-details">${result.rows} 行數據，${result.columns.length} 個欄位${fileSize}</div>
             </div>
+            <button class="btn-delete-upload" onclick="resetUpload('${type}')" title="刪除並重新上傳">
+                <i class="fas fa-trash-alt"></i>
+            </button>
         </div>
     `;
 }
@@ -647,6 +664,159 @@ function formatFileSize(bytes) {
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// 重置上傳狀態（刪除已上傳的文件，允許重新上傳）
+async function resetUpload(type) {
+    const uploadBox = document.getElementById(`${type}-upload-box`);
+    const status = document.getElementById(`${type}-status`);
+    const fileInput = document.getElementById(`${type}-file`);
+
+    // 呼叫後端 API 刪除伺服器上的檔案
+    try {
+        const response = await fetch('/api/delete_upload', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                type: type,
+                upload_session_id: uploadSessionId
+            })
+        });
+
+        const result = await response.json();
+        if (!result.success) {
+            console.error('刪除檔案失敗:', result.message);
+        } else {
+            console.log('伺服器檔案已刪除:', result.deleted_files);
+        }
+    } catch (error) {
+        console.error('刪除檔案請求失敗:', error);
+    }
+
+    // 重置 UI
+    uploadBox.style.display = 'block';
+    status.style.display = 'none';
+
+    // 清空文件輸入
+    if (fileInput) {
+        fileInput.value = '';
+    }
+
+    // 重置上傳狀態
+    uploadedFiles[type] = false;
+    uploadedFileInfo[type] = null;
+
+    // 更新檢查清單和下一步按鈕
+    checkUploadComplete();
+
+    showNotification(`已刪除${type === 'erp' ? 'ERP淨需求' : type === 'forecast' ? 'Forecast' : '在途'}文件，請重新上傳`, 'info');
+}
+
+// 刪除單一 Forecast 檔案
+async function deleteSingleForecastFile(savedName, index) {
+    try {
+        const response = await fetch('/api/delete_upload', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                type: 'forecast',
+                upload_session_id: uploadSessionId,
+                filename: savedName
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            console.log('單檔刪除成功:', savedName);
+
+            // 從 UI 中移除該檔案項目
+            const fileItem = document.getElementById(`forecast-file-${index}`);
+            if (fileItem) {
+                fileItem.remove();
+            }
+
+            // 更新 forecastFilesInfo
+            if (window.forecastFilesInfo) {
+                window.forecastFilesInfo = window.forecastFilesInfo.filter((_, i) => i !== index);
+            }
+
+            // 檢查是否還有剩餘檔案
+            if (result.remaining_count === 0) {
+                // 沒有剩餘檔案，重置整個 forecast 上傳狀態
+                resetUpload('forecast');
+                showNotification('所有 Forecast 檔案已刪除，請重新上傳', 'info');
+            } else {
+                // 更新檔案數量顯示
+                updateForecastFileCount(result.remaining_count);
+
+                // 更新在途提醒
+                updateTransitAlert(result.transit_check);
+
+                showNotification(`已刪除檔案，剩餘 ${result.remaining_count} 個檔案`, 'info');
+            }
+        } else {
+            console.error('單檔刪除失敗:', result.message);
+            showNotification('刪除檔案失敗: ' + result.message, 'error');
+        }
+    } catch (error) {
+        console.error('單檔刪除請求失敗:', error);
+        showNotification('刪除檔案失敗', 'error');
+    }
+}
+
+// 更新 Forecast 檔案數量顯示
+function updateForecastFileCount(count) {
+    const status = document.getElementById('forecast-status');
+    if (!status) return;
+
+    // 更新標題中的檔案數量
+    const detailsDiv = status.querySelector('.status-details');
+    if (detailsDiv) {
+        const strongEl = detailsDiv.querySelector('strong');
+        if (strongEl) {
+            strongEl.textContent = `${count} 個檔案`;
+        }
+    }
+}
+
+// 更新在途提醒
+function updateTransitAlert(transitCheck) {
+    const status = document.getElementById('forecast-status');
+    if (!status) return;
+
+    // 移除現有的在途提醒
+    const existingAlert = status.querySelector('.transit-alert');
+    if (existingAlert) {
+        existingAlert.remove();
+    }
+
+    // 如果有新的在途提醒，加入
+    if (transitCheck && transitCheck.message) {
+        let alertClass = 'info';
+        let alertIcon = 'info-circle';
+
+        if (transitCheck.has_transit_requirement) {
+            alertClass = 'warning';
+            alertIcon = 'exclamation-triangle';
+        }
+
+        const alertHtml = `
+            <div class="transit-alert ${alertClass}">
+                <i class="fas fa-${alertIcon}"></i>
+                <span>${transitCheck.message}</span>
+            </div>
+        `;
+
+        // 找到 status-content 並在最後加入提醒
+        const statusContent = status.querySelector('.status-content');
+        if (statusContent) {
+            statusContent.insertAdjacentHTML('beforeend', alertHtml);
+        }
+    }
 }
 
 // 顯示錯誤

@@ -836,6 +836,63 @@ body {
     font-size: 0.9rem;
 }
 
+/* 刪除上傳按鈕 */
+.btn-delete-upload {
+    background: transparent;
+    border: 1px solid #dc3545;
+    color: #dc3545;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.btn-delete-upload:hover {
+    background: #dc3545;
+    color: white;
+}
+
+.btn-delete-upload i {
+    font-size: 14px;
+}
+
+/* 單檔刪除按鈕 */
+.btn-delete-single-file {
+    background: transparent;
+    border: none;
+    color: #dc3545;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+    margin-left: auto;
+    padding: 0;
+}
+
+.btn-delete-single-file:hover {
+    background: #fee2e2;
+    color: #b02a37;
+}
+
+.btn-delete-single-file i {
+    font-size: 12px;
+}
+
+.multi-file-details .file-item {
+    display: flex;
+    align-items: center;
+}
+
 /* 按鈕樣式 */
 .btn {
     display: inline-flex;
