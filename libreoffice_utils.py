@@ -408,12 +408,14 @@ def merge_excel_files_libreoffice(file_paths, output_path, skip_header=True):
             src_ws = src_wb.active
 
             # 找到目標工作表的下一個空白行
-            dest_row = base_ws.max_row + 1
+            dest_start_row = base_ws.max_row + 1
 
             # 複製資料（跳過標題行）
             start_row = 2 if skip_header else 1
             rows_copied = 0
+            row_offset = dest_start_row - start_row  # 計算行偏移量
 
+            dest_row = dest_start_row
             for row_idx in range(start_row, src_ws.max_row + 1):
                 for col_idx in range(1, src_ws.max_column + 1):
                     src_cell = src_ws.cell(row=row_idx, column=col_idx)
@@ -432,8 +434,20 @@ def merge_excel_files_libreoffice(file_paths, output_path, skip_header=True):
                 dest_row += 1
                 rows_copied += 1
 
+            # 複製合併儲存格
+            from openpyxl.utils import get_column_letter
+            merged_count = 0
+            for merged_range in src_ws.merged_cells.ranges:
+                # 只複製在複製範圍內的合併儲存格
+                if merged_range.min_row >= start_row:
+                    new_min_row = merged_range.min_row + row_offset
+                    new_max_row = merged_range.max_row + row_offset
+                    new_range = f"{get_column_letter(merged_range.min_col)}{new_min_row}:{get_column_letter(merged_range.max_col)}{new_max_row}"
+                    base_ws.merge_cells(new_range)
+                    merged_count += 1
+
             src_wb.close()
-            print(f"    合併檔案 {i} 完成（{rows_copied} 行）")
+            print(f"    合併檔案 {i} 完成（{rows_copied} 行，{merged_count} 個合併儲存格）")
 
         # 保存合併後的 xlsx
         merged_xlsx = os.path.join(temp_dir, 'merged.xlsx')
