@@ -214,7 +214,7 @@ def get_template_columns(template_type, username=None):
 def validate_erp_format(uploaded_file_path, username=None):
     """
     驗證 ERP 文件格式
-    必須欄位名稱和順序完全一致
+    只檢查必要欄位名稱是否存在（不卡控欄位數量和順序）
     username: 用戶名稱，用於指定客戶專屬模板目錄
     """
     try:
@@ -227,32 +227,25 @@ def validate_erp_format(uploaded_file_path, username=None):
         uploaded_df = pd.read_excel(uploaded_file_path, nrows=1)
         uploaded_columns = list(uploaded_df.columns)
 
-        # 檢查欄位數量
-        if len(uploaded_columns) != len(template_columns):
-            return False, f'欄位數量不符：預期 {len(template_columns)} 個欄位，實際 {len(uploaded_columns)} 個欄位', []
+        # 標準化欄位名稱（去除空白和換行符）
+        template_columns_clean = [str(col).strip().replace('\n', '') for col in template_columns]
+        uploaded_columns_clean = [str(col).strip().replace('\n', '') for col in uploaded_columns]
 
-        # 檢查欄位名稱和順序
-        mismatched = []
-        for i, (template_col, uploaded_col) in enumerate(zip(template_columns, uploaded_columns)):
-            # 標準化比較（去除空白和換行符）
-            template_clean = str(template_col).strip().replace('\n', '')
-            uploaded_clean = str(uploaded_col).strip().replace('\n', '')
-            if template_clean != uploaded_clean:
-                mismatched.append({
-                    'index': i,
-                    'expected': template_clean,
-                    'actual': uploaded_clean
-                })
+        # 檢查必要欄位是否存在（不卡控順序和數量）
+        missing_columns = []
+        for template_col in template_columns_clean:
+            if template_col not in uploaded_columns_clean:
+                missing_columns.append(template_col)
 
-        if mismatched:
+        if missing_columns:
             error_details = []
-            for m in mismatched[:5]:  # 最多顯示5個錯誤
-                error_details.append(f"欄位 {m['index']+1}: 預期「{m['expected']}」，實際「{m['actual']}」")
+            for col in missing_columns[:5]:  # 最多顯示5個錯誤
+                error_details.append(f"缺少欄位：「{col}」")
 
-            if len(mismatched) > 5:
-                error_details.append(f"...還有 {len(mismatched)-5} 個欄位不符")
+            if len(missing_columns) > 5:
+                error_details.append(f"...還有 {len(missing_columns)-5} 個欄位缺少")
 
-            return False, '欄位名稱或順序不符', error_details
+            return False, '缺少必要欄位', error_details
 
         return True, 'ERP 文件格式驗證通過', []
 
@@ -262,7 +255,7 @@ def validate_erp_format(uploaded_file_path, username=None):
 def validate_transit_format(uploaded_file_path, username=None):
     """
     驗證在途文件格式
-    必須欄位名稱和順序完全一致
+    只檢查必要欄位名稱是否存在（不卡控欄位數量和順序）
     username: 用戶名稱，用於指定客戶專屬模板目錄
     """
     try:
@@ -275,32 +268,25 @@ def validate_transit_format(uploaded_file_path, username=None):
         uploaded_df = pd.read_excel(uploaded_file_path, nrows=1)
         uploaded_columns = list(uploaded_df.columns)
 
-        # 檢查欄位數量
-        if len(uploaded_columns) != len(template_columns):
-            return False, f'欄位數量不符：預期 {len(template_columns)} 個欄位，實際 {len(uploaded_columns)} 個欄位', []
+        # 標準化欄位名稱（去除空白和換行符）
+        template_columns_clean = [str(col).strip().replace('\n', '') for col in template_columns]
+        uploaded_columns_clean = [str(col).strip().replace('\n', '') for col in uploaded_columns]
 
-        # 檢查欄位名稱和順序
-        mismatched = []
-        for i, (template_col, uploaded_col) in enumerate(zip(template_columns, uploaded_columns)):
-            # 標準化比較（去除空白和換行符）
-            template_clean = str(template_col).strip().replace('\n', '')
-            uploaded_clean = str(uploaded_col).strip().replace('\n', '')
-            if template_clean != uploaded_clean:
-                mismatched.append({
-                    'index': i,
-                    'expected': template_clean,
-                    'actual': uploaded_clean
-                })
+        # 檢查必要欄位是否存在（不卡控順序和數量）
+        missing_columns = []
+        for template_col in template_columns_clean:
+            if template_col not in uploaded_columns_clean:
+                missing_columns.append(template_col)
 
-        if mismatched:
+        if missing_columns:
             error_details = []
-            for m in mismatched[:5]:  # 最多顯示5個錯誤
-                error_details.append(f"欄位 {m['index']+1}: 預期「{m['expected']}」，實際「{m['actual']}」")
+            for col in missing_columns[:5]:  # 最多顯示5個錯誤
+                error_details.append(f"缺少欄位：「{col}」")
 
-            if len(mismatched) > 5:
-                error_details.append(f"...還有 {len(mismatched)-5} 個欄位不符")
+            if len(missing_columns) > 5:
+                error_details.append(f"...還有 {len(missing_columns)-5} 個欄位缺少")
 
-            return False, '欄位名稱或順序不符', error_details
+            return False, '缺少必要欄位', error_details
 
         return True, '在途文件格式驗證通過', []
 
