@@ -4654,6 +4654,7 @@ def api_get_login_customers():
     try:
         users = get_users_with_company()
         # 只返回必要的資訊：username（用於登入）、display_name（顯示名稱）、company（公司）
+        # 一般使用者登入只顯示和碩（pegatron）
         customer_list = [
             {
                 'username': u['username'],
@@ -4661,6 +4662,7 @@ def api_get_login_customers():
                 'company': u['company'] or u['display_name']
             }
             for u in users
+            if u['username'].lower() == 'pegatron'
         ]
         return jsonify({'success': True, 'customers': customer_list})
     except Exception as e:
