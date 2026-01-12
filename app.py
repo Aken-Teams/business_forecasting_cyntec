@@ -2481,6 +2481,7 @@ def process_erp_mapping():
         # 獲取在途文件是否必填的參數（預設為必填）
         transit_required = data.get('transit_required', True)
         print(f"📋 Transit Required: {transit_required}")
+        print(f"🔍 /process_erp_mapping: test_mode={test_mode}, test_customer_id={test_customer_id}")
 
         # 獲取前端傳來的 upload_session_id
         upload_session_id = data.get('upload_session_id')
@@ -2597,7 +2598,16 @@ def process_erp_mapping():
             return jsonify({'success': False, 'message': 'ERP文件找不到客戶簡稱欄位'})
 
         # 判斷是否為 pegatron 用戶（使用不同的映射邏輯）
-        is_pegatron = user['username'].lower() == 'pegatron'
+        # IT 測試模式下，根據目標客戶 ID 判斷
+        if test_mode and test_customer_id:
+            # 查詢目標客戶的 username
+            from database import get_user_by_id
+            target_user = get_user_by_id(test_customer_id)
+            is_pegatron = target_user and target_user.get('username', '').lower() == 'pegatron'
+            print(f"🔍 IT測試模式: test_customer_id={test_customer_id}, target_user={target_user}, is_pegatron={is_pegatron}")
+        else:
+            is_pegatron = user['username'].lower() == 'pegatron'
+            print(f"🔍 一般模式: user={user['username']}, is_pegatron={is_pegatron}")
 
         if is_pegatron:
             # === Pegatron 專用映射邏輯 ===
@@ -4359,21 +4369,68 @@ def api_run_test():
                 'eta': mapping_data.get('eta', {}).get(cust, '')
             }
 
-        # 動態查找 Transit 客戶欄位
-        transit_customer_col, _ = find_column_by_name(transit_df, ['客戶', '簡稱'], required=False)
-        if transit_customer_col:
-            transit_df['客戶需求地區'] = transit_df[transit_customer_col].apply(
-                lambda x: mapping_dict.get(str(x), {}).get('region', '') if pd.notna(x) else ''
-            )
-            transit_df['排程出貨日期斷點'] = transit_df[transit_customer_col].apply(
-                lambda x: mapping_dict.get(str(x), {}).get('schedule_breakpoint', '') if pd.notna(x) else ''
-            )
-            transit_df['ETD'] = transit_df[transit_customer_col].apply(
-                lambda x: mapping_dict.get(str(x), {}).get('etd', '') if pd.notna(x) else ''
-            )
-            transit_df['ETA_mapping'] = transit_df[transit_customer_col].apply(
-                lambda x: mapping_dict.get(str(x), {}).get('eta', '') if pd.notna(x) else ''
-            )
+        # 判斷是否為 Pegatron（檢查是否有 Line 客戶採購單號 欄位）
+        is_pegatron_transit = False
+        transit_line_po_col, _ = find_column_by_name(transit_df, 'Line 客戶採購單號', required=False)
+        transit_ordered_item_col, _ = find_column_by_name(transit_df, 'Ordered Item', required=False)
+
+        if transit_line_po_col and transit_ordered_item_col:
+            # Pegatron Transit 映射邏輯：用 Line 客戶採購單號 + Ordered Item 匹配 ERP
+            is_pegatron_transit = True
+            print(f"🔧 IT測試: 使用 Pegatron Transit 映射邏輯")
+
+            # 動態查找 ERP 欄位
+            erp_line_po_col, _ = find_column_by_name(erp_df, 'Line 客戶採購單號', required=False)
+            erp_pn_col, _ = find_column_by_name(erp_df, '客戶料號', required=False)
+
+            if erp_line_po_col and erp_pn_col:
+                # 建立 ERP lookup
+                erp_lookup = {}
+                for idx, row in erp_df.iterrows():
+                    line_po = str(row[erp_line_po_col]).strip() if pd.notna(row[erp_line_po_col]) else ''
+                    pn = str(row[erp_pn_col]).strip() if pd.notna(row[erp_pn_col]) else ''
+                    if line_po and pn:
+                        key = (line_po, pn)
+                        if key not in erp_lookup:
+                            erp_lookup[key] = {
+                                'region': str(row.get('客戶需求地區', '')).strip() if pd.notna(row.get('客戶需求地區', '')) else '',
+                                'schedule_breakpoint': str(row.get('排程出貨日期斷點', '')).strip() if pd.notna(row.get('排程出貨日期斷點', '')) else '',
+                                'etd': str(row.get('ETD', '')).strip() if pd.notna(row.get('ETD', '')) else '',
+                                'eta': str(row.get('ETA', '')).strip() if pd.notna(row.get('ETA', '')) else ''
+                            }
+
+                # 應用 Transit 映射
+                def get_pegatron_transit_mapping(row, field):
+                    line_po = str(row[transit_line_po_col]).strip() if pd.notna(row[transit_line_po_col]) else ''
+                    ordered_item = str(row[transit_ordered_item_col]).strip() if pd.notna(row[transit_ordered_item_col]) else ''
+                    key = (line_po, ordered_item)
+                    mapping = erp_lookup.get(key, {})
+                    return mapping.get(field, '')
+
+                transit_df['客戶需求地區'] = transit_df.apply(lambda row: get_pegatron_transit_mapping(row, 'region'), axis=1)
+                transit_df['排程出貨日期斷點'] = transit_df.apply(lambda row: get_pegatron_transit_mapping(row, 'schedule_breakpoint'), axis=1)
+                transit_df['ETD'] = transit_df.apply(lambda row: get_pegatron_transit_mapping(row, 'etd'), axis=1)
+                transit_df['ETA_mapping'] = transit_df.apply(lambda row: get_pegatron_transit_mapping(row, 'eta'), axis=1)
+
+        if not is_pegatron_transit:
+            # Quanta 等其他客戶：用客戶簡稱映射
+            transit_customer_col, _ = find_column_by_name(transit_df, ['客戶', '簡稱'], required=False)
+            if transit_customer_col:
+                print(f"🔧 IT測試: 使用 Quanta Transit 映射邏輯")
+                transit_df['客戶需求地區'] = transit_df[transit_customer_col].apply(
+                    lambda x: mapping_dict.get(str(x), {}).get('region', '') if pd.notna(x) else ''
+                )
+                transit_df['排程出貨日期斷點'] = transit_df[transit_customer_col].apply(
+                    lambda x: mapping_dict.get(str(x), {}).get('schedule_breakpoint', '') if pd.notna(x) else ''
+                )
+                transit_df['ETD'] = transit_df[transit_customer_col].apply(
+                    lambda x: mapping_dict.get(str(x), {}).get('etd', '') if pd.notna(x) else ''
+                )
+                transit_df['ETA_mapping'] = transit_df[transit_customer_col].apply(
+                    lambda x: mapping_dict.get(str(x), {}).get('eta', '') if pd.notna(x) else ''
+                )
+            else:
+                print(f"⚠️ IT測試: Transit 找不到可用的映射欄位")
 
         integrated_transit_file = os.path.join(processed_folder, 'integrated_transit.xlsx')
         transit_df.to_excel(integrated_transit_file, index=False)
