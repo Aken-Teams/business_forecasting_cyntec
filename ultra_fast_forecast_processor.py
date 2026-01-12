@@ -64,15 +64,52 @@ class UltraFastForecastProcessor:
                     self.transit_df = pd.read_excel(self.transit_file)
                     print(f"✅ Transit文件: {len(self.transit_df)} 行, {len(self.transit_df.columns)} 欄")
 
-                    # 建立Transit索引：M欄位(索引12) + F欄位(索引5)
+                    # 動態查找 Transit 關鍵欄位
                     if len(self.transit_df.columns) >= 13:
-                        print(f"🔍 Transit欄位調試:")
-                        print(f"   F欄位名稱(索引5): {self.transit_df.columns[5]}")
-                        print(f"   H欄位名稱(索引7): {self.transit_df.columns[7]}")
-                        print(f"   I欄位名稱(索引8): {self.transit_df.columns[8]}")
-                        print(f"   M欄位名稱(索引12): {self.transit_df.columns[12]}")
+                        # 查找「客戶需求地區」欄位
+                        region_col = None
+                        for col in self.transit_df.columns:
+                            if '客戶需求地區' in str(col) or '需求地區' in str(col):
+                                region_col = col
+                                break
 
-                        self.transit_df['match_key'] = self.transit_df.iloc[:, 12].astype(str) + '_' + self.transit_df.iloc[:, 5].astype(str)
+                        # 查找「Ordered Item」欄位
+                        ordered_item_col = None
+                        for col in self.transit_df.columns:
+                            if 'Ordered Item' in str(col) or 'ordered item' in str(col).lower():
+                                ordered_item_col = col
+                                break
+
+                        print(f"🔍 Transit欄位調試:")
+                        print(f"   客戶需求地區欄位: {region_col}")
+                        print(f"   Ordered Item欄位: {ordered_item_col}")
+
+                        # 查找「Qty」欄位
+                        qty_col = None
+                        for col in self.transit_df.columns:
+                            if col == 'Qty' or 'qty' in str(col).lower():
+                                qty_col = col
+                                break
+
+                        # 查找「ETA」欄位（原始的 ETA，不是 ETA_mapping）
+                        eta_col = None
+                        for col in self.transit_df.columns:
+                            if col == 'ETA':  # 精確匹配，避免匹配到 ETA_mapping
+                                eta_col = col
+                                break
+
+                        print(f"   Qty欄位: {qty_col}")
+                        print(f"   ETA欄位: {eta_col}")
+
+                        # 儲存欄位名稱供後續使用
+                        self.transit_qty_col = qty_col
+                        self.transit_eta_col = eta_col
+
+                        if region_col and ordered_item_col:
+                            self.transit_df['match_key'] = self.transit_df[region_col].astype(str) + '_' + self.transit_df[ordered_item_col].astype(str)
+                        else:
+                            print(f"⚠️ 找不到必要欄位，嘗試使用舊索引方式")
+                            self.transit_df['match_key'] = self.transit_df.iloc[:, 12].astype(str) + '_' + self.transit_df.iloc[:, 5].astype(str)
 
                         # 保存原始行索引，以便後續更新 transit_df 的已分配狀態
                         self.transit_df['_original_idx'] = self.transit_df.index
@@ -614,17 +651,22 @@ class UltraFastForecastProcessor:
                         skipped_count += 1
                         continue
 
-                    # 獲取 H 欄位數據（索引7）和 I 欄位 ETA（索引8）
-                    h_value = transit_record.iloc[7] if len(transit_record) > 7 else None
-                    eta_value = transit_record.iloc[8] if len(transit_record) > 8 else None
+                    # 動態獲取 Qty 和 ETA 欄位數據
+                    if hasattr(self, 'transit_qty_col') and self.transit_qty_col:
+                        h_value = transit_record.get(self.transit_qty_col)
+                    else:
+                        h_value = transit_record.iloc[7] if len(transit_record) > 7 else None
+
+                    if hasattr(self, 'transit_eta_col') and self.transit_eta_col:
+                        eta_value = transit_record.get(self.transit_eta_col)
+                    else:
+                        eta_value = transit_record.iloc[8] if len(transit_record) > 8 else None
 
                     # 調試信息
                     if filled_count == 0 and skipped_count == 0:
                         print(f"    🔍 Transit記錄調試:")
-                        print(f"       M欄位(12): {transit_record.iloc[12] if len(transit_record) > 12 else 'N/A'}")
-                        print(f"       F欄位(5): {transit_record.iloc[5] if len(transit_record) > 5 else 'N/A'}")
-                        print(f"       H欄位(7): {h_value}")
-                        print(f"       I欄位(8): {eta_value}")
+                        print(f"       Qty欄位: {h_value}")
+                        print(f"       ETA欄位: {eta_value}")
 
                     if pd.isna(h_value) or pd.isna(eta_value) or h_value == 0:
                         skipped_count += 1

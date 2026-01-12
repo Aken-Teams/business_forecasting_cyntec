@@ -211,6 +211,35 @@ def get_template_columns(template_type, username=None):
     except Exception as e:
         return None, f'讀取範本文件失敗: {str(e)}'
 
+def find_column_by_name(df, patterns, required=True):
+    """
+    根據欄位名稱模式動態查找 DataFrame 欄位
+
+    參數:
+        df: pandas DataFrame
+        patterns: str 或 list[str]，欄位名稱模式（多個模式為 AND 邏輯）
+        required: bool，是否為必填欄位
+
+    返回:
+        tuple: (欄位名稱, 錯誤訊息)
+    """
+    if isinstance(patterns, str):
+        patterns = [patterns]
+
+    patterns_clean = [str(p).strip().replace('\n', '') for p in patterns]
+
+    for col in df.columns:
+        col_clean = str(col).strip().replace('\n', '')
+        if all(pattern in col_clean for pattern in patterns_clean):
+            return col, None
+
+    if required:
+        if len(patterns) == 1:
+            return None, f"找不到欄位：「{patterns[0]}」"
+        else:
+            return None, f"找不到包含「{'」和「'.join(patterns)}」的欄位"
+    return None, None
+
 def validate_erp_format(uploaded_file_path, username=None):
     """
     驗證 ERP 文件格式
@@ -2607,19 +2636,14 @@ def process_erp_mapping():
 
             print(f"   建立 {len(pegatron_mapping_lookup)} 筆完整匹配 + {len(pegatron_mapping_lookup_simple)} 筆簡化匹配")
 
-            # 找到必要欄位
-            # D欄(索引3): 客戶簡稱 - 已找到
-            # M欄(索引12): Line 客戶採購單號
-            # AG欄(索引32): 送貨地點
-            line_po_col = erp_df.columns[12] if len(erp_df.columns) > 12 else None
-            delivery_col = erp_df.columns[32] if len(erp_df.columns) > 32 else None
+            # 動態查找必要欄位
+            line_po_col, err = find_column_by_name(erp_df, 'Line 客戶採購單號')
+            if err:
+                return jsonify({'success': False, 'message': f'Pegatron ERP {err}'})
 
-            print(f"   客戶簡稱欄位: {customer_col}")
-            print(f"   Line 客戶採購單號欄位: {line_po_col}")
-            print(f"   送貨地點欄位: {delivery_col}")
-
-            if not line_po_col or not delivery_col:
-                return jsonify({'success': False, 'message': 'Pegatron ERP文件欄位不足，需要 M 欄和 AG 欄'})
+            delivery_col, err = find_column_by_name(erp_df, '送貨地點')
+            if err:
+                return jsonify({'success': False, 'message': f'Pegatron ERP {err}'})
 
             # 應用 Pegatron 映射
             def get_pegatron_mapping(row, field):
@@ -2684,29 +2708,29 @@ def process_erp_mapping():
             # Transit 匹配規則: L欄(Line 客戶採購單號) + E欄(Ordered Item) 匹配 ERP 的 M欄 + N欄
             print("🔧 使用 Pegatron 專用 Transit 映射邏輯...")
 
-            # 找到 Transit 必要欄位
-            # E欄(索引4): Ordered Item
-            # L欄(索引11): Line 客戶採購單號
-            transit_ordered_item_col = transit_df.columns[4] if len(transit_df.columns) > 4 else None
-            transit_line_po_col = transit_df.columns[11] if len(transit_df.columns) > 11 else None
+            # 動態查找 Transit 必要欄位
+            transit_ordered_item_col, err = find_column_by_name(transit_df, 'Ordered Item')
+            if err:
+                return jsonify({'success': False, 'message': f'Pegatron Transit {err}'})
+
+            transit_line_po_col, err = find_column_by_name(transit_df, 'Line 客戶採購單號')
+            if err:
+                return jsonify({'success': False, 'message': f'Pegatron Transit {err}'})
 
             print(f"   Transit Ordered Item 欄位: {transit_ordered_item_col}")
             print(f"   Transit Line 客戶採購單號欄位: {transit_line_po_col}")
 
-            # ERP 欄位
-            # M欄(索引12): Line 客戶採購單號
-            # N欄(索引13): 客戶料號
-            erp_line_po_col = erp_df.columns[12] if len(erp_df.columns) > 12 else None
-            erp_pn_col = erp_df.columns[13] if len(erp_df.columns) > 13 else None
+            # 動態查找 ERP 欄位（用於 Transit 匹配）
+            erp_line_po_col, err = find_column_by_name(erp_df, 'Line 客戶採購單號')
+            if err:
+                return jsonify({'success': False, 'message': f'ERP {err}'})
+
+            erp_pn_col, err = find_column_by_name(erp_df, '客戶料號')
+            if err:
+                return jsonify({'success': False, 'message': f'ERP {err}'})
 
             print(f"   ERP Line 客戶採購單號欄位: {erp_line_po_col}")
             print(f"   ERP 客戶料號欄位: {erp_pn_col}")
-
-            if not transit_ordered_item_col or not transit_line_po_col:
-                return jsonify({'success': False, 'message': 'Pegatron Transit 文件欄位不足，需要 E 欄和 L 欄'})
-
-            if not erp_line_po_col or not erp_pn_col:
-                return jsonify({'success': False, 'message': 'Pegatron ERP 文件欄位不足，需要 M 欄和 N 欄'})
 
             # 建立 ERP lookup: (Line 客戶採購單號, 客戶料號) -> mapping values
             erp_lookup = {}
@@ -2779,12 +2803,15 @@ def process_erp_mapping():
                 # 向後相容：從 Excel 讀取 mapping
                 mapping_excel_df = pd.read_excel(mapping_excel_file)
 
-                # mapping 表的欄位結構
-                mapping_customer_col = mapping_excel_df.columns[0]  # A欄位
-                mapping_region_col = mapping_excel_df.columns[1] if len(mapping_excel_df.columns) > 1 else None
-                mapping_schedule_col = mapping_excel_df.columns[3] if len(mapping_excel_df.columns) > 3 else None
-                mapping_etd_col = mapping_excel_df.columns[4] if len(mapping_excel_df.columns) > 4 else None
-                mapping_eta_col = mapping_excel_df.columns[5] if len(mapping_excel_df.columns) > 5 else None
+                # 動態查找 Mapping 表欄位
+                mapping_customer_col, err = find_column_by_name(mapping_excel_df, ['客戶', '簡稱'])
+                if err:
+                    return jsonify({'success': False, 'message': f'Mapping 表 {err}'})
+
+                mapping_region_col, _ = find_column_by_name(mapping_excel_df, '地區', required=False)
+                mapping_schedule_col, _ = find_column_by_name(mapping_excel_df, '斷點', required=False)
+                mapping_etd_col, _ = find_column_by_name(mapping_excel_df, 'ETD', required=False)
+                mapping_eta_col, _ = find_column_by_name(mapping_excel_df, 'ETA', required=False)
 
                 for idx, row in mapping_excel_df.iterrows():
                     customer = str(row[mapping_customer_col])
@@ -2796,12 +2823,11 @@ def process_erp_mapping():
                     }
                 print(f"從 Excel 建立 mapping 字典，共 {len(mapping_dict)} 個客戶")
 
-            # transit_data 的 E 欄位（索引4）與 mapping 表 A 欄位比對
-            if len(transit_df.columns) < 5:
-                return jsonify({'success': False, 'message': '在途文件欄位不足，需要至少 E 欄位'})
-
-            transit_customer_col = transit_df.columns[4]  # E欄位
-            print(f"在途文件 E 欄位名稱: {transit_customer_col}")
+            # 動態查找 Transit 客戶欄位
+            transit_customer_col, err = find_column_by_name(transit_df, ['客戶', '簡稱'])
+            if err:
+                return jsonify({'success': False, 'message': f'在途文件 {err}'})
+            print(f"在途文件客戶簡稱欄位: {transit_customer_col}")
 
             # 新版在途文件結構（12欄位）：
             # 索引0-11: Tw, Ship Number, Invoice Date, Location, 客戶簡稱, Ordered Item, Pj Item, Qty, ETA, Stauts, 集團客戶, 週別
@@ -4333,8 +4359,9 @@ def api_run_test():
                 'eta': mapping_data.get('eta', {}).get(cust, '')
             }
 
-        if len(transit_df.columns) >= 5:
-            transit_customer_col = transit_df.columns[4]
+        # 動態查找 Transit 客戶欄位
+        transit_customer_col, _ = find_column_by_name(transit_df, ['客戶', '簡稱'], required=False)
+        if transit_customer_col:
             transit_df['客戶需求地區'] = transit_df[transit_customer_col].apply(
                 lambda x: mapping_dict.get(str(x), {}).get('region', '') if pd.notna(x) else ''
             )
