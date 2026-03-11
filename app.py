@@ -202,7 +202,9 @@ def get_template_columns(template_type, username=None):
 
         if template_type == 'forecast':
             # Forecast 使用 header=None 讀取原始結構
-            df = pd.read_excel(template_file, nrows=20, header=None)
+            # 光寶：只讀取 Daily+Weekly+Monthly sheet
+            sheet_name = 'Daily+Weekly+Monthly' if username and username.lower() == 'liteon' else 0
+            df = pd.read_excel(template_file, nrows=20, header=None, sheet_name=sheet_name)
             return df, None
         else:
             # ERP 和 Transit 讀取欄位名稱
@@ -335,15 +337,18 @@ def validate_forecast_format(uploaded_file_path, username=None):
             return False, error, []
 
         # 讀取上傳的文件（不使用 header）
-        uploaded_df = pd.read_excel(uploaded_file_path, nrows=20, header=None)
+        # 光寶：只讀取 Daily+Weekly+Monthly sheet
+        forecast_sheet = 'Daily+Weekly+Monthly' if username and username.lower() == 'liteon' else 0
+        uploaded_df = pd.read_excel(uploaded_file_path, nrows=20, header=None, sheet_name=forecast_sheet)
 
         # 只檢查欄位數量是否一致（不比對資料內容，因為資料會變動）
         if len(uploaded_df.columns) != len(template_df.columns):
             return False, f'欄位數量不符：預期 {len(template_df.columns)} 個欄位，實際 {len(uploaded_df.columns)} 個欄位', []
 
-        # 檢查列數是否足夠（至少要有基本的資料結構）
-        if len(uploaded_df) < 4:
-            return False, f'資料列數不足：至少需要 4 列，實際只有 {len(uploaded_df)} 列', []
+        # 檢查列數是否足夠（至少要與範本列數一致）
+        min_rows = len(template_df)
+        if len(uploaded_df) < min_rows:
+            return False, f'資料列數不足：至少需要 {min_rows} 列，實際只有 {len(uploaded_df)} 列', []
 
         return True, 'Forecast 文件格式驗證通過', []
 
@@ -4653,8 +4658,11 @@ def api_get_login_customers():
     """取得登入頁面的客戶選項列表（公開 API，不需登入）"""
     try:
         users = get_users_with_company()
-        # 只返回必要的資訊：username（用於登入）、display_name（顯示名稱）、company（公司）
-        # 一般使用者登入只顯示和碩（pegatron）
+
+        # 從環境變數讀取允許的客戶清單（逗號分隔，空白=全部顯示）
+        allowed = os.environ.get('LOGIN_ALLOWED_CUSTOMERS', '').strip()
+        allowed_list = [name.strip().lower() for name in allowed.split(',') if name.strip()] if allowed else []
+
         customer_list = [
             {
                 'username': u['username'],
@@ -4662,7 +4670,7 @@ def api_get_login_customers():
                 'company': u['company'] or u['display_name']
             }
             for u in users
-            if u['username'].lower() == 'pegatron'
+            if not allowed_list or u['username'].lower() in allowed_list
         ]
         return jsonify({'success': True, 'customers': customer_list})
     except Exception as e:
