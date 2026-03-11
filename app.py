@@ -328,18 +328,51 @@ def validate_forecast_format(uploaded_file_path, username=None):
     """
     驗證 Forecast 文件格式
     只檢查欄位數量是否與範本一致（不比對具體數據內容，因為資料會變動）
+    光寶：只驗證 Daily+Weekly+Monthly sheet 是否存在且有資料（欄位數會隨日期變動）
     username: 用戶名稱，用於指定客戶專屬模板目錄
     """
     try:
+        # 光寶：驗證目標 sheet 是否存在，並比對固定標題欄位
+        if username and username.lower() == 'liteon':
+            target_sheet = 'Daily+Weekly+Monthly'
+            try:
+                uploaded_df = pd.read_excel(uploaded_file_path, nrows=3, header=None, sheet_name=target_sheet)
+            except ValueError:
+                return False, f'找不到工作表「{target_sheet}」', []
+
+            # 比對灰色區塊的固定標題（位置固定不變）
+            expected_labels = {
+                (0, 1): 'Plant:',
+                (0, 3): 'Buyer Code:',
+                (0, 5): 'Released Time:',
+                (1, 1): 'ERP Vendor Code:',
+                (1, 3): 'Report Date:',
+                (1, 5): 'VDS Num:',
+                (2, 1): 'Vendor Name:',
+                (2, 5): 'Version:',
+            }
+            missing_labels = []
+            for (row, col), expected in expected_labels.items():
+                if row < len(uploaded_df) and col < len(uploaded_df.columns):
+                    actual = str(uploaded_df.iloc[row, col]).strip() if pd.notna(uploaded_df.iloc[row, col]) else ''
+                    if actual != expected:
+                        missing_labels.append(f'({row+1},{col+1}) 預期「{expected}」，實際「{actual}」')
+                else:
+                    missing_labels.append(f'({row+1},{col+1}) 缺少「{expected}」')
+
+            if missing_labels:
+                return False, '標題欄位不符', missing_labels[:5]
+
+            return True, 'Forecast 文件格式驗證通過', []
+
+        # 其他客戶：比對欄位數量
         # 獲取範本結構（根據用戶名稱取得對應模板）
         template_df, error = get_template_columns('forecast', username)
         if error:
             return False, error, []
 
         # 讀取上傳的文件（不使用 header）
-        # 光寶：只讀取 Daily+Weekly+Monthly sheet
-        forecast_sheet = 'Daily+Weekly+Monthly' if username and username.lower() == 'liteon' else 0
-        uploaded_df = pd.read_excel(uploaded_file_path, nrows=20, header=None, sheet_name=forecast_sheet)
+        uploaded_df = pd.read_excel(uploaded_file_path, nrows=20, header=None)
 
         # 只檢查欄位數量是否一致（不比對資料內容，因為資料會變動）
         if len(uploaded_df.columns) != len(template_df.columns):
