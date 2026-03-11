@@ -3242,13 +3242,16 @@ def run_forecast():
                 match = re.search(r'cleaned_forecast_(\d+)\.xlsx?', file_basename)
                 file_num = match.group(1) if match else str(idx)
 
-                # Liteon: 從 Forecast C1 取 Plant code 作為檔名
+                # Liteon: 從 Forecast C1 (Plant) + E1 (Buyer Code) 作為檔名
                 try:
                     _tmp_wb = openpyxl.load_workbook(forecast_file, read_only=True)
                     _tmp_ws = _tmp_wb['Daily+Weekly+Monthly']
                     plant_code = str(_tmp_ws.cell(row=1, column=3).value or '').strip()
+                    buyer_code = str(_tmp_ws.cell(row=1, column=5).value or '').strip()
                     _tmp_wb.close()
-                    if plant_code:
+                    if plant_code and buyer_code:
+                        output_filename = f'forecast_{plant_code}_{buyer_code}.xlsx'
+                    elif plant_code:
                         output_filename = f'forecast_{plant_code}.xlsx'
                     else:
                         output_filename = f'forecast_result_{file_num}.xlsx'

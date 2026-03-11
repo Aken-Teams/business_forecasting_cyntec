@@ -443,7 +443,13 @@ class LiteonForecastProcessor:
         if not date_text:
             return None
 
-        return self._calculate_target_from_text(week_end, date_text)
+        target_date = self._calculate_target_from_text(week_end, date_text)
+
+        # 防護：目標日期不可早於排程出貨日期
+        if target_date is not None and target_date < schedule_date:
+            return None
+
+        return target_date
 
     def _get_week_end_by_breakpoint(self, schedule_date, breakpoint_text):
         """
@@ -508,12 +514,16 @@ class LiteonForecastProcessor:
         if target_weekday is None:
             return None
 
-        # Calculate: from week_end, go forward by weeks_offset weeks,
-        # then find the target weekday
-        base_date = week_end + timedelta(weeks=weeks_offset)
-        base_weekday = base_date.weekday()
-        days_diff = (target_weekday - base_weekday) % 7
-        return base_date + timedelta(days=days_diff)
+        # 以 week_end (斷點日) 為錨點計算
+        # 斷點日是一周的最後一天，目標 weekday 在同一周內（斷點日或之前）
+        # 例: 斷點=週一(0), 目標=週四(3) → days_diff = (3-0)%7 = 3, 3>0 → 3-7 = -4
+        #     表示目標在斷點日的前 4 天
+        breakpoint_weekday = week_end.weekday()
+        days_diff = (target_weekday - breakpoint_weekday) % 7
+        if days_diff > 0:
+            days_diff -= 7  # 目標在斷點日之前（同一周內）
+        # days_diff == 0 表示目標就是斷點日本身
+        return week_end + timedelta(days=7 * weeks_offset + days_diff)
 
     def _apply_changes(self):
         """Apply all pending changes to the worksheet"""
