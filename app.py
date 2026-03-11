@@ -1953,14 +1953,24 @@ def get_mapping_data():
                     elif requires_transit == 0:
                         requires_transit = False
 
-                    mapping_list.append({
+                    item = {
                         'customer_name': row['customer_name'] or '',
                         'region': row['region'] or '',
                         'schedule_breakpoint': row['schedule_breakpoint'] or '',
                         'etd': row['etd'] or '',
                         'eta': row['eta'] or '',
                         'requires_transit': requires_transit
-                    })
+                    }
+                    # 光寶專用欄位（其他客戶這些欄位為 NULL，不影響）
+                    if row.get('order_type'):
+                        item['order_type'] = row['order_type']
+                    if row.get('warehouse'):
+                        item['warehouse'] = row['warehouse']
+                    if row.get('date_calc_type'):
+                        item['date_calc_type'] = row['date_calc_type']
+                    if row.get('delivery_location'):
+                        item['delivery_location'] = row['delivery_location']
+                    mapping_list.append(item)
 
                 return jsonify({
                     'success': True,

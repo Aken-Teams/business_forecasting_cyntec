@@ -44,6 +44,7 @@ const WEEK_OPTIONS = [
     { value: '本週', label: '本週' },
     { value: '下週', label: '下週' },
     { value: '下下週', label: '下下週' },
+    { value: '下下下週', label: '下下下週' },
     { value: '上週', label: '上週' }
 ];
 
@@ -202,10 +203,60 @@ function getCurrentPageData() {
     }));
 }
 
+// 訂單型態選項（光寶專用）
+const ORDER_TYPE_OPTIONS = [
+    { value: '', label: '請選擇' },
+    { value: '11', label: '11' },
+    { value: '32', label: '32' }
+];
+
+// 回覆日期算法選項（光寶專用）
+const DATE_CALC_TYPE_OPTIONS = [
+    { value: '', label: '請選擇' },
+    { value: 'ETD', label: 'ETD' },
+    { value: 'ETA', label: 'ETA' }
+];
+
+// 檢查是否有光寶專屬欄位
+function hasLiteonFields() {
+    return mappingList.some(item =>
+        item.order_type || item.delivery_location || item.warehouse || item.date_calc_type
+    );
+}
+
 // 渲染映射表格（新版列表格式，支援分頁）
 function renderMappingTableList() {
     const tbody = document.getElementById('mapping-tbody');
     tbody.innerHTML = '';
+
+    const showLiteon = hasLiteonFields();
+
+    // 表格加上/移除 liteon-expanded class
+    const table = document.querySelector('.mapping-table');
+    if (table) {
+        table.classList.toggle('liteon-expanded', showLiteon);
+    }
+
+    // 動態更新表頭
+    const theadRow = document.getElementById('mapping-thead-row');
+    if (theadRow) {
+        let headerHTML = '<th style="min-width: 80px;">客戶簡稱</th>';
+        if (showLiteon) {
+            headerHTML += '<th style="min-width: 70px;">訂單型態</th>';
+            headerHTML += '<th style="min-width: 100px;">送貨地點</th>';
+            headerHTML += '<th style="min-width: 100px;">倉庫</th>';
+        }
+        headerHTML += '<th style="min-width: 100px;">客戶需求地區</th>';
+        headerHTML += '<th style="min-width: 110px;">排程出貨日期斷點</th>';
+        headerHTML += '<th style="min-width: 160px;">ETD</th>';
+        headerHTML += '<th style="min-width: 160px;">ETA</th>';
+        if (showLiteon) {
+            headerHTML += '<th style="min-width: 110px;">日期算法</th>';
+        }
+        headerHTML += '<th style="width: 60px;">需在途</th>';
+        headerHTML += '<th style="width: 60px;">操作</th>';
+        theadRow.innerHTML = headerHTML;
+    }
 
     // 取得當前頁的資料
     const pageData = getCurrentPageData();
@@ -219,8 +270,21 @@ function renderMappingTableList() {
         const etdParsed = parseWeekDay(item.etd || '');
         const etaParsed = parseWeekDay(item.eta || '');
 
-        row.innerHTML = `
-            <td><input type="text" data-row="${index}" data-field="customer" placeholder="輸入客戶簡稱" value="${item.customer_name || ''}" class="customer-name-input"></td>
+        let rowHTML = `
+            <td><input type="text" data-row="${index}" data-field="customer" placeholder="輸入客戶簡稱" value="${item.customer_name || ''}" class="customer-name-input"></td>`;
+
+        if (showLiteon) {
+            rowHTML += `
+            <td>
+                <select data-row="${index}" data-field="order_type" class="mapping-select">
+                    ${generateSelectOptions(ORDER_TYPE_OPTIONS, item.order_type || '')}
+                </select>
+            </td>
+            <td><input type="text" data-row="${index}" data-field="delivery_location" placeholder="送貨地點" value="${item.delivery_location || ''}"></td>
+            <td><input type="text" data-row="${index}" data-field="warehouse" placeholder="倉庫" value="${item.warehouse || ''}"></td>`;
+        }
+
+        rowHTML += `
             <td><input type="text" data-row="${index}" data-field="region" placeholder="輸入地區代碼" value="${item.region || ''}"></td>
             <td>
                 <select data-row="${index}" data-field="schedule" class="mapping-select">
@@ -246,7 +310,18 @@ function renderMappingTableList() {
                         ${generateSelectOptions(DAY_OPTIONS, etaParsed.day)}
                     </select>
                 </div>
-            </td>
+            </td>`;
+
+        if (showLiteon) {
+            rowHTML += `
+            <td>
+                <select data-row="${index}" data-field="date_calc_type" class="mapping-select" style="min-width: 90px;">
+                    ${generateSelectOptions(DATE_CALC_TYPE_OPTIONS, item.date_calc_type || '')}
+                </select>
+            </td>`;
+        }
+
+        rowHTML += `
             <td class="toggle-cell">
                 <label class="toggle-switch-mini">
                     <input type="checkbox" data-row="${index}" data-field="requires-transit" ${item.requires_transit !== false ? 'checked' : ''}>
@@ -257,8 +332,9 @@ function renderMappingTableList() {
                 <button class="btn btn-danger btn-sm delete-btn" onclick="deleteCustomerFromList(${index})" title="刪除此記錄">
                     <i class="fas fa-trash"></i>
                 </button>
-            </td>
-        `;
+            </td>`;
+
+        row.innerHTML = rowHTML;
         tbody.appendChild(row);
     });
 
@@ -376,6 +452,17 @@ function saveCurrentPageEdits() {
             mappingList[index].etd = combineWeekDay(etdWeek, etdDay);
             mappingList[index].eta = combineWeekDay(etaWeek, etaDay);
             mappingList[index].requires_transit = requiresTransitCheckbox ? requiresTransitCheckbox.checked : true;
+
+            // 光寶專屬欄位
+            const orderTypeSelect = row.querySelector('select[data-field="order_type"]');
+            const deliveryLocationInput = row.querySelector('input[data-field="delivery_location"]');
+            const warehouseInput = row.querySelector('input[data-field="warehouse"]');
+            const dateCalcTypeSelect = row.querySelector('select[data-field="date_calc_type"]');
+
+            if (orderTypeSelect) mappingList[index].order_type = orderTypeSelect.value;
+            if (deliveryLocationInput) mappingList[index].delivery_location = deliveryLocationInput.value.trim();
+            if (warehouseInput) mappingList[index].warehouse = warehouseInput.value.trim();
+            if (dateCalcTypeSelect) mappingList[index].date_calc_type = dateCalcTypeSelect.value;
         }
     });
 }
@@ -393,14 +480,24 @@ function addNewCustomer() {
     saveCurrentPageEdits();
 
     // 新增一筆空的 mapping 記錄
-    mappingList.push({
+    const newItem = {
         customer_name: '',
         region: '',
         schedule_breakpoint: '',
         etd: '',
         eta: '',
         requires_transit: true  // 預設需要在途文件
-    });
+    };
+
+    // 若目前有光寶欄位，新增記錄也要帶上這些欄位
+    if (hasLiteonFields()) {
+        newItem.order_type = '';
+        newItem.delivery_location = '';
+        newItem.warehouse = '';
+        newItem.date_calc_type = '';
+    }
+
+    mappingList.push(newItem);
 
     // 跳轉到最後一頁
     currentPage = getTotalPages();
@@ -566,14 +663,22 @@ async function saveMapping() {
             const customerName = (item.customer_name || '').trim();
             const regionValue = (item.region || '').trim();
             return customerName && regionValue;
-        }).map(item => ({
-            customer_name: (item.customer_name || '').trim(),
-            region: (item.region || '').trim(),
-            schedule_breakpoint: item.schedule_breakpoint || '',
-            etd: item.etd || '',
-            eta: item.eta || '',
-            requires_transit: item.requires_transit !== false  // 預設為 true
-        }));
+        }).map(item => {
+            const saveItem = {
+                customer_name: (item.customer_name || '').trim(),
+                region: (item.region || '').trim(),
+                schedule_breakpoint: item.schedule_breakpoint || '',
+                etd: item.etd || '',
+                eta: item.eta || '',
+                requires_transit: item.requires_transit !== false  // 預設為 true
+            };
+            // 光寶專屬欄位
+            if (item.order_type !== undefined) saveItem.order_type = item.order_type || '';
+            if (item.delivery_location !== undefined) saveItem.delivery_location = item.delivery_location || '';
+            if (item.warehouse !== undefined) saveItem.warehouse = item.warehouse || '';
+            if (item.date_calc_type !== undefined) saveItem.date_calc_type = item.date_calc_type || '';
+            return saveItem;
+        });
 
         // 驗證
         if (hasEmptyCustomer) {

@@ -160,6 +160,39 @@ def init_database():
                 if "Duplicate column" not in str(alter_error):
                     print(f"ℹ️ requires_transit 欄位檢查: {alter_error}")
 
+            # 確保 order_type 欄位存在（光寶：11=訂單/送貨地點, 32=倉庫）
+            try:
+                cursor.execute("""
+                    ALTER TABLE customer_mappings
+                    ADD COLUMN order_type VARCHAR(10) DEFAULT NULL AFTER requires_transit
+                """)
+                print("✅ 已新增 order_type 欄位")
+            except Exception as alter_error:
+                if "Duplicate column" not in str(alter_error):
+                    print(f"ℹ️ order_type 欄位檢查: {alter_error}")
+
+            # 確保 warehouse 欄位存在（光寶 32 訂單用的倉庫欄位）
+            try:
+                cursor.execute("""
+                    ALTER TABLE customer_mappings
+                    ADD COLUMN warehouse VARCHAR(100) DEFAULT NULL AFTER order_type
+                """)
+                print("✅ 已新增 warehouse 欄位")
+            except Exception as alter_error:
+                if "Duplicate column" not in str(alter_error):
+                    print(f"ℹ️ warehouse 欄位檢查: {alter_error}")
+
+            # 確保 date_calc_type 欄位存在（光寶：ETD 或 ETA 算法）
+            try:
+                cursor.execute("""
+                    ALTER TABLE customer_mappings
+                    ADD COLUMN date_calc_type VARCHAR(10) DEFAULT NULL AFTER warehouse
+                """)
+                print("✅ 已新增 date_calc_type 欄位")
+            except Exception as alter_error:
+                if "Duplicate column" not in str(alter_error):
+                    print(f"ℹ️ date_calc_type 欄位檢查: {alter_error}")
+
             # 更新唯一索引（從 user_id + customer_name 改為 user_id + customer_name + region）
             try:
                 # 先刪除舊的唯一索引
@@ -1528,7 +1561,8 @@ def get_customer_mappings_raw(user_id):
     try:
         with connection.cursor() as cursor:
             cursor.execute("""
-                SELECT customer_name, delivery_location, region, schedule_breakpoint, etd, eta, requires_transit
+                SELECT customer_name, delivery_location, region, schedule_breakpoint, etd, eta,
+                       requires_transit, order_type, warehouse, date_calc_type
                 FROM customer_mappings
                 WHERE user_id = %s
             """, (user_id,))
@@ -1637,15 +1671,22 @@ def save_customer_mappings_list(user_id, mapping_list):
                 requires_transit = item.get('requires_transit', True)
                 if requires_transit is None:
                     requires_transit = True
+                # 光寶專屬欄位
+                delivery_location = item.get('delivery_location', '')
+                order_type = item.get('order_type', '')
+                warehouse = item.get('warehouse', '')
+                date_calc_type = item.get('date_calc_type', '')
 
                 if not customer_name or not region:
                     continue  # 跳過無效記錄
 
                 cursor.execute("""
                     INSERT INTO customer_mappings
-                    (user_id, customer_name, delivery_location, region, schedule_breakpoint, etd, eta, requires_transit)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """, (user_id, customer_name, '', region, schedule_breakpoint, etd, eta, requires_transit))
+                    (user_id, customer_name, delivery_location, region, schedule_breakpoint,
+                     etd, eta, requires_transit, order_type, warehouse, date_calc_type)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (user_id, customer_name, delivery_location, region, schedule_breakpoint,
+                      etd, eta, requires_transit, order_type or None, warehouse or None, date_calc_type or None))
 
             connection.commit()
             print(f"✅ 已儲存 {len(mapping_list)} 筆映射資料 (user_id: {user_id})")

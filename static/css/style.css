@@ -1381,6 +1381,29 @@ body {
 
 .mapping-table .customer-name-input {
     font-weight: 500;
+    min-width: 70px;
+}
+
+/* 光寶擴展欄位樣式 - 表格欄位多時設定最小寬度讓水平滾動生效 */
+.mapping-table.liteon-expanded {
+    min-width: 1400px;
+}
+
+.mapping-table.liteon-expanded th,
+.mapping-table.liteon-expanded td {
+    padding: 10px 8px;
+    font-size: 0.85rem;
+}
+
+.mapping-table.liteon-expanded input {
+    padding: 6px 8px;
+    font-size: 0.85rem;
+    min-width: 60px;
+}
+
+.mapping-table.liteon-expanded select {
+    padding: 6px 8px;
+    font-size: 0.85rem;
 }
 
 /* ETD/ETA 週別+星期組合選單 */
