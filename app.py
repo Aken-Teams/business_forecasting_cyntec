@@ -2664,17 +2664,20 @@ def process_erp_mapping():
         if customer_col is None:
             return jsonify({'success': False, 'message': 'ERP文件找不到客戶簡稱欄位'})
 
-        # 判斷是否為 pegatron 用戶（使用不同的映射邏輯）
+        # 判斷客戶類型（使用不同的映射邏輯）
         # IT 測試模式下，根據目標客戶 ID 判斷
         if test_mode and test_customer_id:
-            # 查詢目標客戶的 username
             from database import get_user_by_id
             target_user = get_user_by_id(test_customer_id)
-            is_pegatron = target_user and target_user.get('username', '').lower() == 'pegatron'
-            print(f"🔍 IT測試模式: test_customer_id={test_customer_id}, target_user={target_user}, is_pegatron={is_pegatron}")
+            target_username = target_user.get('username', '').lower() if target_user else ''
+            is_pegatron = target_username == 'pegatron'
+            is_liteon = target_username == 'liteon'
+            print(f"IT: test_customer_id={test_customer_id}, is_pegatron={is_pegatron}, is_liteon={is_liteon}")
         else:
-            is_pegatron = user['username'].lower() == 'pegatron'
-            print(f"🔍 一般模式: user={user['username']}, is_pegatron={is_pegatron}")
+            target_username = user['username'].lower()
+            is_pegatron = target_username == 'pegatron'
+            is_liteon = target_username == 'liteon'
+            print(f"user={user['username']}, is_pegatron={is_pegatron}, is_liteon={is_liteon}")
 
         if is_pegatron:
             # === Pegatron 專用映射邏輯 ===
@@ -2750,6 +2753,88 @@ def process_erp_mapping():
             # 統計匹配結果
             matched_count = (erp_df['客戶需求地區'] != '').sum()
             print(f"   ✅ Pegatron ERP 映射完成: {matched_count}/{len(erp_df)} 行匹配成功")
+        elif is_liteon:
+            # === Liteon 專用映射邏輯 ===
+            # 11一般訂單: 送貨地點(AG) + 客戶簡稱(D) + 訂單型態(AM) = "11"
+            # 32HUB補貨單: 倉庫(AL) + 客戶簡稱(D) + 訂單型態(AM) = "32"
+            print("使用 Liteon 專用映射邏輯...")
+
+            mapping_records = get_customer_mappings_raw(mapping_user_id)
+            print(f"   取得 {len(mapping_records)} 筆 mapping 記錄")
+
+            # 建立兩種 lookup (key 全部轉小寫/去空白 做模糊比對)
+            # type 11: (customer_name, delivery_location, "11") -> mapping values
+            # type 32: (customer_name, warehouse, "32") -> mapping values
+            liteon_lookup_11 = {}
+            liteon_lookup_32 = {}
+            for m in mapping_records:
+                cname = str(m['customer_name']).strip() if m['customer_name'] else ''
+                order_type = str(m.get('order_type', '')).strip()
+                delivery_loc = str(m.get('delivery_location', '')).strip() if m.get('delivery_location') else ''
+                warehouse = str(m.get('warehouse', '')).strip() if m.get('warehouse') else ''
+
+                mapping_values = {
+                    'region': str(m['region']).strip() if m['region'] else '',
+                    'schedule_breakpoint': str(m['schedule_breakpoint']).strip() if m['schedule_breakpoint'] else '',
+                    'etd': str(m['etd']).strip() if m['etd'] else '',
+                    'eta': str(m['eta']).strip() if m['eta'] else '',
+                    'date_calc_type': str(m.get('date_calc_type', '')).strip() if m.get('date_calc_type') else ''
+                }
+
+                if order_type == '11' and delivery_loc:
+                    key = (cname, delivery_loc)
+                    liteon_lookup_11[key] = mapping_values
+                elif order_type == '32' and warehouse:
+                    key = (cname, warehouse)
+                    liteon_lookup_32[key] = mapping_values
+
+            print(f"   建立 {len(liteon_lookup_11)} 筆 type-11 lookup + {len(liteon_lookup_32)} 筆 type-32 lookup")
+
+            # 動態查找 ERP 欄位
+            delivery_col, err = find_column_by_name(erp_df, '送貨地點')
+            if err:
+                return jsonify({'success': False, 'message': f'Liteon ERP {err}'})
+
+            order_type_col, err = find_column_by_name(erp_df, '訂單型態')
+            if err:
+                return jsonify({'success': False, 'message': f'Liteon ERP {err}'})
+
+            # 倉庫欄位 (可能不存在，嘗試查找)
+            warehouse_col, _ = find_column_by_name(erp_df, '倉庫', required=False)
+
+            print(f"   送貨地點欄位: {delivery_col}")
+            print(f"   訂單型態欄位: {order_type_col}")
+            print(f"   倉庫欄位: {warehouse_col}")
+
+            # 應用 Liteon 映射
+            def get_liteon_mapping(row, field):
+                customer = str(row[customer_col]).strip() if pd.notna(row[customer_col]) else ''
+                order_type_val = str(row[order_type_col]).strip() if pd.notna(row[order_type_col]) else ''
+
+                # 提取訂單型態前綴: "11一般訂單" -> "11", "32HUB補貨單" -> "32"
+                ot_prefix = order_type_val[:2] if len(order_type_val) >= 2 else order_type_val
+
+                if ot_prefix == '11':
+                    delivery = str(row[delivery_col]).strip() if pd.notna(row[delivery_col]) else ''
+                    key = (customer, delivery)
+                    mapping = liteon_lookup_11.get(key, {})
+                elif ot_prefix == '32':
+                    wh = str(row[warehouse_col]).strip() if warehouse_col and pd.notna(row[warehouse_col]) else ''
+                    key = (customer, wh)
+                    mapping = liteon_lookup_32.get(key, {})
+                else:
+                    mapping = {}
+
+                return mapping.get(field, '') if mapping else ''
+
+            erp_df['客戶需求地區'] = erp_df.apply(lambda row: get_liteon_mapping(row, 'region'), axis=1)
+            erp_df['排程出貨日期斷點'] = erp_df.apply(lambda row: get_liteon_mapping(row, 'schedule_breakpoint'), axis=1)
+            erp_df['ETD'] = erp_df.apply(lambda row: get_liteon_mapping(row, 'etd'), axis=1)
+            erp_df['ETA'] = erp_df.apply(lambda row: get_liteon_mapping(row, 'eta'), axis=1)
+            erp_df['日期算法'] = erp_df.apply(lambda row: get_liteon_mapping(row, 'date_calc_type'), axis=1)
+
+            matched_count = (erp_df['客戶需求地區'] != '').sum()
+            print(f"   Liteon ERP 映射完成: {matched_count}/{len(erp_df)} 行匹配成功")
         else:
             # === 原有映射邏輯（Quanta 等其他客戶）===
             # 應用映射到 ERP（使用客戶簡稱單欄位匹配）
@@ -2853,6 +2938,58 @@ def process_erp_mapping():
             integrated_transit_file = os.path.join(processed_folder, 'integrated_transit.xlsx')
             transit_df.to_excel(integrated_transit_file, index=False)
             print(f"✅ 在途數據整合完成: {len(transit_df)} 行 (session: {session_timestamp})")
+            transit_rows = len(transit_df)
+        elif is_liteon:
+            # === Liteon Transit 映射邏輯 ===
+            # Transit 的 mapping 欄位從已整合的 ERP lookup 取得
+            print("使用 Liteon Transit 映射邏輯...")
+            transit_df = pd.read_excel(transit_file)
+
+            # 動態查找 Transit 客戶簡稱欄位
+            transit_customer_col, err = find_column_by_name(transit_df, ['客戶', '簡稱'])
+            if err:
+                return jsonify({'success': False, 'message': f'Liteon Transit {err}'})
+
+            # 從已整合的 ERP 建立 lookup: 客戶料號 -> mapping values
+            erp_pn_col, _ = find_column_by_name(erp_df, '客戶料號', required=False)
+            erp_transit_lookup = {}
+            if erp_pn_col:
+                for idx, row in erp_df.iterrows():
+                    pn = str(row[erp_pn_col]).strip() if pd.notna(row[erp_pn_col]) else ''
+                    customer = str(row[customer_col]).strip() if pd.notna(row[customer_col]) else ''
+                    if pn and customer:
+                        key = (customer, pn)
+                        if key not in erp_transit_lookup:
+                            erp_transit_lookup[key] = {
+                                'region': str(row.get('客戶需求地區', '')).strip() if pd.notna(row.get('客戶需求地區', '')) else '',
+                                'schedule_breakpoint': str(row.get('排程出貨日期斷點', '')).strip() if pd.notna(row.get('排程出貨日期斷點', '')) else '',
+                                'etd': str(row.get('ETD', '')).strip() if pd.notna(row.get('ETD', '')) else '',
+                                'eta': str(row.get('ETA', '')).strip() if pd.notna(row.get('ETA', '')) else ''
+                            }
+                print(f"   建立 ERP transit lookup: {len(erp_transit_lookup)} 筆")
+
+            # 查找 Transit 的料號欄位
+            transit_pn_col, _ = find_column_by_name(transit_df, 'Ordered Item', required=False)
+
+            def get_liteon_transit_mapping(row, field):
+                customer = str(row[transit_customer_col]).strip() if pd.notna(row[transit_customer_col]) else ''
+                pn = str(row[transit_pn_col]).strip() if transit_pn_col and pd.notna(row[transit_pn_col]) else ''
+                key = (customer, pn)
+                mapping = erp_transit_lookup.get(key, {})
+                return mapping.get(field, '') if mapping else ''
+
+            transit_df['客戶需求地區'] = transit_df.apply(lambda row: get_liteon_transit_mapping(row, 'region'), axis=1)
+            transit_df['排程出貨日期斷點'] = transit_df.apply(lambda row: get_liteon_transit_mapping(row, 'schedule_breakpoint'), axis=1)
+            transit_df['ETD'] = transit_df.apply(lambda row: get_liteon_transit_mapping(row, 'etd'), axis=1)
+            transit_df['ETA_mapping'] = transit_df.apply(lambda row: get_liteon_transit_mapping(row, 'eta'), axis=1)
+
+            matched_count = (transit_df['客戶需求地區'] != '').sum()
+            print(f"   Liteon Transit 映射完成: {matched_count}/{len(transit_df)} 行匹配成功")
+
+            transit_df['已分配'] = ''
+            integrated_transit_file = os.path.join(processed_folder, 'integrated_transit.xlsx')
+            transit_df.to_excel(integrated_transit_file, index=False)
+            print(f"在途數據整合完成: {len(transit_df)} 行 (session: {session_timestamp})")
             transit_rows = len(transit_df)
         else:
             # === 原有 Transit 映射邏輯（Quanta 等其他客戶）===
