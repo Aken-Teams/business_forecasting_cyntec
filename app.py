@@ -3218,10 +3218,111 @@ def run_forecast():
         from ultra_fast_forecast_processor import UltraFastForecastProcessor
 
         # Pegatron (user_id=5) 使用專用處理器
+        # Liteon (user_id=6) 使用專用處理器
         # 在 IT 測試模式下，使用被測試客戶的 ID 來判斷
         is_pegatron = processor_user_id == 5
+        is_liteon = processor_user_id == 6
 
-        if is_pegatron:
+        if is_liteon:
+            # ===== Liteon 專用處理：使用 LiteonForecastProcessor =====
+            from liteon_forecast_processor import LiteonForecastProcessor
+
+            print(f"=== Liteon 多檔案模式：{len(multi_cleaned_files)} 個檔案 ===")
+
+            total_erp_filled = 0
+            total_transit_filled = 0
+            total_erp_skipped = 0
+            total_transit_skipped = 0
+            processed_files = []
+            failed_files = []
+
+            for idx, forecast_file in enumerate(multi_cleaned_files, 1):
+                file_basename = os.path.basename(forecast_file)
+                import re
+                match = re.search(r'cleaned_forecast_(\d+)\.xlsx?', file_basename)
+                file_num = match.group(1) if match else str(idx)
+
+                # Liteon: 從 Forecast C1 取 Plant code 作為檔名
+                try:
+                    _tmp_wb = openpyxl.load_workbook(forecast_file, read_only=True)
+                    _tmp_ws = _tmp_wb['Daily+Weekly+Monthly']
+                    plant_code = str(_tmp_ws.cell(row=1, column=3).value or '').strip()
+                    _tmp_wb.close()
+                    if plant_code:
+                        output_filename = f'forecast_{plant_code}.xlsx'
+                    else:
+                        output_filename = f'forecast_result_{file_num}.xlsx'
+                except:
+                    output_filename = f'forecast_result_{file_num}.xlsx'
+
+                print(f"\n--- 處理檔案 {idx}/{len(multi_cleaned_files)}: {file_basename} ---")
+
+                try:
+                    processor = LiteonForecastProcessor(
+                        forecast_file=forecast_file,
+                        erp_file=integrated_erp,
+                        transit_file=integrated_transit if has_transit else None,
+                        output_folder=processed_folder,
+                        output_filename=output_filename
+                    )
+
+                    success = processor.process_all_blocks()
+
+                    if success:
+                        result_file = os.path.join(processed_folder, processor.output_filename)
+                        if os.path.exists(result_file):
+                            file_size = os.path.getsize(result_file)
+                            processed_files.append({
+                                'input': file_basename,
+                                'output': processor.output_filename,
+                                'erp_filled': processor.total_filled,
+                                'transit_filled': processor.total_transit_filled,
+                                'file_size': file_size
+                            })
+                            total_erp_filled += processor.total_filled
+                            total_erp_skipped += processor.total_skipped
+                            total_transit_filled += processor.total_transit_filled
+                            total_transit_skipped += processor.total_transit_skipped
+                            print(f"  ✅ 成功: ERP填入 {processor.total_filled}, Transit填入 {processor.total_transit_filled}")
+                        else:
+                            print(f"  ❌ 結果文件未找到: {result_file}")
+                            failed_files.append({'input': file_basename, 'error': '結果文件未生成'})
+                    else:
+                        failed_files.append({'input': file_basename, 'error': '處理失敗'})
+
+                except Exception as e:
+                    print(f"  ❌ 處理失敗: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+                    failed_files.append({'input': file_basename, 'error': str(e)})
+
+            duration = time.time() - start_time
+
+            if processed_files:
+                log_process(user['id'], 'forecast', 'success',
+                          f'Liteon 多檔案處理: {len(processed_files)} 成功, ERP填入: {total_erp_filled}, Transit填入: {total_transit_filled}', duration)
+                log_activity(user['id'], user['username'], 'forecast_success',
+                           f"Liteon FORECAST 多檔案處理成功: {len(processed_files)} 個檔案", get_client_ip(), request.headers.get('User-Agent'))
+
+                return jsonify({
+                    'success': True,
+                    'message': f'FORECAST處理完成：{len(processed_files)} 個檔案',
+                    'multi_file': True,
+                    'files': processed_files,
+                    'failed_files': failed_files,
+                    'file_count': len(multi_cleaned_files),
+                    'success_count': len(processed_files),
+                    'total_erp_filled': total_erp_filled,
+                    'total_erp_skipped': total_erp_skipped,
+                    'total_transit_filled': total_transit_filled,
+                    'total_transit_skipped': total_transit_skipped,
+                    'transit_file_skipped': transit_skipped
+                })
+            else:
+                log_process(user['id'], 'forecast', 'failed', '所有檔案處理失敗', duration)
+                return jsonify({'success': False, 'message': '所有檔案處理失敗'})
+
+        elif is_pegatron:
             # ===== Pegatron 專用處理：使用 PegatronForecastProcessor =====
             from pegatron_forecast_processor import PegatronForecastProcessor
 
