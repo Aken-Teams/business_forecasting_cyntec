@@ -2941,47 +2941,62 @@ def process_erp_mapping():
             transit_rows = len(transit_df)
         elif is_liteon:
             # === Liteon Transit 映射邏輯 ===
-            # Transit 的 mapping 欄位從已整合的 ERP lookup 取得
+            # 1. Transit D(Location) -> 比對 ERP AG(送貨地點) -> 得知 11 或 32 訂單
+            # 2. Transit K 欄: 11 訂單放送貨地點, 32 訂單放倉庫
+            # 3. 用 K 值查 mapping 表 -> 帶出客戶需求地區
             print("使用 Liteon Transit 映射邏輯...")
             transit_df = pd.read_excel(transit_file)
 
-            # 動態查找 Transit 客戶簡稱欄位
-            transit_customer_col, err = find_column_by_name(transit_df, ['客戶', '簡稱'])
-            if err:
-                return jsonify({'success': False, 'message': f'Liteon Transit {err}'})
+            # 從 mapping 表建立兩個 lookup: 送貨地點->region, 倉庫->region
+            dl_to_region = {}
+            wh_to_region = {}
+            liteon_transit_mappings = get_customer_mappings_raw(mapping_user_id)
+            for m in liteon_transit_mappings:
+                ot = str(m.get('order_type', '')).strip()
+                dl = str(m.get('delivery_location', '')).strip() if m.get('delivery_location') else ''
+                wh = str(m.get('warehouse', '')).strip() if m.get('warehouse') else ''
+                region = str(m['region']).strip() if m['region'] else ''
+                if ot == '11' and dl:
+                    dl_to_region[dl] = region
+                elif ot == '32' and wh:
+                    wh_to_region[wh] = region
 
-            # 從已整合的 ERP 建立 lookup: 客戶料號 -> mapping values
-            erp_pn_col, _ = find_column_by_name(erp_df, '客戶料號', required=False)
-            erp_transit_lookup = {}
-            if erp_pn_col:
-                for idx, row in erp_df.iterrows():
-                    pn = str(row[erp_pn_col]).strip() if pd.notna(row[erp_pn_col]) else ''
-                    customer = str(row[customer_col]).strip() if pd.notna(row[customer_col]) else ''
-                    if pn and customer:
-                        key = (customer, pn)
-                        if key not in erp_transit_lookup:
-                            erp_transit_lookup[key] = {
-                                'region': str(row.get('客戶需求地區', '')).strip() if pd.notna(row.get('客戶需求地區', '')) else '',
-                                'schedule_breakpoint': str(row.get('排程出貨日期斷點', '')).strip() if pd.notna(row.get('排程出貨日期斷點', '')) else '',
-                                'etd': str(row.get('ETD', '')).strip() if pd.notna(row.get('ETD', '')) else '',
-                                'eta': str(row.get('ETA', '')).strip() if pd.notna(row.get('ETA', '')) else ''
-                            }
-                print(f"   建立 ERP transit lookup: {len(erp_transit_lookup)} 筆")
+            print(f"   送貨地點 lookup: {len(dl_to_region)} 筆, 倉庫 lookup: {len(wh_to_region)} 筆")
 
-            # 查找 Transit 的料號欄位
-            transit_pn_col, _ = find_column_by_name(transit_df, 'Ordered Item', required=False)
+            # 從 ERP 建立: 送貨地點(AG) -> 訂單型態前綴(11/32)
+            erp_location_to_type = {}
+            erp_ag_col, _ = find_column_by_name(erp_df, '送貨地點', required=False)
+            erp_am_col, _ = find_column_by_name(erp_df, '訂單型態', required=False)
+            if erp_ag_col and erp_am_col:
+                for _, row in erp_df.iterrows():
+                    ag = str(row[erp_ag_col]).strip() if pd.notna(row[erp_ag_col]) else ''
+                    am = str(row[erp_am_col]).strip() if pd.notna(row[erp_am_col]) else ''
+                    ot_prefix = am[:2] if len(am) >= 2 else ''
+                    if ag and ot_prefix:
+                        erp_location_to_type[ag] = ot_prefix
 
-            def get_liteon_transit_mapping(row, field):
-                customer = str(row[transit_customer_col]).strip() if pd.notna(row[transit_customer_col]) else ''
-                pn = str(row[transit_pn_col]).strip() if transit_pn_col and pd.notna(row[transit_pn_col]) else ''
-                key = (customer, pn)
-                mapping = erp_transit_lookup.get(key, {})
-                return mapping.get(field, '') if mapping else ''
+            print(f"   ERP location->type: {len(erp_location_to_type)} 筆")
 
-            transit_df['客戶需求地區'] = transit_df.apply(lambda row: get_liteon_transit_mapping(row, 'region'), axis=1)
-            transit_df['排程出貨日期斷點'] = transit_df.apply(lambda row: get_liteon_transit_mapping(row, 'schedule_breakpoint'), axis=1)
-            transit_df['ETD'] = transit_df.apply(lambda row: get_liteon_transit_mapping(row, 'etd'), axis=1)
-            transit_df['ETA_mapping'] = transit_df.apply(lambda row: get_liteon_transit_mapping(row, 'eta'), axis=1)
+            # Transit 欄位: D=Location(index 3), K=11訂單>送貨地點/32訂單>倉庫(index 10)
+            transit_d_col = transit_df.columns[3]   # Location
+            transit_k_col = transit_df.columns[10]  # 11訂單>送貨地點 / 32訂單>倉庫
+
+            def get_liteon_transit_region(row):
+                location = str(row[transit_d_col]).strip() if pd.notna(row[transit_d_col]) else ''
+                k_val = str(row[transit_k_col]).strip() if pd.notna(row[transit_k_col]) else ''
+
+                # Transit D -> ERP AG -> 訂單型態
+                ot_prefix = erp_location_to_type.get(location, '')
+
+                if ot_prefix == '11':
+                    return dl_to_region.get(k_val, '')
+                elif ot_prefix == '32':
+                    return wh_to_region.get(k_val, '')
+                else:
+                    # fallback: 兩邊都試
+                    return dl_to_region.get(k_val, '') or wh_to_region.get(k_val, '')
+
+            transit_df['客戶需求地區'] = transit_df.apply(get_liteon_transit_region, axis=1)
 
             matched_count = (transit_df['客戶需求地區'] != '').sum()
             print(f"   Liteon Transit 映射完成: {matched_count}/{len(transit_df)} 行匹配成功")
