@@ -2351,11 +2351,27 @@ def process_forecast_cleanup():
 
                 try:
                     wb = load_workbook(file_path)
-                    ws = wb.active
                     cleaned_count = 0
 
-                    for row_idx in range(1, ws.max_row + 1):
-                        if username == 'pegatron':
+                    if username == 'liteon':
+                        # 光寶：指定讀取 Daily+Weekly+Monthly sheet
+                        # 清理條件：C欄(column 3) = "Commit" 時，清零 J~BY 欄(column 10~77)
+                        if 'Daily+Weekly+Monthly' in wb.sheetnames:
+                            ws = wb['Daily+Weekly+Monthly']
+                        else:
+                            ws = wb.active
+                        for row_idx in range(1, ws.max_row + 1):
+                            c_cell = ws.cell(row=row_idx, column=3)
+                            if c_cell.value and str(c_cell.value).strip() == "Commit":
+                                for col_idx in range(10, min(78, ws.max_column + 1)):  # J=10, BY=77
+                                    cell = ws.cell(row=row_idx, column=col_idx)
+                                    if cell.value is not None and cell.value != 0:
+                                        cell.value = 0
+                                        cleaned_count += 1
+                    elif username == 'pegatron':
+                        # 和碩：M欄(column 13) = "ETA QTY" 時，清零 N~DN 欄(column 14~118)
+                        ws = wb.active
+                        for row_idx in range(1, ws.max_row + 1):
                             m_cell = ws.cell(row=row_idx, column=13)
                             if m_cell.value and str(m_cell.value).strip() == "ETA QTY":
                                 for col_idx in range(14, min(119, ws.max_column + 1)):
@@ -2363,7 +2379,10 @@ def process_forecast_cleanup():
                                     if cell.value is not None and cell.value != 0:
                                         cell.value = 0
                                         cleaned_count += 1
-                        else:
+                    else:
+                        # 廣達：K欄(column 11) = "供應數量" 時，清零 L~AW 欄(column 12~49)
+                        ws = wb.active
+                        for row_idx in range(1, ws.max_row + 1):
                             k_cell = ws.cell(row=row_idx, column=11)
                             if k_cell.value and str(k_cell.value) == "供應數量":
                                 for col_idx in range(12, min(50, ws.max_column + 1)):
