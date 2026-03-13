@@ -2941,9 +2941,9 @@ def process_erp_mapping():
             transit_rows = len(transit_df)
         elif is_liteon:
             # === Liteon Transit 映射邏輯 ===
-            # 1. Transit D(Location) -> 比對 ERP AG(送貨地點) -> 得知 11 或 32 訂單
-            # 2. Transit K 欄: 11 訂單放送貨地點, 32 訂單放倉庫
-            # 3. 用 K 值查 mapping 表 -> 帶出客戶需求地區
+            # Transit 檔案已包含: K=訂單型態, L=送貨地點, M=倉庫
+            # K=11 → 用 L(送貨地點) 查 mapping → 客戶需求地區
+            # K=32 → 用 M(倉庫) 查 mapping → 客戶需求地區
             print("使用 Liteon Transit 映射邏輯...")
             transit_df = pd.read_excel(transit_file)
 
@@ -2963,38 +2963,33 @@ def process_erp_mapping():
 
             print(f"   送貨地點 lookup: {len(dl_to_region)} 筆, 倉庫 lookup: {len(wh_to_region)} 筆")
 
-            # 從 ERP 建立: 送貨地點(AG) -> 訂單型態前綴(11/32)
-            erp_location_to_type = {}
-            erp_ag_col, _ = find_column_by_name(erp_df, '送貨地點', required=False)
-            erp_am_col, _ = find_column_by_name(erp_df, '訂單型態', required=False)
-            if erp_ag_col and erp_am_col:
-                for _, row in erp_df.iterrows():
-                    ag = str(row[erp_ag_col]).strip() if pd.notna(row[erp_ag_col]) else ''
-                    am = str(row[erp_am_col]).strip() if pd.notna(row[erp_am_col]) else ''
-                    ot_prefix = am[:2] if len(am) >= 2 else ''
-                    if ag and ot_prefix:
-                        erp_location_to_type[ag] = ot_prefix
+            # 動態查找 Transit 欄位（用欄位名稱，不再用 hardcoded index）
+            transit_ot_col, err = find_column_by_name(transit_df, '訂單型態')
+            if err:
+                return jsonify({'success': False, 'message': f'Liteon Transit {err}'})
 
-            print(f"   ERP location->type: {len(erp_location_to_type)} 筆")
+            transit_dl_col, err = find_column_by_name(transit_df, '送貨地點')
+            if err:
+                return jsonify({'success': False, 'message': f'Liteon Transit {err}'})
 
-            # Transit 欄位: D=Location(index 3), K=11訂單>送貨地點/32訂單>倉庫(index 10)
-            transit_d_col = transit_df.columns[3]   # Location
-            transit_k_col = transit_df.columns[10]  # 11訂單>送貨地點 / 32訂單>倉庫
+            transit_wh_col, _ = find_column_by_name(transit_df, '倉庫', required=False)
+
+            print(f"   Transit 訂單型態欄位: {transit_ot_col}")
+            print(f"   Transit 送貨地點欄位: {transit_dl_col}")
+            print(f"   Transit 倉庫欄位: {transit_wh_col}")
 
             def get_liteon_transit_region(row):
-                location = str(row[transit_d_col]).strip() if pd.notna(row[transit_d_col]) else ''
-                k_val = str(row[transit_k_col]).strip() if pd.notna(row[transit_k_col]) else ''
-
-                # Transit D -> ERP AG -> 訂單型態
-                ot_prefix = erp_location_to_type.get(location, '')
+                ot_val = str(row[transit_ot_col]).strip() if pd.notna(row[transit_ot_col]) else ''
+                ot_prefix = ot_val[:2] if len(ot_val) >= 2 else ot_val
 
                 if ot_prefix == '11':
-                    return dl_to_region.get(k_val, '')
+                    dl_val = str(row[transit_dl_col]).strip() if pd.notna(row[transit_dl_col]) else ''
+                    return dl_to_region.get(dl_val, '')
                 elif ot_prefix == '32':
-                    return wh_to_region.get(k_val, '')
+                    wh_val = str(row[transit_wh_col]).strip() if transit_wh_col and pd.notna(row[transit_wh_col]) else ''
+                    return wh_to_region.get(wh_val, '')
                 else:
-                    # fallback: 兩邊都試
-                    return dl_to_region.get(k_val, '') or wh_to_region.get(k_val, '')
+                    return ''
 
             transit_df['客戶需求地區'] = transit_df.apply(get_liteon_transit_region, axis=1)
 
