@@ -2,24 +2,27 @@
 光寶(Liteon) Forecast Processor
 處理 Liteon 的 Forecast 填入邏輯
 
-Forecast 結構 (Daily+Weekly+Monthly sheet):
+支援兩種模式:
+1. 單檔模式 (merged_mode=False): 每個 Forecast 檔案獨立處理
+2. 合併模式 (merged_mode=True): 多個檔案合併後一次處理
+
+單檔 Forecast 結構 (Daily+Weekly+Monthly sheet):
 - C1: Plant code (e.g. "15K0")
 - Row 7: 日期 headers (K~AO=BY天, AP~BK=BY周, BL~BQ=BY月)
 - Row 8+: 每個料號 3 行一組 (Demand / Commit / Accumulate Shortage)
 - Column B: Material (料號)
 - Column C: Data Measures ("Demand" / "Commit" / "Accumulate Shortage")
 
-Transit 填入邏輯:
-- Transit 客戶需求地區 == Forecast C1 (Plant code)
-- Transit Ordered Item == Forecast Column B (Material)
-- Transit QTY × 1000 → 填入 Commit row 的對應日期欄位
-- 日期匹配: Transit ETA → Forecast Row 7 日期 (先找天, 再找周, 再找月)
+合併 Forecast 結構:
+- Row 1: [Plant, Buyer Code, 原 Row 7 headers] ← 欄位右移 2
+- Row 2+: [plant_val, buyer_val, 原 Row 8+ data]
+- Column A: Plant code (per row)
+- Column D: Material (原 Column B + 2)
+- Column E: Data Measures (原 Column C + 2)
 
-ERP 填入邏輯:
-- ERP 客戶需求地區 == Forecast C1 (Plant code)
-- ERP 客戶料號 == Forecast Column B (Material)
-- 根據日期算法(ETD/ETA) + 排程出貨日期 + ETD/ETA mapping → 計算目標日期
-- ERP 數量 × 1000 → 填入 Commit row 的對應日期欄位
+Transit/ERP 填入邏輯:
+- 客戶需求地區 == Plant code (單檔: C1, 合併: Column A)
+- 料號匹配 + 日期計算 → 填入 Commit row
 """
 
 import os
@@ -49,12 +52,35 @@ class LiteonForecastProcessor:
     MONTHLY_END_COL = 69     # Column BQ
 
     def __init__(self, forecast_file, erp_file, transit_file=None,
-                 output_folder=None, output_filename=None):
+                 output_folder=None, output_filename=None, merged_mode=False):
         self.forecast_file = forecast_file
         self.erp_file = erp_file
         self.transit_file = transit_file
         self.output_folder = output_folder or os.path.dirname(forecast_file)
         self.output_filename = output_filename or 'forecast_result.xlsx'
+        self.merged_mode = merged_mode
+
+        # 合併模式: 所有欄位右移 2 (Plant + Buyer Code 佔 A, B)
+        if merged_mode:
+            self.col_offset = 2
+            self.plant_col = 1           # Column A = Plant (per row)
+            self.buyer_col = 2           # Column B = Buyer Code (per row)
+            self.date_header_row = 1     # Row 1 = headers
+            self.data_start_row = 2      # Row 2+ = data
+        else:
+            self.col_offset = 0
+            self.date_header_row = self.DATE_HEADER_ROW
+            self.data_start_row = self.DATA_START_ROW
+
+        # Dynamic column positions (apply offset)
+        self.material_col = self.MATERIAL_COL + self.col_offset
+        self.data_measures_col = self.DATA_MEASURES_COL + self.col_offset
+        self.daily_start_col = self.DAILY_START_COL + self.col_offset
+        self.daily_end_col = self.DAILY_END_COL + self.col_offset
+        self.weekly_start_col = self.WEEKLY_START_COL + self.col_offset
+        self.weekly_end_col = self.WEEKLY_END_COL + self.col_offset
+        self.monthly_start_col = self.MONTHLY_START_COL + self.col_offset
+        self.monthly_end_col = self.MONTHLY_END_COL + self.col_offset
 
         # Statistics
         self.total_filled = 0
@@ -67,7 +93,10 @@ class LiteonForecastProcessor:
         self.ws = None
         self.plant_code = None
         self.date_map = {}          # col_index -> date object
-        self.material_commit_rows = {}  # material -> commit row number
+        # material_commit_rows:
+        #   單檔模式: material -> commit row number
+        #   合併模式: (plant, material) -> commit row number
+        self.material_commit_rows = {}
         self.pending_changes = []   # list of {row, col, value}
         self.erp_df = None
         self.transit_df = None
@@ -123,9 +152,13 @@ class LiteonForecastProcessor:
 
         self.ws = self.wb[self.SHEET_NAME]
 
-        # Get Plant code from C1
-        self.plant_code = str(self.ws.cell(row=self.PLANT_CELL_ROW, column=self.PLANT_CELL_COL).value or '').strip()
-        print(f"[Liteon] Plant: {self.plant_code}")
+        # Get Plant code
+        if self.merged_mode:
+            self.plant_code = None  # 合併模式: Plant 在每行 Column A
+            print(f"[Liteon] 合併模式: Plant 從每行 Column A 讀取")
+        else:
+            self.plant_code = str(self.ws.cell(row=self.PLANT_CELL_ROW, column=self.PLANT_CELL_COL).value or '').strip()
+            print(f"[Liteon] Plant: {self.plant_code}")
 
         # Parse date headers from row 7
         self._parse_date_headers()
@@ -134,11 +167,11 @@ class LiteonForecastProcessor:
         self._build_material_index()
 
     def _parse_date_headers(self):
-        """Parse date columns from row 7"""
+        """Parse date columns from header row"""
         self.date_map = {}  # col_index (1-based) -> date object
 
-        for col in range(self.DAILY_START_COL, self.MONTHLY_END_COL + 1):
-            cell_val = self.ws.cell(row=self.DATE_HEADER_ROW, column=col).value
+        for col in range(self.daily_start_col, self.monthly_end_col + 1):
+            cell_val = self.ws.cell(row=self.date_header_row, column=col).value
             if cell_val is None:
                 continue
 
@@ -147,7 +180,7 @@ class LiteonForecastProcessor:
                 self.date_map[col] = date_obj
 
         print(f"[Liteon] 日期欄位: {len(self.date_map)} columns "
-              f"(Daily: K-AO, Weekly: AP-BK, Monthly: BL-BQ)")
+              f"(offset={self.col_offset})")
 
     def _parse_date_value(self, val):
         """Parse a cell value to a date object"""
@@ -172,14 +205,23 @@ class LiteonForecastProcessor:
         return None
 
     def _build_material_index(self):
-        """Build mapping: material number -> commit row number"""
+        """Build mapping: material number -> commit row number
+        單檔模式: material -> row
+        合併模式: (plant, material) -> row
+        """
         self.material_commit_rows = {}
 
-        for row in range(self.DATA_START_ROW, self.ws.max_row + 1):
-            measure = str(self.ws.cell(row=row, column=self.DATA_MEASURES_COL).value or '').strip()
+        for row in range(self.data_start_row, self.ws.max_row + 1):
+            measure = str(self.ws.cell(row=row, column=self.data_measures_col).value or '').strip()
             if measure == 'Commit':
-                material = str(self.ws.cell(row=row, column=self.MATERIAL_COL).value or '').strip()
-                if material:
+                material = str(self.ws.cell(row=row, column=self.material_col).value or '').strip()
+                if not material:
+                    continue
+                if self.merged_mode:
+                    plant = str(self.ws.cell(row=row, column=self.plant_col).value or '').strip()
+                    if plant:
+                        self.material_commit_rows[(plant, material)] = row
+                else:
                     self.material_commit_rows[material] = row
 
         print(f"[Liteon] 料號數: {len(self.material_commit_rows)}")
@@ -216,7 +258,7 @@ class LiteonForecastProcessor:
 
         # Step 1: 精確匹配日期 (BY天)
         for col, date_obj in self.date_map.items():
-            if col > self.DAILY_END_COL:
+            if col > self.daily_end_col:
                 continue
             if date_obj == target_date:
                 return col
@@ -224,7 +266,7 @@ class LiteonForecastProcessor:
         # Step 2: 找所屬的周 (BY周)
         # Weekly columns represent week start (Monday), find the week that contains target_date
         for col, date_obj in self.date_map.items():
-            if col < self.WEEKLY_START_COL or col > self.WEEKLY_END_COL:
+            if col < self.weekly_start_col or col > self.weekly_end_col:
                 continue
             # Each weekly column covers a 7-day range starting from date_obj
             week_start = date_obj
@@ -234,7 +276,7 @@ class LiteonForecastProcessor:
 
         # Step 3: 找所屬的月 (BY月)
         for col, date_obj in self.date_map.items():
-            if col < self.MONTHLY_START_COL or col > self.MONTHLY_END_COL:
+            if col < self.monthly_start_col or col > self.monthly_end_col:
                 continue
             # Monthly column: same year+month
             if date_obj.year == target_date.year and date_obj.month == target_date.month:
@@ -270,16 +312,25 @@ class LiteonForecastProcessor:
                 self.total_transit_skipped += 1
                 continue
 
-            # Match region to plant code
+            # Match region and material
             region = str(row.get(region_col, '')).strip()
-            if region != self.plant_code:
-                continue
-
-            # Match material
             material = str(row.get(item_col, '')).strip()
-            if not material or material not in self.material_commit_rows:
-                self.total_transit_skipped += 1
-                continue
+
+            if self.merged_mode:
+                # 合併模式: 用 (region, material) 查 commit row
+                key = (region, material)
+                if not material or key not in self.material_commit_rows:
+                    self.total_transit_skipped += 1
+                    continue
+                commit_row = self.material_commit_rows[key]
+            else:
+                # 單檔模式: 先比對 plant_code，再查 material
+                if region != self.plant_code:
+                    continue
+                if not material or material not in self.material_commit_rows:
+                    self.total_transit_skipped += 1
+                    continue
+                commit_row = self.material_commit_rows[material]
 
             # Parse ETA date
             eta_val = row.get(eta_col)
@@ -305,7 +356,6 @@ class LiteonForecastProcessor:
                 continue
 
             fill_value = qty * 1000
-            commit_row = self.material_commit_rows[material]
 
             self._add_change(commit_row, target_col, fill_value)
             self.transit_df.at[idx, '已分配'] = '✓'
@@ -344,16 +394,25 @@ class LiteonForecastProcessor:
                     self.total_skipped += 1
                     continue
 
-                # Match region to plant code
+                # Match region and material
                 region = str(row.get(region_col, '')).strip()
-                if region != self.plant_code:
-                    continue
-
-                # Match material
                 part_number = str(row.get(part_col, '')).strip()
-                if not part_number or part_number not in self.material_commit_rows:
-                    self.total_skipped += 1
-                    continue
+
+                if self.merged_mode:
+                    # 合併模式: 用 (region, material) 查 commit row
+                    key = (region, part_number)
+                    if not part_number or key not in self.material_commit_rows:
+                        self.total_skipped += 1
+                        continue
+                    commit_row = self.material_commit_rows[key]
+                else:
+                    # 單檔模式: 先比對 plant_code，再查 material
+                    if region != self.plant_code:
+                        continue
+                    if not part_number or part_number not in self.material_commit_rows:
+                        self.total_skipped += 1
+                        continue
+                    commit_row = self.material_commit_rows[part_number]
 
                 # Calculate target date
                 target_date = self._calculate_erp_target_date(row, date_calc_col,
@@ -381,7 +440,6 @@ class LiteonForecastProcessor:
                     continue
 
                 fill_value = qty * 1000
-                commit_row = self.material_commit_rows[part_number]
 
                 self._add_change(commit_row, target_col, fill_value)
                 self.erp_df.at[idx, '已分配'] = '✓'

@@ -1528,8 +1528,11 @@ def upload_forecast():
                 return jsonify({'success': False, 'message': '沒有有效的 Forecast 文件'})
 
             # ========== 根據合併選項處理 ==========
-            if merge_files:
-                # 合併模式：使用 LibreOffice 跨平台方案，保留格式
+            # Liteon: 不用 LibreOffice 合併（會丟失 Plant/Buyer 且合併全部 sheets）
+            # Liteon 的智慧合併在 run_forecast 時由 merge_liteon_forecast_files() 處理
+            is_liteon_upload = (template_username == 'liteon')
+            if merge_files and not is_liteon_upload:
+                # 非 Liteon 合併模式：使用 LibreOffice 跨平台方案，保留格式
                 import shutil
                 import time
                 from libreoffice_utils import merge_excel_files_libreoffice
@@ -1618,7 +1621,8 @@ def upload_forecast():
                 return jsonify(response_data)
 
             else:
-                # 不合併模式：將暫存檔案重新命名為正式檔案（保留原始副檔名）
+                # 不合併模式（或 Liteon 合併模式）：將暫存檔案重新命名為正式檔案（保留原始副檔名）
+                # Liteon 勾合併時走此路徑，保留分檔，合併在 run_forecast 時處理
                 saved_files = []
                 total_rows = 0
 
@@ -1645,7 +1649,7 @@ def upload_forecast():
 
                 # 儲存上傳標記到 session（只存儲檔案數量，不存儲完整路徑列表）
                 set_user_file_path('forecast', saved_files[0]['path'] if saved_files else None)
-                session['forecast_merge_mode'] = False
+                session['forecast_merge_mode'] = (merge_files and is_liteon_upload)  # Liteon 合併模式時為 True
                 session['forecast_file_count'] = len(saved_files)
                 session.modified = True
 
@@ -1688,6 +1692,179 @@ def upload_forecast():
         if user:
             log_upload(user['id'], 'forecast', original_filename, 0, 0, 0, 'failed', str(e))
         return jsonify({'success': False, 'message': f'上傳處理失敗: {str(e)}'})
+
+
+def merge_liteon_forecast_files(cleaned_files, output_path):
+    """
+    合併多個 cleaned Liteon forecast 為一個檔案，前置 Plant + Buyer Code 欄。
+
+    原始每檔結構: C1=Plant, E1=Buyer, Row 7=headers, Row 8+=data
+    合併後結構: Row 1 = [Plant, Buyer Code, 原 Row 7 headers], Row 2+ = data
+
+    注意：不同檔案的日期欄位可能起始日不同，需用日期 remapping 對齊。
+    保留原始格式（字型、填色、數字格式、對齊、邊框）和公式。
+    """
+    import openpyxl
+    from openpyxl import Workbook
+    from openpyxl.utils import get_column_letter
+    from copy import copy
+    from datetime import datetime as _dt
+
+    SHEET_NAME = 'Daily+Weekly+Monthly'
+    DATE_COL_START = 11  # Column K (1-based)
+
+    merged_wb = Workbook()
+    merged_ws = merged_wb.active
+    merged_ws.title = SHEET_NAME
+
+    header_written = False
+    current_row = 2  # Row 1 = header, Row 2+ = data
+    master_date_cols = {}  # date_value -> merged_col (1-based, already +2)
+
+    def _to_date(val):
+        """Convert cell value to comparable date key"""
+        if val is None:
+            return None
+        if isinstance(val, _dt):
+            return val.date()
+        if hasattr(val, 'date') and callable(val.date):
+            try:
+                return val.date()
+            except:
+                return None
+        if isinstance(val, str):
+            val = val.strip()
+            for fmt in ['%Y/%m/%d', '%Y-%m-%d', '%m/%d/%Y']:
+                try:
+                    return _dt.strptime(val, fmt).date()
+                except ValueError:
+                    continue
+        return None
+
+    def _copy_cell(src_cell, tgt_cell, value_override=None):
+        """複製 cell 的值（或公式）和樣式"""
+        tgt_cell.value = value_override if value_override is not None else src_cell.value
+        if src_cell.has_style:
+            tgt_cell.font = copy(src_cell.font)
+            tgt_cell.fill = copy(src_cell.fill)
+            tgt_cell.number_format = src_cell.number_format
+            tgt_cell.border = copy(src_cell.border)
+            tgt_cell.alignment = copy(src_cell.alignment)
+            tgt_cell.protection = copy(src_cell.protection)
+
+    for file_idx, filepath in enumerate(cleaned_files):
+        try:
+            wb = openpyxl.load_workbook(filepath)
+            if SHEET_NAME in wb.sheetnames:
+                ws = wb[SHEET_NAME]
+            else:
+                ws = wb.active
+
+            # Read Plant (C1) and Buyer Code (E1)
+            plant_code = str(ws.cell(row=1, column=3).value or '').strip()
+            buyer_code = str(ws.cell(row=1, column=5).value or '').strip()
+
+            # Write header from first file's Row 7 (保留格式)
+            if not header_written:
+                # Plant / Buyer Code header (用第一個資料 cell 的樣式)
+                header_style_cell = ws.cell(row=7, column=1)
+                plant_hdr = merged_ws.cell(row=1, column=1, value='Plant')
+                buyer_hdr = merged_ws.cell(row=1, column=2, value='Buyer Code')
+                if header_style_cell.has_style:
+                    for hdr_cell in [plant_hdr, buyer_hdr]:
+                        hdr_cell.font = copy(header_style_cell.font)
+                        hdr_cell.fill = copy(header_style_cell.fill)
+                        hdr_cell.number_format = header_style_cell.number_format
+                        hdr_cell.border = copy(header_style_cell.border)
+                        hdr_cell.alignment = copy(header_style_cell.alignment)
+
+                for col in range(1, ws.max_column + 1):
+                    src_cell = ws.cell(row=7, column=col)
+                    merged_col = col + 2
+                    tgt_cell = merged_ws.cell(row=1, column=merged_col)
+                    _copy_cell(src_cell, tgt_cell)
+                    # 記錄日期欄位映射
+                    if col >= DATE_COL_START:
+                        d = _to_date(src_cell.value)
+                        if d:
+                            master_date_cols[d] = merged_col
+
+                # 複製欄寬 (原始欄 +2 偏移)
+                merged_ws.column_dimensions['A'].width = 8   # Plant
+                merged_ws.column_dimensions['B'].width = 12  # Buyer Code
+                for col in range(1, ws.max_column + 1):
+                    src_letter = get_column_letter(col)
+                    tgt_letter = get_column_letter(col + 2)
+                    if src_letter in ws.column_dimensions:
+                        merged_ws.column_dimensions[tgt_letter].width = ws.column_dimensions[src_letter].width
+
+                # 複製列高 (Row 7 -> Row 1)
+                if ws.row_dimensions[7].height:
+                    merged_ws.row_dimensions[1].height = ws.row_dimensions[7].height
+
+                header_written = True
+                max_merged_col = ws.max_column + 2
+
+            # 建立此檔案的 source_col -> merged_col 映射
+            col_map = {}
+            for col in range(1, DATE_COL_START):
+                col_map[col] = col + 2
+            for col in range(DATE_COL_START, ws.max_column + 1):
+                val = ws.cell(row=7, column=col).value
+                d = _to_date(val)
+                if d and d in master_date_cols:
+                    col_map[col] = master_date_cols[d]
+
+            # Copy data rows (Row 8+) with Plant and Buyer prepended (保留格式和公式)
+            for row in range(8, ws.max_row + 1):
+                # Skip completely empty rows
+                has_data = False
+                for col in range(1, ws.max_column + 1):
+                    if ws.cell(row=row, column=col).value is not None:
+                        has_data = True
+                        break
+                if not has_data:
+                    continue
+
+                # Plant / Buyer Code (用該列第一個 cell 的樣式)
+                row_style_cell = ws.cell(row=row, column=1)
+                plant_cell = merged_ws.cell(row=current_row, column=1, value=plant_code)
+                buyer_cell = merged_ws.cell(row=current_row, column=2, value=buyer_code)
+                if row_style_cell.has_style:
+                    for cell in [plant_cell, buyer_cell]:
+                        cell.font = copy(row_style_cell.font)
+                        cell.fill = copy(row_style_cell.fill)
+                        cell.border = copy(row_style_cell.border)
+                        cell.alignment = copy(row_style_cell.alignment)
+
+                # 複製資料欄位（值 + 格式 + 公式）
+                for col in range(1, ws.max_column + 1):
+                    target_col = col_map.get(col)
+                    if target_col:
+                        src_cell = ws.cell(row=row, column=col)
+                        tgt_cell = merged_ws.cell(row=current_row, column=target_col)
+                        _copy_cell(src_cell, tgt_cell)
+
+                # 複製列高
+                if ws.row_dimensions[row].height:
+                    merged_ws.row_dimensions[current_row].height = ws.row_dimensions[row].height
+
+                current_row += 1
+
+            wb.close()
+            remapped = sum(1 for c in range(DATE_COL_START, ws.max_column + 1) if c in col_map)
+            print(f"[Merge] 檔案 {file_idx + 1}: Plant={plant_code}, Buyer={buyer_code}, "
+                  f"資料列={current_row - 2}, 日期對齊={remapped}欄")
+
+        except Exception as e:
+            print(f"[Merge] 檔案 {file_idx + 1} 合併失敗: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
+
+    merged_wb.save(output_path)
+    print(f"[Merge] 合併完成: {current_row - 2} 列 → {os.path.basename(output_path)}")
+    return current_row - 2  # return total data rows
 
 
 @app.route('/merge_forecast_files', methods=['POST'])
@@ -1734,7 +1911,34 @@ def merge_forecast_files():
 
         print(f"  找到 {len(multi_files)} 個待合併檔案")
 
-        # 使用 LibreOffice 進行合併（跨平台方案）
+        # 判斷是否為 Liteon（檢查 test_mode 或 user 本身）
+        test_mode = data.get('test_mode', False)
+        customer_id = data.get('customer_id')
+        if test_mode and customer_id and user['role'] in ['admin', 'it']:
+            target_user = get_user_by_id(int(customer_id))
+            is_liteon_merge = (target_user and target_user['username'] == 'liteon')
+        else:
+            is_liteon_merge = (user['username'] == 'liteon')
+
+        if is_liteon_merge:
+            # Liteon: 不做 LibreOffice 合併（會丟失 Plant/Buyer 且合併全部 sheets）
+            # 只設定 session flag，保留分檔，run_forecast 時由 merge_liteon_forecast_files() 處理
+            print(f"  Liteon 模式：跳過 LibreOffice 合併，保留 {len(multi_files)} 個分檔")
+
+            session['forecast_merge_mode'] = True
+            session.modified = True
+
+            log_activity(user['id'], user['username'], 'merge_forecast',
+                       f"Liteon 合併模式標記：{len(multi_files)} 個檔案（保留分檔）", get_client_ip(), request.headers.get('User-Agent'))
+
+            return jsonify({
+                'success': True,
+                'message': f'{len(multi_files)} 個檔案已標記合併（Liteon 模式）',
+                'merged': True,
+                'merge_time': 0
+            })
+
+        # 非 Liteon：使用 LibreOffice 進行合併（跨平台方案）
         import shutil
         import time
         from libreoffice_utils import merge_excel_files_libreoffice
@@ -3222,7 +3426,9 @@ def run_forecast():
             # ===== Liteon 專用處理：使用 LiteonForecastProcessor =====
             from liteon_forecast_processor import LiteonForecastProcessor
 
-            print(f"=== Liteon 多檔案模式：{len(multi_cleaned_files)} 個檔案 ===")
+            # 檢查是否為合併模式
+            merge_mode = session.get('forecast_merge_mode', False)
+            print(f"=== Liteon 模式：{len(multi_cleaned_files)} 個檔案, 合併模式: {merge_mode} ===")
 
             total_erp_filled = 0
             total_transit_filled = 0
@@ -3231,81 +3437,131 @@ def run_forecast():
             processed_files = []
             failed_files = []
 
-            for idx, forecast_file in enumerate(multi_cleaned_files, 1):
-                file_basename = os.path.basename(forecast_file)
-                import re
-                match = re.search(r'cleaned_forecast_(\d+)\.xlsx?', file_basename)
-                file_num = match.group(1) if match else str(idx)
-
-                # Liteon: 從 Forecast C1 (Plant) + E1 (Buyer Code) 作為檔名
-                try:
-                    _tmp_wb = openpyxl.load_workbook(forecast_file, read_only=True)
-                    _tmp_ws = _tmp_wb['Daily+Weekly+Monthly']
-                    plant_code = str(_tmp_ws.cell(row=1, column=3).value or '').strip()
-                    buyer_code = str(_tmp_ws.cell(row=1, column=5).value or '').strip()
-                    _tmp_wb.close()
-                    if plant_code and buyer_code:
-                        output_filename = f'forecast_{plant_code}_{buyer_code}.xlsx'
-                    elif plant_code:
-                        output_filename = f'forecast_{plant_code}.xlsx'
-                    else:
-                        output_filename = f'forecast_result_{file_num}.xlsx'
-                except:
-                    output_filename = f'forecast_result_{file_num}.xlsx'
-
-                print(f"\n--- 處理檔案 {idx}/{len(multi_cleaned_files)}: {file_basename} ---")
+            if merge_mode and len(multi_cleaned_files) > 1:
+                # ===== 合併模式：先合併再處理 =====
+                print(f"\n=== Liteon 合併模式：合併 {len(multi_cleaned_files)} 個檔案 ===")
+                merged_file = os.path.join(processed_folder, 'merged_forecast.xlsx')
 
                 try:
+                    total_rows = merge_liteon_forecast_files(multi_cleaned_files, merged_file)
+                    print(f"合併完成: {total_rows} 列資料")
+
+                    output_filename = 'forecast_merged.xlsx'
                     processor = LiteonForecastProcessor(
-                        forecast_file=forecast_file,
+                        forecast_file=merged_file,
                         erp_file=integrated_erp,
                         transit_file=integrated_transit if has_transit else None,
                         output_folder=processed_folder,
-                        output_filename=output_filename
+                        output_filename=output_filename,
+                        merged_mode=True
                     )
 
                     success = processor.process_all_blocks()
 
                     if success:
-                        result_file = os.path.join(processed_folder, processor.output_filename)
+                        result_file = os.path.join(processed_folder, output_filename)
                         if os.path.exists(result_file):
                             file_size = os.path.getsize(result_file)
                             processed_files.append({
-                                'input': file_basename,
-                                'output': processor.output_filename,
+                                'input': 'merged_forecast.xlsx',
+                                'output': output_filename,
                                 'erp_filled': processor.total_filled,
                                 'transit_filled': processor.total_transit_filled,
                                 'file_size': file_size
                             })
-                            total_erp_filled += processor.total_filled
-                            total_erp_skipped += processor.total_skipped
-                            total_transit_filled += processor.total_transit_filled
-                            total_transit_skipped += processor.total_transit_skipped
-                            print(f"  ✅ 成功: ERP填入 {processor.total_filled}, Transit填入 {processor.total_transit_filled}")
-                        else:
-                            print(f"  ❌ 結果文件未找到: {result_file}")
-                            failed_files.append({'input': file_basename, 'error': '結果文件未生成'})
+                            total_erp_filled = processor.total_filled
+                            total_erp_skipped = processor.total_skipped
+                            total_transit_filled = processor.total_transit_filled
+                            total_transit_skipped = processor.total_transit_skipped
+                            print(f"  ✅ 合併處理成功: ERP填入 {processor.total_filled}, Transit填入 {processor.total_transit_filled}")
                     else:
-                        failed_files.append({'input': file_basename, 'error': '處理失敗'})
+                        failed_files.append({'input': 'merged_forecast.xlsx', 'error': '合併處理失敗'})
 
                 except Exception as e:
-                    print(f"  ❌ 處理失敗: {str(e)}")
+                    print(f"  ❌ 合併處理失敗: {str(e)}")
                     import traceback
                     traceback.print_exc()
-                    failed_files.append({'input': file_basename, 'error': str(e)})
+                    failed_files.append({'input': 'merged_forecast.xlsx', 'error': str(e)})
+
+            else:
+                # ===== 逐檔模式：原有邏輯 =====
+                for idx, forecast_file in enumerate(multi_cleaned_files, 1):
+                    file_basename = os.path.basename(forecast_file)
+                    import re
+                    match = re.search(r'cleaned_forecast_(\d+)\.xlsx?', file_basename)
+                    file_num = match.group(1) if match else str(idx)
+
+                    # Liteon: 從 Forecast C1 (Plant) + E1 (Buyer Code) 作為檔名
+                    try:
+                        _tmp_wb = openpyxl.load_workbook(forecast_file, read_only=True)
+                        _tmp_ws = _tmp_wb['Daily+Weekly+Monthly']
+                        plant_code = str(_tmp_ws.cell(row=1, column=3).value or '').strip()
+                        buyer_code = str(_tmp_ws.cell(row=1, column=5).value or '').strip()
+                        _tmp_wb.close()
+                        if plant_code and buyer_code:
+                            output_filename = f'forecast_{plant_code}_{buyer_code}.xlsx'
+                        elif plant_code:
+                            output_filename = f'forecast_{plant_code}.xlsx'
+                        else:
+                            output_filename = f'forecast_result_{file_num}.xlsx'
+                    except:
+                        output_filename = f'forecast_result_{file_num}.xlsx'
+
+                    print(f"\n--- 處理檔案 {idx}/{len(multi_cleaned_files)}: {file_basename} ---")
+
+                    try:
+                        processor = LiteonForecastProcessor(
+                            forecast_file=forecast_file,
+                            erp_file=integrated_erp,
+                            transit_file=integrated_transit if has_transit else None,
+                            output_folder=processed_folder,
+                            output_filename=output_filename
+                        )
+
+                        success = processor.process_all_blocks()
+
+                        if success:
+                            result_file = os.path.join(processed_folder, processor.output_filename)
+                            if os.path.exists(result_file):
+                                file_size = os.path.getsize(result_file)
+                                processed_files.append({
+                                    'input': file_basename,
+                                    'output': processor.output_filename,
+                                    'erp_filled': processor.total_filled,
+                                    'transit_filled': processor.total_transit_filled,
+                                    'file_size': file_size
+                                })
+                                total_erp_filled += processor.total_filled
+                                total_erp_skipped += processor.total_skipped
+                                total_transit_filled += processor.total_transit_filled
+                                total_transit_skipped += processor.total_transit_skipped
+                                print(f"  ✅ 成功: ERP填入 {processor.total_filled}, Transit填入 {processor.total_transit_filled}")
+                            else:
+                                print(f"  ❌ 結果文件未找到: {result_file}")
+                                failed_files.append({'input': file_basename, 'error': '結果文件未生成'})
+                        else:
+                            failed_files.append({'input': file_basename, 'error': '處理失敗'})
+
+                    except Exception as e:
+                        print(f"  ❌ 處理失敗: {str(e)}")
+                        import traceback
+                        traceback.print_exc()
+                        failed_files.append({'input': file_basename, 'error': str(e)})
 
             duration = time.time() - start_time
 
             if processed_files:
+                mode_label = '合併處理' if (merge_mode and len(multi_cleaned_files) > 1) else '多檔案處理'
                 log_process(user['id'], 'forecast', 'success',
-                          f'Liteon 多檔案處理: {len(processed_files)} 成功, ERP填入: {total_erp_filled}, Transit填入: {total_transit_filled}', duration)
+                          f'Liteon {mode_label}: {len(processed_files)} 成功, ERP填入: {total_erp_filled}, Transit填入: {total_transit_filled}', duration)
                 log_activity(user['id'], user['username'], 'forecast_success',
-                           f"Liteon FORECAST 多檔案處理成功: {len(processed_files)} 個檔案", get_client_ip(), request.headers.get('User-Agent'))
+                           f"Liteon FORECAST {mode_label}成功: {len(processed_files)} 個檔案", get_client_ip(), request.headers.get('User-Agent'))
 
                 return jsonify({
                     'success': True,
                     'message': f'FORECAST處理完成：{len(processed_files)} 個檔案',
                     'multi_file': True,
+                    'merged_mode': merge_mode and len(multi_cleaned_files) > 1,
                     'files': processed_files,
                     'failed_files': failed_files,
                     'file_count': len(multi_cleaned_files),
