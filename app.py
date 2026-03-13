@@ -1707,6 +1707,7 @@ def merge_liteon_forecast_files(cleaned_files, output_path):
     import openpyxl
     from openpyxl import Workbook
     from openpyxl.utils import get_column_letter
+    from openpyxl.formula.translate import Translator
     from copy import copy
     from datetime import datetime as _dt
 
@@ -1837,13 +1838,24 @@ def merge_liteon_forecast_files(cleaned_files, output_path):
                         cell.border = copy(row_style_cell.border)
                         cell.alignment = copy(row_style_cell.alignment)
 
-                # 複製資料欄位（值 + 格式 + 公式）
+                # 複製資料欄位（值 + 格式 + 公式，公式用 Translator 調整行列參照）
                 for col in range(1, ws.max_column + 1):
                     target_col = col_map.get(col)
                     if target_col:
                         src_cell = ws.cell(row=row, column=col)
                         tgt_cell = merged_ws.cell(row=current_row, column=target_col)
-                        _copy_cell(src_cell, tgt_cell)
+                        val = src_cell.value
+                        if isinstance(val, str) and val.startswith('='):
+                            # 公式：用 Translator 自動調整 row/col 參照
+                            try:
+                                orig_coord = f"{get_column_letter(col)}{row}"
+                                tgt_coord = f"{get_column_letter(target_col)}{current_row}"
+                                adjusted = Translator(val, orig_coord).translate_formula(tgt_coord)
+                                _copy_cell(src_cell, tgt_cell, value_override=adjusted)
+                            except Exception:
+                                _copy_cell(src_cell, tgt_cell)  # fallback: 原樣複製
+                        else:
+                            _copy_cell(src_cell, tgt_cell)
 
                 # 複製列高
                 if ws.row_dimensions[row].height:
@@ -4719,9 +4731,17 @@ def api_toggle_rule_status(rule_id):
 @app.route('/api/test/customers')
 @it_or_admin_required
 def api_get_test_customers():
-    """取得可測試的客戶列表"""
+    """取得可測試的客戶列表（依據 LOGIN_ALLOWED_CUSTOMERS 過濾）"""
     try:
         customers = get_users_with_company()
+
+        # 從環境變數讀取允許的客戶清單（逗號分隔，空白=全部顯示）
+        allowed = os.environ.get('LOGIN_ALLOWED_CUSTOMERS', '').strip()
+        allowed_list = [name.strip().lower() for name in allowed.split(',') if name.strip()] if allowed else []
+
+        if allowed_list:
+            customers = [c for c in customers if c['username'].lower() in allowed_list]
+
         return jsonify({'success': True, 'customers': customers})
     except Exception as e:
         print(f"❌ 取得客戶列表失敗: {e}")
