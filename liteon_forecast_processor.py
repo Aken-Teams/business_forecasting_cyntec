@@ -52,13 +52,16 @@ class LiteonForecastProcessor:
     MONTHLY_END_COL = 69     # Column BQ
 
     def __init__(self, forecast_file, erp_file, transit_file=None,
-                 output_folder=None, output_filename=None, merged_mode=False):
+                 output_folder=None, output_filename=None, merged_mode=False,
+                 plant_daily_end_dates=None):
         self.forecast_file = forecast_file
         self.erp_file = erp_file
         self.transit_file = transit_file
         self.output_folder = output_folder or os.path.dirname(forecast_file)
         self.output_filename = output_filename or 'forecast_result.xlsx'
         self.merged_mode = merged_mode
+        # 合併模式: 每個 Plant 的原始 Daily 結束日期 (限制 daily 欄位搜尋範圍)
+        self.plant_daily_end_dates = plant_daily_end_dates or {}
 
         # 合併模式: 所有欄位右移 2 (Plant + Buyer Code 佔 A, B)
         if merged_mode:
@@ -248,17 +251,29 @@ class LiteonForecastProcessor:
         else:
             self.transit_df = None
 
-    def _find_date_column(self, target_date):
+    def _find_date_column(self, target_date, plant=None):
         """
         找到目標日期對應的欄位。
         策略: 先找精確天 → 再找所屬周 → 再找所屬月
+
+        合併模式下，如果提供 plant 參數，會限制 daily 欄位搜尋不超過
+        該 Plant 原始檔案的 daily 結束日期，避免因合併後日期範圍擴大
+        而產生不一致的結果。
         """
         if target_date is None:
             return None
 
+        # 合併模式: 取得此 plant 的原始 daily 結束日期
+        plant_daily_limit = None
+        if self.merged_mode and plant and self.plant_daily_end_dates:
+            plant_daily_limit = self.plant_daily_end_dates.get(plant)
+
         # Step 1: 精確匹配日期 (BY天)
         for col, date_obj in self.date_map.items():
             if col > self.daily_end_col:
+                continue
+            # 合併模式: 如果日期超過此 plant 的原始 daily 範圍，跳過
+            if plant_daily_limit and date_obj > plant_daily_limit:
                 continue
             if date_obj == target_date:
                 return col
@@ -343,7 +358,8 @@ class LiteonForecastProcessor:
                     continue
 
             # Find target column (day → week → month fallback)
-            target_col = self._find_date_column(eta_date)
+            # 合併模式: 傳入 plant (region) 限制 daily 欄位範圍
+            target_col = self._find_date_column(eta_date, plant=region if self.merged_mode else None)
             if target_col is None:
                 self.total_transit_skipped += 1
                 continue
@@ -423,7 +439,8 @@ class LiteonForecastProcessor:
                     continue
 
                 # Find target column (day → week → month fallback)
-                target_col = self._find_date_column(target_date)
+                # 合併模式: 傳入 plant (region) 限制 daily 欄位範圍
+                target_col = self._find_date_column(target_date, plant=region if self.merged_mode else None)
                 if target_col is None:
                     self.total_skipped += 1
                     continue

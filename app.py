@@ -1721,6 +1721,7 @@ def merge_liteon_forecast_files(cleaned_files, output_path):
     header_written = False
     current_row = 2  # Row 1 = header, Row 2+ = data
     master_date_cols = {}  # date_value -> merged_col (1-based, already +2)
+    plant_daily_end_dates = {}  # plant_code -> last daily date (for each file's daily range)
 
     def _to_date(val):
         """Convert cell value to comparable date key"""
@@ -1816,6 +1817,19 @@ def merge_liteon_forecast_files(cleaned_files, output_path):
                 if d and d in master_date_cols:
                     col_map[col] = master_date_cols[d]
 
+            # 記錄此 Plant 的 Daily 結束日期（原始檔案的 daily 範圍）
+            # Daily columns: col 11 (K) ~ 41 (AO) in original file
+            DAILY_END_COL_ORIG = 41
+            last_daily_date = None
+            for col in range(DATE_COL_START, min(DAILY_END_COL_ORIG + 1, ws.max_column + 1)):
+                d = _to_date(ws.cell(row=7, column=col).value)
+                if d:
+                    if last_daily_date is None or d > last_daily_date:
+                        last_daily_date = d
+            if plant_code and last_daily_date:
+                plant_daily_end_dates[plant_code] = last_daily_date
+                print(f"[Merge]   Plant {plant_code} daily range ends: {last_daily_date}")
+
             # Copy data rows (Row 8+) with Plant and Buyer prepended (保留格式和公式)
             for row in range(8, ws.max_row + 1):
                 # Skip completely empty rows
@@ -1876,7 +1890,8 @@ def merge_liteon_forecast_files(cleaned_files, output_path):
 
     merged_wb.save(output_path)
     print(f"[Merge] 合併完成: {current_row - 2} 列 → {os.path.basename(output_path)}")
-    return current_row - 2  # return total data rows
+    print(f"[Merge] Plant Daily 結束日期: {plant_daily_end_dates}")
+    return current_row - 2, plant_daily_end_dates  # return (total_rows, plant_daily_end_dates)
 
 
 @app.route('/merge_forecast_files', methods=['POST'])
@@ -3455,7 +3470,7 @@ def run_forecast():
                 merged_file = os.path.join(processed_folder, 'merged_forecast.xlsx')
 
                 try:
-                    total_rows = merge_liteon_forecast_files(multi_cleaned_files, merged_file)
+                    total_rows, plant_daily_end_dates = merge_liteon_forecast_files(multi_cleaned_files, merged_file)
                     print(f"合併完成: {total_rows} 列資料")
 
                     output_filename = 'forecast_merged.xlsx'
@@ -3465,7 +3480,8 @@ def run_forecast():
                         transit_file=integrated_transit if has_transit else None,
                         output_folder=processed_folder,
                         output_filename=output_filename,
-                        merged_mode=True
+                        merged_mode=True,
+                        plant_daily_end_dates=plant_daily_end_dates
                     )
 
                     success = processor.process_all_blocks()
