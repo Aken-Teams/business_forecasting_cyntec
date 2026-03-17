@@ -280,14 +280,25 @@ class LiteonForecastProcessor:
 
         # Step 2: 找所屬的周 (BY周)
         # Weekly columns represent week start (Monday), find the week that contains target_date
+        first_weekly_col = None
+        first_weekly_date = None
         for col, date_obj in self.date_map.items():
             if col < self.weekly_start_col or col > self.weekly_end_col:
                 continue
+            # 記錄最早的 weekly 欄位（用於 GAP fallback）
+            if first_weekly_col is None or date_obj < first_weekly_date:
+                first_weekly_col = col
+                first_weekly_date = date_obj
             # Each weekly column covers a 7-day range starting from date_obj
             week_start = date_obj
             week_end = date_obj + timedelta(days=6)
             if week_start <= target_date <= week_end:
                 return col
+
+        # Step 2b: GAP fallback — 日期在 Daily 結束後、第一個 Weekly 開始前
+        # 這些日期落在 Daily-Weekly 之間的空白區，歸入最近的 Weekly 欄位
+        if first_weekly_date and target_date < first_weekly_date:
+            return first_weekly_col
 
         # Step 3: 找所屬的月 (BY月)
         for col, date_obj in self.date_map.items():
@@ -518,7 +529,9 @@ class LiteonForecastProcessor:
         if not date_text:
             return None
 
-        target_date = self._calculate_target_from_text(week_end, date_text)
+        # 排程日剛好落在斷點日 → 該天是新一週起點，計算邏輯不同
+        on_breakpoint = (schedule_date == week_end)
+        target_date = self._calculate_target_from_text(week_end, date_text, on_breakpoint)
 
         # 防護：目標日期不可早於排程出貨日期
         if target_date is not None and target_date < schedule_date:
@@ -552,13 +565,17 @@ class LiteonForecastProcessor:
         except (TypeError, ValueError):
             return None
 
-    def _calculate_target_from_text(self, week_end, date_text):
+    def _calculate_target_from_text(self, week_end, date_text, on_breakpoint=False):
         """
         從文字描述計算目標日期
         例如: "本週三" → week_end + 0 weeks + offset to Wednesday
               "下週一" → week_end + 1 week + offset to Monday
               "下下週二" → week_end + 2 weeks + offset to Tuesday
               "下下下週五" → week_end + 3 weeks + offset to Friday
+
+        on_breakpoint: 排程日剛好落在斷點日時為 True
+            此時斷點日是新一週的起始日，目標 weekday 在斷點日之後
+            否則斷點日是當週的結束日，目標 weekday 在斷點日之前
         """
         weekday_map = {
             '一': 0, '二': 1, '三': 2, '四': 3,
@@ -590,14 +607,21 @@ class LiteonForecastProcessor:
             return None
 
         # 以 week_end (斷點日) 為錨點計算
-        # 斷點日是一周的最後一天，目標 weekday 在同一周內（斷點日或之前）
-        # 例: 斷點=週一(0), 目標=週四(3) → days_diff = (3-0)%7 = 3, 3>0 → 3-7 = -4
-        #     表示目標在斷點日的前 4 天
         breakpoint_weekday = week_end.weekday()
         days_diff = (target_weekday - breakpoint_weekday) % 7
-        if days_diff > 0:
-            days_diff -= 7  # 目標在斷點日之前（同一周內）
-        # days_diff == 0 表示目標就是斷點日本身
+
+        if on_breakpoint:
+            # 排程日 == 斷點日: 斷點是新一週起始日，目標在斷點日或之後
+            # 例: 斷點=週一(0), 排程=3/30(一), 目標=週四(3)
+            #     days_diff = 3, 「下週四」= 3/30 + 7 + 3 = 4/9
+            pass  # days_diff 保持正值
+        else:
+            # 排程日 != 斷點日: 斷點是當週結束日，目標在斷點日之前
+            # 例: 斷點=週一(0), 排程=3/10(二), week_end=3/16(一), 目標=週四(3)
+            #     days_diff = 3 → -4, 「下週四」= 3/16 + 7 - 4 = 3/19
+            if days_diff > 0:
+                days_diff -= 7
+
         return week_end + timedelta(days=7 * weeks_offset + days_diff)
 
     def _apply_changes(self):
