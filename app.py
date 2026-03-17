@@ -2705,37 +2705,52 @@ def process_forecast_cleanup():
                 # 清理數據
                 cleaned_count = 0
 
-                for row_idx in range(1, ws.max_row + 1):
-                    # ========== pegatron 專屬清理邏輯 ==========
-                    if username == 'pegatron':
-                        # 檢查M欄位（第13列）是否為 "ETA QTY"
-                        m_cell = ws.cell(row=row_idx, column=13)
-                        if m_cell.value and str(m_cell.value).strip() == "ETA QTY":
-                            # 清空N~DN欄位（第14列到第118列）設為 0
-                            for col_idx in range(14, min(119, ws.max_column + 1)):
+                if username == 'liteon':
+                    # ========== liteon 專屬清理邏輯 ==========
+                    # 指定讀取 Daily+Weekly+Monthly sheet
+                    # 清理條件：C欄(column 3) = "Commit" 時，清零 J~BY 欄(column 10~77)
+                    if 'Daily+Weekly+Monthly' in wb.sheetnames:
+                        ws = wb['Daily+Weekly+Monthly']
+                    for row_idx in range(1, ws.max_row + 1):
+                        c_cell = ws.cell(row=row_idx, column=3)
+                        if c_cell.value and str(c_cell.value).strip() == "Commit":
+                            for col_idx in range(10, min(78, ws.max_column + 1)):  # J=10, BY=77
                                 cell = ws.cell(row=row_idx, column=col_idx)
                                 if cell.value is not None and cell.value != 0:
                                     cell.value = 0
                                     cleaned_count += 1
-                    # ========== quanta 原有清理邏輯 ==========
-                    else:
-                        # 檢查K欄位（第11列）是否為"供應數量"
-                        k_cell = ws.cell(row=row_idx, column=11)
-                        if k_cell.value and str(k_cell.value) == "供應數量":
-                            # 清空L~AW欄位（第12列到第49列）
-                            for col_idx in range(12, min(50, ws.max_column + 1)):
-                                cell = ws.cell(row=row_idx, column=col_idx)
-                                if cell.value != 0:
-                                    cell.value = 0
-                                    cleaned_count += 1
+                else:
+                    for row_idx in range(1, ws.max_row + 1):
+                        # ========== pegatron 專屬清理邏輯 ==========
+                        if username == 'pegatron':
+                            # 檢查M欄位（第13列）是否為 "ETA QTY"
+                            m_cell = ws.cell(row=row_idx, column=13)
+                            if m_cell.value and str(m_cell.value).strip() == "ETA QTY":
+                                # 清空N~DN欄位（第14列到第118列）設為 0
+                                for col_idx in range(14, min(119, ws.max_column + 1)):
+                                    cell = ws.cell(row=row_idx, column=col_idx)
+                                    if cell.value is not None and cell.value != 0:
+                                        cell.value = 0
+                                        cleaned_count += 1
+                        # ========== quanta 原有清理邏輯 ==========
+                        else:
+                            # 檢查K欄位（第11列）是否為"供應數量"
+                            k_cell = ws.cell(row=row_idx, column=11)
+                            if k_cell.value and str(k_cell.value) == "供應數量":
+                                # 清空L~AW欄位（第12列到第49列）
+                                for col_idx in range(12, min(50, ws.max_column + 1)):
+                                    cell = ws.cell(row=row_idx, column=col_idx)
+                                    if cell.value != 0:
+                                        cell.value = 0
+                                        cleaned_count += 1
 
-                        # 檢查I欄位（第9列）是否包含"庫存數量"
-                        i_cell = ws.cell(row=row_idx, column=9)
-                        if i_cell.value and "庫存數量" in str(i_cell.value):
-                            next_row_i_cell = ws.cell(row=row_idx + 1, column=9)
-                            if next_row_i_cell.value != 0:
-                                next_row_i_cell.value = 0
-                                cleaned_count += 1
+                            # 檢查I欄位（第9列）是否包含"庫存數量"
+                            i_cell = ws.cell(row=row_idx, column=9)
+                            if i_cell.value and "庫存數量" in str(i_cell.value):
+                                next_row_i_cell = ws.cell(row=row_idx + 1, column=9)
+                                if next_row_i_cell.value != 0:
+                                    next_row_i_cell.value = 0
+                                    cleaned_count += 1
 
                 # 保存清理後的文件
                 cleaned_file = os.path.join(processed_folder, 'cleaned_forecast.xlsx')

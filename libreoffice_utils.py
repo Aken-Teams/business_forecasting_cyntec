@@ -206,37 +206,54 @@ def cleanup_xls_file_libreoffice(file_path, output_path, username):
         max_col = ws.max_column
         print(f"  📊 檔案大小: {max_row} 行 x {max_col} 欄")
 
-        for row_idx in range(1, max_row + 1):
-            if row_idx % 100 == 0:
-                print(f"    處理進度: {row_idx}/{max_row} 行...")
-
-            if username == 'pegatron':
-                # 檢查M欄位（第13欄）是否為 "ETA QTY"
-                m_cell = ws.cell(row=row_idx, column=13)
-                if m_cell.value and str(m_cell.value).strip() == "ETA QTY":
-                    # 清空N~DN欄位（第14欄到第118欄）設為 0
-                    for col_idx in range(14, min(119, max_col + 1)):
+        if username == 'liteon':
+            # ========== liteon 專屬清理邏輯 ==========
+            # 指定讀取 Daily+Weekly+Monthly sheet
+            # 清理條件：C欄(column 3) = "Commit" 時，清零 J~BY 欄(column 10~77)
+            if 'Daily+Weekly+Monthly' in wb.sheetnames:
+                ws = wb['Daily+Weekly+Monthly']
+                max_row = ws.max_row
+                max_col = ws.max_column
+            for row_idx in range(1, max_row + 1):
+                c_cell = ws.cell(row=row_idx, column=3)
+                if c_cell.value and str(c_cell.value).strip() == "Commit":
+                    for col_idx in range(10, min(78, max_col + 1)):  # J=10, BY=77
                         cell = ws.cell(row=row_idx, column=col_idx)
                         if cell.value is not None and cell.value != 0 and cell.value != '':
                             cell.value = 0
                             cleaned_count += 1
-            else:
-                # quanta 清理邏輯
-                k_cell = ws.cell(row=row_idx, column=11)
-                if k_cell.value and str(k_cell.value) == "供應數量":
-                    for col_idx in range(12, min(50, max_col + 1)):
-                        cell = ws.cell(row=row_idx, column=col_idx)
-                        if cell.value != 0 and cell.value != '':
-                            cell.value = 0
-                            cleaned_count += 1
+        else:
+            for row_idx in range(1, max_row + 1):
+                if row_idx % 100 == 0:
+                    print(f"    處理進度: {row_idx}/{max_row} 行...")
 
-                i_cell = ws.cell(row=row_idx, column=9)
-                if i_cell.value and "庫存數量" in str(i_cell.value):
-                    if row_idx + 1 <= max_row:
-                        next_cell = ws.cell(row=row_idx + 1, column=9)
-                        if next_cell.value != 0 and next_cell.value != '':
-                            next_cell.value = 0
-                            cleaned_count += 1
+                if username == 'pegatron':
+                    # 檢查M欄位（第13欄）是否為 "ETA QTY"
+                    m_cell = ws.cell(row=row_idx, column=13)
+                    if m_cell.value and str(m_cell.value).strip() == "ETA QTY":
+                        # 清空N~DN欄位（第14欄到第118欄）設為 0
+                        for col_idx in range(14, min(119, max_col + 1)):
+                            cell = ws.cell(row=row_idx, column=col_idx)
+                            if cell.value is not None and cell.value != 0 and cell.value != '':
+                                cell.value = 0
+                                cleaned_count += 1
+                else:
+                    # quanta 清理邏輯
+                    k_cell = ws.cell(row=row_idx, column=11)
+                    if k_cell.value and str(k_cell.value) == "供應數量":
+                        for col_idx in range(12, min(50, max_col + 1)):
+                            cell = ws.cell(row=row_idx, column=col_idx)
+                            if cell.value != 0 and cell.value != '':
+                                cell.value = 0
+                                cleaned_count += 1
+
+                    i_cell = ws.cell(row=row_idx, column=9)
+                    if i_cell.value and "庫存數量" in str(i_cell.value):
+                        if row_idx + 1 <= max_row:
+                            next_cell = ws.cell(row=row_idx + 1, column=9)
+                            if next_cell.value != 0 and next_cell.value != '':
+                                next_cell.value = 0
+                                cleaned_count += 1
 
         # 保存修改後的 xlsx
         cleaned_xlsx = os.path.join(temp_dir, 'cleaned_temp.xlsx')
