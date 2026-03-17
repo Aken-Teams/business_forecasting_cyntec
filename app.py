@@ -3453,6 +3453,10 @@ def run_forecast():
             # ===== Liteon 專用處理：使用 LiteonForecastProcessor =====
             from liteon_forecast_processor import LiteonForecastProcessor
 
+            # 單檔案 fallback：如果沒有 cleaned_forecast_*.xlsx 但有 cleaned_forecast.xlsx
+            if not multi_cleaned_files and has_single_cleaned:
+                multi_cleaned_files = [single_cleaned_file]
+
             # 檢查是否為合併模式
             merge_mode = session.get('forecast_merge_mode', False)
             print(f"=== Liteon 模式：{len(multi_cleaned_files)} 個檔案, 合併模式: {merge_mode} ===")
