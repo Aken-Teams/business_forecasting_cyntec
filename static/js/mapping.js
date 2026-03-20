@@ -64,8 +64,9 @@ const DAY_OPTIONS = [
 function parseWeekDay(value) {
     if (!value) return { week: '', day: '' };
 
-    // 匹配格式如：本週一、下週二、下下週三、上週四
-    const weekPatterns = ['下下週', '下週', '本週', '上週'];
+    // 匹配格式如：本週一、下週二、下下週三、下下下週四、上週五
+    // 注意：長的模式必須在前面，避免 "下下下週" 被 "下下週" 先匹配到
+    const weekPatterns = ['下下下週', '下下週', '下週', '本週', '上週'];
     for (const week of weekPatterns) {
         if (value.startsWith(week)) {
             const day = value.substring(week.length);
