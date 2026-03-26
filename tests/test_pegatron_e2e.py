@@ -125,6 +125,14 @@ def create_test_erp(path):
     df.to_excel(path, index=False)
 
 
+def _mock_recalc(file_path, output_path=None):
+    """Mock recalculate: Balance 是數值不是公式，直接複製即可"""
+    target = output_path or file_path
+    if os.path.abspath(file_path) != os.path.abspath(target):
+        shutil.copy2(file_path, target)
+    return True
+
+
 # ============================================================
 # Tests
 # ============================================================
@@ -150,45 +158,38 @@ class TestPegatronEndToEnd:
             'output_file': str(output_dir / "result.xlsx"),
         }
 
-    @patch('libreoffice_utils.recalculate_xlsx')
-    def test_full_flow_commit(self, mock_recalc, test_env):
-        """
-        E2E: 3 groups → ERP 匹配 → 寫入 ETA QTY → Commit 判定
-        Group 1: Balance1 全正 → Y
-        Group 2: 都有負 → N
-        Group 3: Balance2 全正 → Y
-        """
-        # Mock recalculate: Balance 是數值不是公式，直接複製即可
-        def copy_file(file_path, output_path=None):
-            target = output_path or file_path
-            if os.path.abspath(file_path) != os.path.abspath(target):
-                shutil.copy2(file_path, target)
-            return True
-        mock_recalc.side_effect = copy_file
-
+    def _run_processor(self, test_env):
+        """建立並執行 processor"""
         processor = PegatronForecastProcessor(
             forecast_file=test_env['forecast'],
             erp_file=test_env['erp'],
             output_folder=test_env['output_dir'],
             output_filename='result.xlsx',
         )
+        processor.process_all_blocks()
+        return processor
 
-        success = processor.process_all_blocks()
-        assert success is True
+    @patch('pegatron_forecast_processor.PegatronForecastProcessor._fill_part_number_with_excel_com',
+           side_effect=Exception("skip Excel COM in test"))
+    @patch('libreoffice_utils.recalculate_xlsx', side_effect=_mock_recalc)
+    def test_full_flow_commit(self, mock_recalc, mock_excel_com, test_env):
+        """
+        E2E: 3 groups → ERP 匹配 → 寫入 ETA QTY → Commit 判定
+        Group 1: Balance1 全正 → Y
+        Group 2: 都有負 → N
+        Group 3: Balance2 全正 → Y
+        """
+        self._run_processor(test_env)
 
-        # 讀取輸出檔驗證
-        output_path = test_env['output_file']
-        assert os.path.exists(output_path)
-
-        wb = load_workbook(output_path)
+        wb = load_workbook(test_env['output_file'])
         ws = wb.active
 
-        # --- Commit 驗證 ---
+        # --- Commit 驗證 (openpyxl fallback 不插入欄位，col 12 不變) ---
         assert ws.cell(row=3, column=12).value == "Y", "Group 1: Balance1 全正 → Y"
         assert ws.cell(row=11, column=12).value == "N", "Group 2: 都有負值 → N"
         assert ws.cell(row=19, column=12).value == "Y", "Group 3: Balance2 全正 → Y"
 
-        # --- ETA QTY 驗證 (ERP 有匹配的 Group) ---
+        # --- ETA QTY 驗證 ---
         # Group 1: qty=5, *1000=5000, target=2026-04-03 (Fri) → week of 3/30 → col 15
         assert ws.cell(row=7, column=15).value == 5000, "Group 1 ETA QTY"
         # Group 3: qty=3, *1000=3000, target=2026-04-09 (Thu) → week of 4/6 → col 16
@@ -201,68 +202,63 @@ class TestPegatronEndToEnd:
 
         wb.close()
 
-    @patch('libreoffice_utils.recalculate_xlsx')
-    def test_commit_all_negative_is_n(self, mock_recalc, test_env):
+    @patch('pegatron_forecast_processor.PegatronForecastProcessor._fill_part_number_with_excel_com',
+           side_effect=Exception("skip Excel COM in test"))
+    @patch('libreoffice_utils.recalculate_xlsx', side_effect=_mock_recalc)
+    def test_commit_all_negative_is_n(self, mock_recalc, mock_excel_com, test_env):
         """單獨驗證: Balance1/2 都有負值 → Commit = N"""
-        def copy_file(file_path, output_path=None):
-            target = output_path or file_path
-            if os.path.abspath(file_path) != os.path.abspath(target):
-                shutil.copy2(file_path, target)
-            return True
-        mock_recalc.side_effect = copy_file
-
-        processor = PegatronForecastProcessor(
-            forecast_file=test_env['forecast'],
-            erp_file=test_env['erp'],
-            output_folder=test_env['output_dir'],
-            output_filename='result.xlsx',
-        )
-        processor.process_all_blocks()
+        self._run_processor(test_env)
 
         wb = load_workbook(test_env['output_file'])
         ws = wb.active
         assert ws.cell(row=11, column=12).value == "N"
         wb.close()
 
-    @patch('libreoffice_utils.recalculate_xlsx')
-    def test_erp_allocation_marked(self, mock_recalc, test_env):
+    @patch('pegatron_forecast_processor.PegatronForecastProcessor._fill_part_number_with_excel_com',
+           side_effect=Exception("skip Excel COM in test"))
+    @patch('libreoffice_utils.recalculate_xlsx', side_effect=_mock_recalc)
+    def test_erp_allocation_marked(self, mock_recalc, mock_excel_com, test_env):
         """驗證 ERP 已分配狀態被正確標記"""
-        def copy_file(file_path, output_path=None):
-            target = output_path or file_path
-            if os.path.abspath(file_path) != os.path.abspath(target):
-                shutil.copy2(file_path, target)
-            return True
-        mock_recalc.side_effect = copy_file
+        self._run_processor(test_env)
 
-        processor = PegatronForecastProcessor(
-            forecast_file=test_env['forecast'],
-            erp_file=test_env['erp'],
-            output_folder=test_env['output_dir'],
-            output_filename='result.xlsx',
-        )
-        processor.process_all_blocks()
-
-        # 驗證 ERP 已分配
         erp_df = pd.read_excel(test_env['erp'])
         assert (erp_df['已分配'] == '✓').sum() == 2, "2 筆 ERP 應被標記已分配"
 
-    @patch('libreoffice_utils.recalculate_xlsx')
-    def test_stats_correct(self, mock_recalc, test_env):
+    @patch('pegatron_forecast_processor.PegatronForecastProcessor._fill_part_number_with_excel_com',
+           side_effect=Exception("skip Excel COM in test"))
+    @patch('libreoffice_utils.recalculate_xlsx', side_effect=_mock_recalc)
+    def test_stats_correct(self, mock_recalc, mock_excel_com, test_env):
         """驗證統計數字"""
-        def copy_file(file_path, output_path=None):
-            target = output_path or file_path
-            if os.path.abspath(file_path) != os.path.abspath(target):
-                shutil.copy2(file_path, target)
-            return True
-        mock_recalc.side_effect = copy_file
-
-        processor = PegatronForecastProcessor(
-            forecast_file=test_env['forecast'],
-            erp_file=test_env['erp'],
-            output_folder=test_env['output_dir'],
-            output_filename='result.xlsx',
-        )
-        processor.process_all_blocks()
+        processor = self._run_processor(test_env)
 
         assert processor.total_filled == 2, "ERP 應有 2 筆更新"
         assert processor.total_transit_filled == 0, "無 Transit"
+
+    @patch('pegatron_forecast_processor.PegatronForecastProcessor._fill_part_number_with_excel_com',
+           side_effect=Exception("skip Excel COM in test"))
+    @patch('libreoffice_utils.recalculate_xlsx', side_effect=_mock_recalc)
+    def test_part_number_in_column_a(self, mock_recalc, mock_excel_com, test_env):
+        """
+        驗證: openpyxl fallback 將客戶料號寫入 A 欄 (不插入新欄)，
+        每個群組 8 列都填入料號。
+        """
+        self._run_processor(test_env)
+
+        wb = load_workbook(test_env['output_file'])
+        ws = wb.active
+
+        # 標題列
+        assert ws.cell(row=2, column=1).value == "PN Model", "A2 應為 PN Model 標題"
+
+        # 每個群組的 8 列都應有對應的客戶料號
+        for r in range(3, 11):
+            assert ws.cell(row=r, column=1).value == "PART001", f"Group 1 row {r} A欄=PART001"
+        for r in range(11, 19):
+            assert ws.cell(row=r, column=1).value == "PART002", f"Group 2 row {r} A欄=PART002"
+        for r in range(19, 27):
+            assert ws.cell(row=r, column=1).value == "PART003", f"Group 3 row {r} A欄=PART003"
+
+        # 原始欄位位置不變 (openpyxl fallback 不插入新欄)
+        assert ws.cell(row=2, column=6).value == "Plant", "Plant 欄位應維持 col 6"
+
+        wb.close()

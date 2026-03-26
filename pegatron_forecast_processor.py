@@ -220,12 +220,12 @@ class PegatronForecastProcessor:
 
             if not all_updates:
                 print("\n沒有需要更新的資料，複製原始檔案作為輸出")
-                # 即使沒有更新，也要建立輸出檔案讓用戶可以下載
                 if self.output_folder:
                     output_path = os.path.join(self.output_folder, self.output_filename)
                 else:
                     output_path = self.output_filename
                 shutil.copy2(self.forecast_file, output_path)
+                self._fill_part_number_to_column_a(output_path)
                 print(f"已輸出到: {output_path}")
                 return True
 
@@ -241,7 +241,10 @@ class PegatronForecastProcessor:
                     output_path = self.output_filename
                 self._update_commit_column(output_path)
 
-                # 8. 更新並保存已分配狀態
+                # 8. 寫入客戶料號到 A 欄 (最後一步，方便篩選)
+                self._fill_part_number_to_column_a(output_path)
+
+                # 9. 更新並保存已分配狀態
                 self._save_allocation_status()
 
                 print("\n" + "=" * 50)
@@ -501,6 +504,131 @@ class PegatronForecastProcessor:
                 shutil.rmtree(temp_dir)
             except:
                 pass
+
+    def _fill_part_number_to_column_a(self, output_path):
+        """
+        用 Excel COM 在最左邊插入新的 A 欄 (PN Model)，
+        將每個群組的客戶料號填入每一列（不合併儲存格）。
+        Excel COM 會正確處理公式參照和合併儲存格的位移。
+        """
+        import platform
+
+        print("\n=== 插入客戶料號欄位 (A 欄) ===")
+
+        abs_path = os.path.abspath(output_path)
+
+        if platform.system() == 'Windows':
+            try:
+                return self._fill_part_number_with_excel_com(abs_path)
+            except ImportError:
+                print("  win32com 不可用，改用 openpyxl fallback...")
+            except Exception as e:
+                print(f"  Excel COM 失敗: {e}，改用 openpyxl fallback...")
+
+        return self._fill_part_number_with_openpyxl(abs_path)
+
+    def _fill_part_number_with_excel_com(self, abs_path):
+        """用 Excel COM 插入 A 欄並填入客戶料號"""
+        import win32com.client
+        import pythoncom
+
+        pythoncom.CoInitialize()
+        excel = None
+        wb = None
+        try:
+            excel = win32com.client.Dispatch("Excel.Application")
+            excel.Visible = False
+            excel.DisplayAlerts = False
+
+            wb = excel.Workbooks.Open(abs_path)
+            ws = wb.ActiveSheet
+
+            # 1. 插入新的 A 欄（Excel 自動處理公式位移和合併儲存格）
+            ws.Columns("A:A").Insert()
+
+            # 2. 寫入標題
+            ws.Cells(2, 1).Value = "PN Model"
+
+            # 3. 掃描群組，填入客戶料號到每一列
+            #    insert 後原 M 欄 (13) → N 欄 (14)，原 I 欄 (9) → J 欄 (10)
+            count = 0
+            row_idx = 1
+            max_row = ws.UsedRange.Rows.Count + ws.UsedRange.Row - 1
+            while row_idx <= max_row:
+                m_val = ws.Cells(row_idx, 14).Value  # 原 M 欄 → N 欄
+                if m_val and str(m_val).strip() == "WEEK#":
+                    part_number = ws.Cells(row_idx + 1, 10).Value  # 原 I 欄 → J 欄
+                    if part_number:
+                        part_number = str(part_number).strip()
+                        for r in range(row_idx, min(row_idx + 8, max_row + 1)):
+                            ws.Cells(r, 1).Value = part_number
+                            # 確保 A 欄該 cell 不是合併儲存格
+                            if ws.Cells(r, 1).MergeCells:
+                                ws.Cells(r, 1).UnMerge()
+                                ws.Cells(r, 1).Value = part_number
+                        count += 1
+                    row_idx += 8
+                else:
+                    row_idx += 1
+
+            wb.Save()
+            wb.Close(SaveChanges=False)
+            wb = None
+
+            print(f"  ✅ 客戶料號欄位插入完成: {count} 個群組 (Excel COM)")
+            return True
+
+        except Exception as e:
+            if wb:
+                try:
+                    wb.Close(SaveChanges=False)
+                except:
+                    pass
+            raise
+        finally:
+            if excel:
+                excel.Quit()
+            pythoncom.CoUninitialize()
+
+    def _fill_part_number_with_openpyxl(self, abs_path):
+        """
+        Fallback: 用 openpyxl 寫入客戶料號到 A 欄。
+        注意: 此方法不插入新欄，直接覆寫 A 欄（適用於 A 欄無重要資料的情況）。
+        """
+        from openpyxl import load_workbook
+
+        try:
+            wb = load_workbook(abs_path)
+            ws = wb.active
+
+            ws.cell(row=2, column=1, value="PN Model")
+
+            count = 0
+            row_idx = 1
+            while row_idx <= ws.max_row:
+                m_val = ws.cell(row=row_idx, column=13).value
+                if m_val and str(m_val).strip() == "WEEK#":
+                    part_number = ws.cell(row=row_idx + 1, column=9).value
+                    if part_number:
+                        part_number = str(part_number).strip()
+                        for r in range(row_idx, min(row_idx + 8, ws.max_row + 1)):
+                            ws.cell(row=r, column=1, value=part_number)
+                        count += 1
+                    row_idx += 8
+                else:
+                    row_idx += 1
+
+            wb.save(abs_path)
+            wb.close()
+
+            print(f"  ✅ 客戶料號欄位寫入完成: {count} 個群組 (openpyxl fallback, 未插入新欄)")
+            return True
+
+        except Exception as e:
+            print(f"  ❌ 客戶料號欄位寫入失敗: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     def _save_allocation_status(self):
         """保存已分配狀態到 ERP 和 Transit 檔案"""
