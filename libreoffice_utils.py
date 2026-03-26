@@ -376,7 +376,9 @@ def write_to_excel_libreoffice(forecast_file, updates, output_path):
 
 def recalculate_xlsx(file_path, output_path=None):
     """
-    使用 LibreOffice headless 開啟並儲存 xlsx 檔案，強制公式重新計算。
+    開啟 Excel 檔案並強制公式重新計算。
+    Windows + Office → 使用 win32com (Excel COM)
+    Linux / 無 Office → fallback 到 LibreOffice headless
 
     Args:
         file_path: 輸入 xlsx 檔案路徑
@@ -385,12 +387,73 @@ def recalculate_xlsx(file_path, output_path=None):
     Returns:
         True if success, False otherwise
     """
+    target = output_path or file_path
+    abs_input = os.path.abspath(file_path)
+    abs_target = os.path.abspath(target)
+
+    # 優先嘗試 win32com (Windows + Office)
+    if platform.system() == 'Windows':
+        try:
+            return _recalculate_with_excel_com(abs_input, abs_target)
+        except ImportError:
+            print("  win32com 不可用，改用 LibreOffice...")
+        except Exception as e:
+            print(f"  Excel COM 失敗: {e}，改用 LibreOffice...")
+
+    # Fallback: LibreOffice headless
+    return _recalculate_with_libreoffice(abs_input, abs_target)
+
+
+def _recalculate_with_excel_com(abs_input, abs_target):
+    """使用 Excel COM (win32com) 重算公式"""
+    import win32com.client
+    import pythoncom
+
+    print(f"  🔄 重新計算公式 (Excel COM): {os.path.basename(abs_input)}")
+
+    # 如果 input != target，先複製
+    if abs_input != abs_target:
+        shutil.copy2(abs_input, abs_target)
+
+    pythoncom.CoInitialize()
+    excel = None
+    wb = None
+    try:
+        excel = win32com.client.Dispatch("Excel.Application")
+        excel.Visible = False
+        excel.DisplayAlerts = False
+
+        wb = excel.Workbooks.Open(abs_target)
+        wb.Application.CalculateFull()  # 強制全部重算
+        wb.Save()
+        wb.Close(SaveChanges=False)
+        wb = None
+
+        print(f"  ✅ 公式重算完成 (Excel COM)")
+        return True
+    except Exception as e:
+        print(f"  ❌ Excel COM 重算失敗: {e}")
+        if wb:
+            try:
+                wb.Close(SaveChanges=False)
+            except:
+                pass
+        raise
+    finally:
+        if excel:
+            try:
+                excel.Quit()
+            except:
+                pass
+        pythoncom.CoUninitialize()
+
+
+def _recalculate_with_libreoffice(abs_input, abs_target):
+    """使用 LibreOffice headless 重算公式"""
     temp_dir = tempfile.mkdtemp()
     try:
         libreoffice = get_libreoffice_path()
-        abs_input = os.path.abspath(file_path)
 
-        # 透過 convert-to xlsx 強制 LibreOffice 開啟、重算公式、儲存
         cmd = [
             libreoffice,
             '--headless',
@@ -400,23 +463,22 @@ def recalculate_xlsx(file_path, output_path=None):
             abs_input
         ]
 
-        print(f"  🔄 重新計算公式: {os.path.basename(file_path)}")
+        print(f"  🔄 重新計算公式 (LibreOffice): {os.path.basename(abs_input)}")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
 
-        basename = os.path.splitext(os.path.basename(file_path))[0]
+        basename = os.path.splitext(os.path.basename(abs_input))[0]
         recalc_path = os.path.join(temp_dir, f"{basename}.xlsx")
 
         if not os.path.exists(recalc_path):
             print(f"  ❌ LibreOffice 公式重算失敗: {result.stderr}")
             return False
 
-        target = output_path or file_path
-        shutil.copy2(recalc_path, target)
-        print(f"  ✅ 公式重算完成")
+        shutil.copy2(recalc_path, abs_target)
+        print(f"  ✅ 公式重算完成 (LibreOffice)")
         return True
 
     except Exception as e:
-        print(f"  ❌ 公式重算失敗: {e}")
+        print(f"  ❌ LibreOffice 公式重算失敗: {e}")
         return False
     finally:
         try:
@@ -483,12 +545,26 @@ def merge_excel_files_libreoffice(file_paths, output_path, skip_header=True):
             rows_copied = 0
             row_offset = dest_start_row - start_row  # 計算行偏移量
 
+            from openpyxl.formula.translate import Translator
+            from openpyxl.utils import get_column_letter as gcl
+
             dest_row = dest_start_row
             for row_idx in range(start_row, src_ws.max_row + 1):
                 for col_idx in range(1, src_ws.max_column + 1):
                     src_cell = src_ws.cell(row=row_idx, column=col_idx)
                     dest_cell = base_ws.cell(row=dest_row, column=col_idx)
-                    dest_cell.value = src_cell.value
+
+                    # 公式平移：調整列號參照（如同 Excel 複製貼上）
+                    if isinstance(src_cell.value, str) and src_cell.value.startswith('='):
+                        col_letter = gcl(col_idx)
+                        origin = f"{col_letter}{row_idx}"
+                        dest_ref = f"{col_letter}{dest_row}"
+                        try:
+                            dest_cell.value = Translator(src_cell.value, origin=origin).translate_formula(dest_ref)
+                        except Exception:
+                            dest_cell.value = src_cell.value  # fallback: 原樣複製
+                    else:
+                        dest_cell.value = src_cell.value
 
                     # 複製樣式（如果有）
                     if src_cell.has_style:
