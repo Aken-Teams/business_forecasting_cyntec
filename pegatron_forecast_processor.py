@@ -592,40 +592,66 @@ class PegatronForecastProcessor:
 
     def _fill_part_number_with_openpyxl(self, abs_path):
         """
-        Fallback: 用 openpyxl 寫入客戶料號到 A 欄。
-        注意: 此方法不插入新欄，直接覆寫 A 欄（適用於 A 欄無重要資料的情況）。
+        Fallback: 用 openpyxl 插入新 A 欄並寫入客戶料號。
+        insert_cols 不會更新公式參照，所以用 Translator 手動修正。
+        適用於 Linux / 無 Excel 環境。
         """
         from openpyxl import load_workbook
+        from openpyxl.formula.translate import Translator
+        from openpyxl.utils import get_column_letter
 
         try:
             wb = load_workbook(abs_path)
             ws = wb.active
 
-            ws.cell(row=2, column=1, value="PN Model")
-
-            count = 0
+            # 1. 先收集料號資料（insert 前的欄位位置）
+            pn_data = {}
             row_idx = 1
             while row_idx <= ws.max_row:
                 m_val = ws.cell(row=row_idx, column=13).value
                 if m_val and str(m_val).strip() == "WEEK#":
-                    part_number = ws.cell(row=row_idx + 1, column=9).value
-                    if part_number:
-                        part_number = str(part_number).strip()
-                        for r in range(row_idx, min(row_idx + 8, ws.max_row + 1)):
-                            ws.cell(row=r, column=1, value=part_number)
-                        count += 1
+                    pn = ws.cell(row=row_idx + 1, column=9).value
+                    if pn:
+                        pn_data[row_idx] = str(pn).strip()
                     row_idx += 8
                 else:
                     row_idx += 1
 
+            # 2. 插入新 A 欄（物理位移，但公式文字不會更新）
+            ws.insert_cols(1)
+
+            # 3. 修正所有公式參照（col +1 位移）
+            for row in ws.iter_rows(min_col=2, max_col=ws.max_column,
+                                     min_row=1, max_row=ws.max_row):
+                for cell in row:
+                    if isinstance(cell.value, str) and cell.value.startswith('='):
+                        orig_col = cell.column - 1
+                        origin = f"{get_column_letter(orig_col)}{cell.row}"
+                        dest = f"{get_column_letter(cell.column)}{cell.row}"
+                        try:
+                            cell.value = Translator(
+                                cell.value, origin=origin
+                            ).translate_formula(dest)
+                        except Exception:
+                            pass  # 無法翻譯的公式保持原樣
+
+            # 4. 寫入標題和客戶料號
+            ws.cell(row=2, column=1, value="PN Model")
+
+            count = 0
+            for row_idx, pn in pn_data.items():
+                for r in range(row_idx, min(row_idx + 8, ws.max_row + 1)):
+                    ws.cell(row=r, column=1, value=pn)
+                count += 1
+
             wb.save(abs_path)
             wb.close()
 
-            print(f"  ✅ 客戶料號欄位寫入完成: {count} 個群組 (openpyxl fallback, 未插入新欄)")
+            print(f"  ✅ 客戶料號欄位插入完成: {count} 個群組 (openpyxl + Translator)")
             return True
 
         except Exception as e:
-            print(f"  ❌ 客戶料號欄位寫入失敗: {e}")
+            print(f"  ❌ 客戶料號欄位插入失敗: {e}")
             import traceback
             traceback.print_exc()
             return False

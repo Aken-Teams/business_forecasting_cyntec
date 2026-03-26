@@ -137,6 +137,14 @@ def _mock_recalc(file_path, output_path=None):
 # Tests
 # ============================================================
 
+# insert_cols 後所有欄位右移 1:
+#   Commit: col 12 → 13
+#   ETA QTY: col 15 → 16, col 16 → 17
+#   Balance cols: 15~23 → 16~24
+#   Plant: col 6 → 7
+COL_SHIFT = 1
+
+
 class TestPegatronEndToEnd:
     """Pegatron 完整流程測試: ERP 匹配 → ETA QTY → Commit"""
 
@@ -184,19 +192,19 @@ class TestPegatronEndToEnd:
         wb = load_workbook(test_env['output_file'])
         ws = wb.active
 
-        # --- Commit 驗證 (openpyxl fallback 不插入欄位，col 12 不變) ---
-        assert ws.cell(row=3, column=12).value == "Y", "Group 1: Balance1 全正 → Y"
-        assert ws.cell(row=11, column=12).value == "N", "Group 2: 都有負值 → N"
-        assert ws.cell(row=19, column=12).value == "Y", "Group 3: Balance2 全正 → Y"
+        # --- Commit 驗證 (insert_cols 後 col 12 → 13) ---
+        assert ws.cell(row=3, column=12 + COL_SHIFT).value == "Y", "Group 1: Balance1 全正 → Y"
+        assert ws.cell(row=11, column=12 + COL_SHIFT).value == "N", "Group 2: 都有負值 → N"
+        assert ws.cell(row=19, column=12 + COL_SHIFT).value == "Y", "Group 3: Balance2 全正 → Y"
 
-        # --- ETA QTY 驗證 ---
-        # Group 1: qty=5, *1000=5000, target=2026-04-03 (Fri) → week of 3/30 → col 15
-        assert ws.cell(row=7, column=15).value == 5000, "Group 1 ETA QTY"
-        # Group 3: qty=3, *1000=3000, target=2026-04-09 (Thu) → week of 4/6 → col 16
-        assert ws.cell(row=23, column=16).value == 3000, "Group 3 ETA QTY"
+        # --- ETA QTY 驗證 (insert_cols 後 col +1) ---
+        # Group 1: qty=5, *1000=5000, target=2026-04-03 (Fri) → week of 3/30 → col 15 → 16
+        assert ws.cell(row=7, column=15 + COL_SHIFT).value == 5000, "Group 1 ETA QTY"
+        # Group 3: qty=3, *1000=3000, target=2026-04-09 (Thu) → week of 4/6 → col 16 → 17
+        assert ws.cell(row=23, column=16 + COL_SHIFT).value == 3000, "Group 3 ETA QTY"
 
-        # Group 2: 沒有 ERP 匹配 → ETA QTY 維持 0
-        for col in range(15, 24):
+        # Group 2: 沒有 ERP 匹配 → ETA QTY 維持 0 (cols 15~23 → 16~24)
+        for col in range(15 + COL_SHIFT, 24 + COL_SHIFT):
             val = ws.cell(row=15, column=col).value
             assert val == 0 or val is None, f"Group 2 ETA QTY col {col} should be 0"
 
@@ -211,7 +219,7 @@ class TestPegatronEndToEnd:
 
         wb = load_workbook(test_env['output_file'])
         ws = wb.active
-        assert ws.cell(row=11, column=12).value == "N"
+        assert ws.cell(row=11, column=12 + COL_SHIFT).value == "N"
         wb.close()
 
     @patch('pegatron_forecast_processor.PegatronForecastProcessor._fill_part_number_with_excel_com',
@@ -239,7 +247,7 @@ class TestPegatronEndToEnd:
     @patch('libreoffice_utils.recalculate_xlsx', side_effect=_mock_recalc)
     def test_part_number_in_column_a(self, mock_recalc, mock_excel_com, test_env):
         """
-        驗證: openpyxl fallback 將客戶料號寫入 A 欄 (不插入新欄)，
+        驗證: openpyxl fallback 插入新 A 欄 + Translator 修正公式，
         每個群組 8 列都填入料號。
         """
         self._run_processor(test_env)
@@ -250,7 +258,7 @@ class TestPegatronEndToEnd:
         # 標題列
         assert ws.cell(row=2, column=1).value == "PN Model", "A2 應為 PN Model 標題"
 
-        # 每個群組的 8 列都應有對應的客戶料號
+        # 每個群組的 8 列都應有對應的客戶料號（不合併）
         for r in range(3, 11):
             assert ws.cell(row=r, column=1).value == "PART001", f"Group 1 row {r} A欄=PART001"
         for r in range(11, 19):
@@ -258,7 +266,7 @@ class TestPegatronEndToEnd:
         for r in range(19, 27):
             assert ws.cell(row=r, column=1).value == "PART003", f"Group 3 row {r} A欄=PART003"
 
-        # 原始欄位位置不變 (openpyxl fallback 不插入新欄)
-        assert ws.cell(row=2, column=6).value == "Plant", "Plant 欄位應維持 col 6"
+        # 原本的資料應該右移一欄（原 col 6 Plant → col 7）
+        assert ws.cell(row=2, column=6 + COL_SHIFT).value == "Plant", "原 Plant 欄應右移到 G"
 
         wb.close()
