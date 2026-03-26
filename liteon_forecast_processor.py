@@ -28,7 +28,7 @@ Transit/ERP 填入邏輯:
 import os
 import pandas as pd
 import openpyxl
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 
 class LiteonForecastProcessor:
@@ -189,6 +189,8 @@ class LiteonForecastProcessor:
         """Parse a cell value to a date object"""
         if val is None or (isinstance(val, float) and pd.isna(val)):
             return None
+        if isinstance(val, date) and not isinstance(val, datetime):
+            return val
         if isinstance(val, datetime):
             return val.date()
         if hasattr(val, 'date') and callable(val.date):

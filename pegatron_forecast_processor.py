@@ -8,6 +8,7 @@ Pegatron Forecast Processor
 import pandas as pd
 import os
 import shutil
+import tempfile
 from datetime import datetime, timedelta
 
 
@@ -233,7 +234,14 @@ class PegatronForecastProcessor:
             success = self._write_to_excel(all_updates)
 
             if success:
-                # 7. 更新並保存已分配狀態
+                # 7. 更新 Commit 欄位 (基於 Balance1/Balance2)
+                if self.output_folder:
+                    output_path = os.path.join(self.output_folder, self.output_filename)
+                else:
+                    output_path = self.output_filename
+                self._update_commit_column(output_path)
+
+                # 8. 更新並保存已分配狀態
                 self._save_allocation_status()
 
                 print("\n" + "=" * 50)
@@ -404,6 +412,95 @@ class PegatronForecastProcessor:
             import traceback
             traceback.print_exc()
             return False
+
+    def _update_commit_column(self, output_path):
+        """
+        公式重算後讀取 Balance1/Balance2 的 R~W (cols 18-23) 值，
+        若 Balance1 或 Balance2 其中一列 R~W 全部 >= 0 → Commit = "Y"，否則 "N"。
+        寫入 Column L (12) 合併儲存格。
+        """
+        from libreoffice_utils import recalculate_xlsx
+        from openpyxl import load_workbook
+
+        print("\n=== 更新 Commit 欄位 ===")
+
+        temp_dir = tempfile.mkdtemp()
+        try:
+            # Step 1: 用 LibreOffice 重算公式
+            recalc_path = os.path.join(temp_dir, 'recalculated.xlsx')
+            if not recalculate_xlsx(output_path, recalc_path):
+                print("  ⚠️ 公式重算失敗，跳過 Commit 更新")
+                return False
+
+            # Step 2: 讀取重算後的 Balance 值 (data_only=True 取得快取數值)
+            wb_read = load_workbook(recalc_path, data_only=True)
+            ws_read = wb_read.active
+
+            # Step 3: 找群組 (M欄="WEEK#") 及其 Balance1/Balance2 行
+            def check_all_non_negative(row_num):
+                """檢查 R~W (cols 18-23) 是否全部 >= 0"""
+                if row_num is None:
+                    return False
+                for col in range(18, 24):  # R=18, S=19, T=20, U=21, V=22, W=23
+                    val = ws_read.cell(row=row_num, column=col).value
+                    if val is None or not isinstance(val, (int, float)) or val < 0:
+                        return False
+                return True
+
+            commit_values = {}  # {start_row: "Y" or "N"}
+            row_idx = 1
+            while row_idx <= ws_read.max_row:
+                m_val = ws_read.cell(row=row_idx, column=13).value
+                if m_val and str(m_val).strip() == "WEEK#":
+                    # 固定位置: offset+5 = Balance 第一列, offset+6 = Balance 第二列
+                    # 不依賴名稱（各廠區命名不同: Balance1/Balance(VMI)/...）
+                    balance1_row = row_idx + 5 if row_idx + 5 <= ws_read.max_row else None
+                    balance2_row = row_idx + 6 if row_idx + 6 <= ws_read.max_row else None
+
+                    b1_ok = check_all_non_negative(balance1_row)
+                    b2_ok = check_all_non_negative(balance2_row)
+                    commit = "Y" if (b1_ok or b2_ok) else "N"
+                    commit_values[row_idx] = commit
+
+                    row_idx += 8
+                else:
+                    row_idx += 1
+
+            wb_read.close()
+
+            if not commit_values:
+                print("  沒有找到需要更新的群組")
+                return True
+
+            # Step 4: 寫入 Commit 到原輸出檔的 Column L (12)
+            wb_write = load_workbook(output_path)
+            ws_write = wb_write.active
+
+            y_count = 0
+            n_count = 0
+            for start_row, commit in commit_values.items():
+                ws_write.cell(row=start_row, column=12).value = commit
+                if commit == "Y":
+                    y_count += 1
+                else:
+                    n_count += 1
+
+            wb_write.save(output_path)
+            wb_write.close()
+
+            print(f"  ✅ Commit 更新完成: {len(commit_values)} 個群組 (Y={y_count}, N={n_count})")
+            return True
+
+        except Exception as e:
+            print(f"  ❌ Commit 更新失敗: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+        finally:
+            try:
+                shutil.rmtree(temp_dir)
+            except:
+                pass
 
     def _save_allocation_status(self):
         """保存已分配狀態到 ERP 和 Transit 檔案"""

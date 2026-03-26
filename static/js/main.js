@@ -1507,21 +1507,6 @@ function buildTransitRequirementBanner() {
         icon = 'fa-exclamation-triangle';
     }
 
-    // 建立廠區列表
-    let regionDetails = '';
-    if (check.transit_not_required_regions && check.transit_not_required_regions.length > 0) {
-        regionDetails += `<div class="transit-region-list">
-            <span class="region-label">不需在途：</span>
-            <span class="region-values">${check.transit_not_required_regions.join('、')}</span>
-        </div>`;
-    }
-    if (check.transit_required_regions && check.transit_required_regions.length > 0) {
-        regionDetails += `<div class="transit-region-list">
-            <span class="region-label">需要在途：</span>
-            <span class="region-values warning">${check.transit_required_regions.join('、')}</span>
-        </div>`;
-    }
-
     return `
         <div class="confirm-transit-banner ${bannerClass}">
             <div class="transit-banner-header">
@@ -1530,7 +1515,6 @@ function buildTransitRequirementBanner() {
                 </div>
                 <span class="transit-text">${check.message}</span>
             </div>
-            ${regionDetails}
         </div>
     `;
 }

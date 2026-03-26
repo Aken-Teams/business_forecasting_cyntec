@@ -374,6 +374,57 @@ def write_to_excel_libreoffice(forecast_file, updates, output_path):
             pass
 
 
+def recalculate_xlsx(file_path, output_path=None):
+    """
+    使用 LibreOffice headless 開啟並儲存 xlsx 檔案，強制公式重新計算。
+
+    Args:
+        file_path: 輸入 xlsx 檔案路徑
+        output_path: 輸出路徑。若為 None，覆蓋原檔案。
+
+    Returns:
+        True if success, False otherwise
+    """
+    temp_dir = tempfile.mkdtemp()
+    try:
+        libreoffice = get_libreoffice_path()
+        abs_input = os.path.abspath(file_path)
+
+        # 透過 convert-to xlsx 強制 LibreOffice 開啟、重算公式、儲存
+        cmd = [
+            libreoffice,
+            '--headless',
+            '--calc',
+            '--convert-to', 'xlsx',
+            '--outdir', temp_dir,
+            abs_input
+        ]
+
+        print(f"  🔄 重新計算公式: {os.path.basename(file_path)}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+        basename = os.path.splitext(os.path.basename(file_path))[0]
+        recalc_path = os.path.join(temp_dir, f"{basename}.xlsx")
+
+        if not os.path.exists(recalc_path):
+            print(f"  ❌ LibreOffice 公式重算失敗: {result.stderr}")
+            return False
+
+        target = output_path or file_path
+        shutil.copy2(recalc_path, target)
+        print(f"  ✅ 公式重算完成")
+        return True
+
+    except Exception as e:
+        print(f"  ❌ 公式重算失敗: {e}")
+        return False
+    finally:
+        try:
+            shutil.rmtree(temp_dir)
+        except:
+            pass
+
+
 def merge_excel_files_libreoffice(file_paths, output_path, skip_header=True):
     """
     使用 LibreOffice + openpyxl 合併多個 Excel 檔案，保留格式
