@@ -21,11 +21,12 @@ class PegatronForecastProcessor:
     - 追蹤已分配狀態，避免重複分配
     """
 
-    def __init__(self, forecast_file, erp_file, transit_file=None, output_folder=None, output_filename=None):
+    def __init__(self, forecast_file, erp_file, transit_file=None, output_folder=None, output_filename=None, is_merged=False):
         self.forecast_file = forecast_file
         self.erp_file = erp_file
         self.transit_file = transit_file
         self.output_folder = output_folder
+        self.is_merged = is_merged  # 合併檔案才需要 A 欄客戶料號
         # 確保輸出為 xlsx 格式（避免轉換失敗）
         if output_filename:
             self.output_filename = os.path.splitext(output_filename)[0] + '.xlsx'
@@ -225,7 +226,8 @@ class PegatronForecastProcessor:
                 else:
                     output_path = self.output_filename
                 shutil.copy2(self.forecast_file, output_path)
-                self._fill_part_number_to_column_a(output_path)
+                if self.is_merged:
+                    self._fill_part_number_to_column_a(output_path)
                 print(f"已輸出到: {output_path}")
                 return True
 
@@ -241,8 +243,9 @@ class PegatronForecastProcessor:
                     output_path = self.output_filename
                 self._update_commit_column(output_path)
 
-                # 8. 寫入客戶料號到 A 欄 (最後一步，方便篩選)
-                self._fill_part_number_to_column_a(output_path)
+                # 8. 寫入客戶料號到 A 欄 (僅合併檔案，方便篩選)
+                if self.is_merged:
+                    self._fill_part_number_to_column_a(output_path)
 
                 # 9. 更新並保存已分配狀態
                 self._save_allocation_status()
@@ -620,7 +623,25 @@ class PegatronForecastProcessor:
             # 2. 插入新 A 欄（物理位移，但公式文字不會更新）
             ws.insert_cols(1)
 
-            # 3. 修正所有公式參照（col +1 位移）
+            # 3. 解除 A 欄的合併儲存格
+            #    insert_cols 可能將原本的合併範圍擴展到包含新的 A 欄，
+            #    需要把 A 欄從合併中移除，確保每列獨立可篩選。
+            merges_to_fix = []
+            for merge_range in list(ws.merged_cells.ranges):
+                if merge_range.min_col == 1:
+                    merges_to_fix.append(str(merge_range))
+
+            for merge_str in merges_to_fix:
+                ws.unmerge_cells(merge_str)
+                # 解析範圍，重新合併 B 欄起（排除 A 欄）
+                from openpyxl.utils.cell import range_boundaries
+                min_c, min_r, max_c, max_r = range_boundaries(merge_str)
+                if max_c >= 2:
+                    new_range = (f"{get_column_letter(2)}{min_r}:"
+                                 f"{get_column_letter(max_c)}{max_r}")
+                    ws.merge_cells(new_range)
+
+            # 4. 修正所有公式參照（col +1 位移）
             for row in ws.iter_rows(min_col=2, max_col=ws.max_column,
                                      min_row=1, max_row=ws.max_row):
                 for cell in row:
@@ -635,7 +656,7 @@ class PegatronForecastProcessor:
                         except Exception:
                             pass  # 無法翻譯的公式保持原樣
 
-            # 4. 寫入標題和客戶料號
+            # 5. 寫入標題和客戶料號
             ws.cell(row=2, column=1, value="PN Model")
 
             count = 0

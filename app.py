@@ -3751,7 +3751,8 @@ def run_forecast():
                     erp_file=integrated_erp,
                     transit_file=integrated_transit if has_transit else None,
                     output_folder=processed_folder,
-                    output_filename=output_filename
+                    output_filename=output_filename,
+                    is_merged=is_merged_forecast
                 )
 
                 success = processor.process_all_blocks()
