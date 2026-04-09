@@ -3097,12 +3097,14 @@ def process_erp_mapping():
             target_username = target_user.get('username', '').lower() if target_user else ''
             is_pegatron = target_username == 'pegatron'
             is_liteon = target_username == 'liteon'
-            print(f"IT: test_customer_id={test_customer_id}, is_pegatron={is_pegatron}, is_liteon={is_liteon}")
+            is_delta = target_username == 'delta'
+            print(f"IT: test_customer_id={test_customer_id}, is_pegatron={is_pegatron}, is_liteon={is_liteon}, is_delta={is_delta}")
         else:
             target_username = user['username'].lower()
             is_pegatron = target_username == 'pegatron'
             is_liteon = target_username == 'liteon'
-            print(f"user={user['username']}, is_pegatron={is_pegatron}, is_liteon={is_liteon}")
+            is_delta = target_username == 'delta'
+            print(f"user={user['username']}, is_pegatron={is_pegatron}, is_liteon={is_liteon}, is_delta={is_delta}")
 
         if is_pegatron:
             # === Pegatron 專用映射邏輯 ===
@@ -3260,6 +3262,53 @@ def process_erp_mapping():
 
             matched_count = (erp_df['客戶需求地區'] != '').sum()
             print(f"   Liteon ERP 映射完成: {matched_count}/{len(erp_df)} 行匹配成功")
+        elif is_delta:
+            # === Delta 專用 ERP 映射邏輯 ===
+            # 匹配規則: D欄(客戶簡稱) + AG欄(送貨地點) → mapping 表
+            # 帶入: 客戶需求地區、排程出貨日期斷點、ETD、ETA
+            print("🔧 使用 Delta 專用 ERP 映射邏輯...")
+
+            mapping_records = get_customer_mappings_raw(mapping_user_id)
+            print(f"   取得 {len(mapping_records)} 筆 mapping 記錄")
+
+            # 建立 lookup: (customer_name, delivery_location) -> mapping values
+            delta_erp_lookup = {}
+            for m in mapping_records:
+                cname = str(m['customer_name']).strip() if m['customer_name'] else ''
+                dl = str(m.get('delivery_location', '')).strip() if m.get('delivery_location') else ''
+                mapping_values = {
+                    'region': str(m['region']).strip() if m['region'] else '',
+                    'schedule_breakpoint': str(m['schedule_breakpoint']).strip() if m['schedule_breakpoint'] else '',
+                    'etd': str(m['etd']).strip() if m['etd'] else '',
+                    'eta': str(m['eta']).strip() if m['eta'] else '',
+                }
+                if cname and dl:
+                    delta_erp_lookup[(cname, dl)] = mapping_values
+
+            print(f"   建立 {len(delta_erp_lookup)} 筆 (客戶簡稱, 送貨地點) lookup")
+
+            # 動態查找 ERP 送貨地點欄位
+            delivery_col, err = find_column_by_name(erp_df, '送貨地點')
+            if err:
+                return jsonify({'success': False, 'message': f'Delta ERP {err}'})
+
+            print(f"   客戶簡稱欄位: {customer_col}")
+            print(f"   送貨地點欄位: {delivery_col}")
+
+            # 應用 Delta 映射
+            def get_delta_erp_mapping(row, field):
+                cust = str(row[customer_col]).strip() if pd.notna(row[customer_col]) else ''
+                deliv = str(row[delivery_col]).strip() if pd.notna(row[delivery_col]) else ''
+                mapping = delta_erp_lookup.get((cust, deliv), {})
+                return mapping.get(field, '')
+
+            erp_df['客戶需求地區'] = erp_df.apply(lambda row: get_delta_erp_mapping(row, 'region'), axis=1)
+            erp_df['排程出貨日期斷點'] = erp_df.apply(lambda row: get_delta_erp_mapping(row, 'schedule_breakpoint'), axis=1)
+            erp_df['ETD'] = erp_df.apply(lambda row: get_delta_erp_mapping(row, 'etd'), axis=1)
+            erp_df['ETA'] = erp_df.apply(lambda row: get_delta_erp_mapping(row, 'eta'), axis=1)
+
+            matched_count = (erp_df['客戶需求地區'] != '').sum()
+            print(f"   ✅ Delta ERP 映射完成: {matched_count}/{len(erp_df)} 行匹配成功")
         else:
             # === 原有映射邏輯（Quanta 等其他客戶）===
             # 應用映射到 ERP（使用客戶簡稱單欄位匹配）
@@ -3426,6 +3475,55 @@ def process_erp_mapping():
             transit_df.to_excel(integrated_transit_file, index=False)
             print(f"在途數據整合完成: {len(transit_df)} 行 (session: {session_timestamp})")
             transit_rows = len(transit_df)
+        elif is_delta:
+            # === Delta Transit 映射邏輯 ===
+            # 匹配規則: D欄(送貨地點) + K欄(客戶簡稱) → mapping 表 → 客戶需求地區
+            print("🔧 使用 Delta Transit 映射邏輯...")
+            transit_df = pd.read_excel(transit_file)
+
+            # 建立 lookup: (customer_name, delivery_location) -> region
+            delta_transit_lookup = {}
+            delta_mappings = get_customer_mappings_raw(mapping_user_id)
+            for m in delta_mappings:
+                cname = str(m['customer_name']).strip() if m['customer_name'] else ''
+                dl = str(m.get('delivery_location', '')).strip() if m.get('delivery_location') else ''
+                region = str(m['region']).strip() if m['region'] else ''
+                if cname and dl:
+                    delta_transit_lookup[(cname, dl)] = region
+
+            print(f"   建立 {len(delta_transit_lookup)} 筆 (客戶簡稱, 送貨地點) lookup")
+
+            # 動態查找 Transit 欄位
+            transit_customer_col, err = find_column_by_name(transit_df, ['客戶', '簡稱'])
+            if err:
+                return jsonify({'success': False, 'message': f'Delta Transit {err}'})
+
+            # Delta Transit 的送貨地點欄位使用英文 'Location' (D 欄)
+            transit_dl_col, err = find_column_by_name(transit_df, 'Location')
+            if err:
+                # 若找不到 Location，再嘗試中文欄位名
+                transit_dl_col, err = find_column_by_name(transit_df, '送貨地點')
+                if err:
+                    return jsonify({'success': False, 'message': f'Delta Transit 找不到送貨地點欄位 (Location)'})
+
+            print(f"   客戶簡稱欄位: {transit_customer_col}")
+            print(f"   送貨地點欄位: {transit_dl_col}")
+
+            def get_delta_transit_region(row):
+                cust = str(row[transit_customer_col]).strip() if pd.notna(row[transit_customer_col]) else ''
+                deliv = str(row[transit_dl_col]).strip() if pd.notna(row[transit_dl_col]) else ''
+                return delta_transit_lookup.get((cust, deliv), '')
+
+            transit_df['客戶需求地區'] = transit_df.apply(get_delta_transit_region, axis=1)
+
+            matched_count = (transit_df['客戶需求地區'] != '').sum()
+            print(f"   ✅ Delta Transit 映射完成: {matched_count}/{len(transit_df)} 行匹配成功")
+
+            transit_df['已分配'] = ''
+            integrated_transit_file = os.path.join(processed_folder, 'integrated_transit.xlsx')
+            transit_df.to_excel(integrated_transit_file, index=False)
+            print(f"✅ 在途數據整合完成: {len(transit_df)} 行 (session: {session_timestamp})")
+            transit_rows = len(transit_df)
         else:
             # === 原有 Transit 映射邏輯（Quanta 等其他客戶）===
             print("開始整合在途數據...")
@@ -3520,12 +3618,66 @@ def process_erp_mapping():
             print(f"✅ 在途數據整合完成: {len(transit_df)} 行 (session: {session_timestamp})")
             transit_rows = len(transit_df)
 
+        # === Delta Forecast C/D 欄位填入 (Delta 專用) ===
+        # 依 PLANT(B) 查 mapping 表的 region，帶入 C(客戶簡稱) 和 D(送貨地點)
+        forecast_cd_msg = ''
+        if is_delta:
+            forecast_file = find_file_with_extensions(upload_folder, 'forecast_data')
+            if forecast_file and os.path.exists(forecast_file):
+                print("🔧 開始填入 Delta Forecast C/D 欄位...")
+
+                # 建立 PLANT 代碼 -> (客戶簡稱, 送貨地點) lookup
+                plant_to_cd = {}
+                for m in get_customer_mappings_raw(mapping_user_id):
+                    region = str(m['region']).strip() if m['region'] else ''
+                    cname = str(m['customer_name']).strip() if m['customer_name'] else ''
+                    dl = str(m.get('delivery_location', '')).strip() if m.get('delivery_location') else ''
+                    if region:
+                        # region 可能是 "PSB5" 或 "PSB5 泰國"，取第一段作為 PLANT 代碼
+                        parts = region.split()
+                        plant_code = parts[0] if parts else region
+                        if plant_code not in plant_to_cd:
+                            plant_to_cd[plant_code] = (cname, dl)
+
+                print(f"   建立 {len(plant_to_cd)} 筆 PLANT → (C, D) lookup")
+
+                # 用 openpyxl 修改 forecast_data.xlsx (保留樣式/公式)
+                import openpyxl
+                wb_fc = openpyxl.load_workbook(forecast_file)
+                ws_fc = wb_fc.active
+
+                matched_rows = 0
+                total_rows = 0
+                for r in range(2, ws_fc.max_row + 1):
+                    plant_val = ws_fc.cell(row=r, column=2).value  # B = PLANT
+                    if plant_val is None or plant_val == '':
+                        continue
+                    total_rows += 1
+                    plant_str = str(plant_val).strip()
+                    if plant_str in plant_to_cd:
+                        cname, dl = plant_to_cd[plant_str]
+                        ws_fc.cell(row=r, column=3, value=cname)  # C = 客戶簡稱
+                        ws_fc.cell(row=r, column=4, value=dl)     # D = 送貨地點
+                        matched_rows += 1
+
+                wb_fc.save(forecast_file)
+
+                # 另存一份到 processed 資料夾作為紀錄
+                import shutil
+                integrated_forecast_file = os.path.join(processed_folder, 'integrated_forecast.xlsx')
+                shutil.copy2(forecast_file, integrated_forecast_file)
+
+                forecast_cd_msg = f', Forecast C/D 填入: {matched_rows}/{total_rows} 行'
+                print(f"   ✅ Delta Forecast C/D 填入完成: {matched_rows}/{total_rows} 行匹配")
+            else:
+                print("⚠️ 未找到 Forecast 檔案，跳過 C/D 填入")
+
         # 存儲 processed 資料夾路徑到 session
         session['current_processed_folder'] = processed_folder
 
         duration = time.time() - start_time
         # 記錄處理成功
-        transit_log_msg = f'ERP: {len(erp_df)} 行' + (', Transit: 已跳過' if transit_skipped else f', Transit: {transit_rows} 行')
+        transit_log_msg = f'ERP: {len(erp_df)} 行' + (', Transit: 已跳過' if transit_skipped else f', Transit: {transit_rows} 行') + forecast_cd_msg
         log_process(user['id'], 'mapping', 'success', transit_log_msg, duration)
         log_activity(user['id'], user['username'], 'mapping_success',
                    f"ERP 數據整合成功" + ("（在途已跳過）" if transit_skipped else " 和在途數據整合成功"), get_client_ip(), request.headers.get('User-Agent'))
