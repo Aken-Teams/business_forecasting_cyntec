@@ -2718,10 +2718,16 @@ def process_forecast_cleanup():
                     cleaned_count = 0
 
                     if username == 'delta':
-                        # 台達：合併後的匯總格式不需要清理 Supply 列
-                        # 直接複製到 cleaned 目錄即可
+                        # 台達：I欄="Supply" 的整列，從 J 欄到最後一欄清零
                         ws = wb.active
-                        cleaned_count = 0  # Delta 不清理
+                        for row_idx in range(1, ws.max_row + 1):
+                            i_cell = ws.cell(row=row_idx, column=9)  # I欄 = column 9
+                            if i_cell.value and str(i_cell.value).strip() == 'Supply':
+                                for col_idx in range(10, ws.max_column + 1):  # J=10 到最後
+                                    cell = ws.cell(row=row_idx, column=col_idx)
+                                    if cell.value is not None and cell.value != 0:
+                                        cell.value = 0
+                                        cleaned_count += 1
 
                     elif username == 'liteon':
                         # 光寶：指定讀取 Daily+Weekly+Monthly sheet
@@ -2834,7 +2840,19 @@ def process_forecast_cleanup():
                 # 清理數據
                 cleaned_count = 0
 
-                if username == 'liteon':
+                if username == 'delta':
+                    # ========== Delta 專屬清理邏輯 ==========
+                    # I欄="Supply" 的整列，從 J 欄到最後一欄清零
+                    for row_idx in range(1, ws.max_row + 1):
+                        i_cell = ws.cell(row=row_idx, column=9)  # I欄 = column 9
+                        if i_cell.value and str(i_cell.value).strip() == 'Supply':
+                            for col_idx in range(10, ws.max_column + 1):  # J=10 到最後
+                                cell = ws.cell(row=row_idx, column=col_idx)
+                                if cell.value is not None and cell.value != 0:
+                                    cell.value = 0
+                                    cleaned_count += 1
+
+                elif username == 'liteon':
                     # ========== liteon 專屬清理邏輯 ==========
                     # 指定讀取 Daily+Weekly+Monthly sheet
                     # 清理條件：C欄(column 3) = "Commit" 時，清零 J~BY 欄(column 10~77)
