@@ -1306,6 +1306,13 @@ def create_default_users():
                     'display_name': '廣達用戶',
                     'role': 'user',
                     'company': '廣達電腦'
+                },
+                {
+                    'username': 'delta',
+                    'password': 'delta123',
+                    'display_name': '台達用戶',
+                    'role': 'user',
+                    'company': '台達電子'
                 }
             ]
 
