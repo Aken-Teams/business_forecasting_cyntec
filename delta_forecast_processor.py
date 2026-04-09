@@ -227,18 +227,74 @@ def _normalize_date_header(val):
 def _sort_date_cols(dates):
     """
     排序日期欄位: PASSDUE → 週日期(YYYYMMDD) → 月份(從最後週日期的月份開始)
+
+    自動處理兩種異常情況:
+    1. 拒絕不合理的日期: 年份 > 當前年份 + 5 (例: 20591231 會被過濾)
+    2. 偵測「月末日期冒充週日期」: 若週日期排序後連續兩個日期間隔 > 14 天,
+       則從該處切分; 後段日期視為月末桶, 依年月轉換為月份標籤 (JAN~DEC)。
+
+    Returns:
+        tuple(date_cols, conversions)
+        - date_cols: list — 排序後的日期欄位
+        - conversions: dict — {原始 YYYYMMDD: 轉換後的月份標籤 或 None (被拒絕)}
+                       讀取器在比對原始檔案 header 時使用此 map 修正對應關係。
     """
     passdue = [d for d in dates if d == 'PASSDUE']
-    weekly = sorted([d for d in dates if d.isdigit() and len(d) == 8])
-    monthly = [d for d in dates if d in MONTH_NAMES]
+    raw_weekly = sorted([d for d in dates if d.isdigit() and len(d) == 8])
+    explicit_monthly = set(d for d in dates if d in MONTH_NAMES)
 
-    if weekly and monthly:
-        # 根據最後一個週日期的月份決定月份排序起點
-        last_month_idx = int(weekly[-1][4:6]) - 1  # 0-based
+    conversions = {}
+
+    # 1. Sanity check: 拒絕年份 > 當前 + 5
+    current_year = datetime.now().year
+    sanity_max_year = current_year + 5
+    sane_weekly = []
+    for d in raw_weekly:
+        year = int(d[:4])
+        if year > sanity_max_year:
+            conversions[d] = None  # 拒絕
+        else:
+            sane_weekly.append(d)
+    rejected = [d for d, v in conversions.items() if v is None]
+    if rejected:
+        print(f"   ⚠️ 拒絕超出合理範圍的日期 (year > {sanity_max_year}): {rejected}")
+
+    # 2. 偵測 gap > 14 天 → 後段視為月末桶
+    split_idx = len(sane_weekly)
+    for i in range(len(sane_weekly) - 1):
+        cur = datetime.strptime(sane_weekly[i], '%Y%m%d')
+        nxt = datetime.strptime(sane_weekly[i + 1], '%Y%m%d')
+        if (nxt - cur).days > 14:
+            split_idx = i + 1
+            break
+
+    true_weekly = sane_weekly[:split_idx]
+    monthly_from_weekly = sane_weekly[split_idx:]
+
+    # 將月末 YYYYMMDD 轉換為月份標籤 (JAN~DEC)
+    auto_monthly = set()
+    for d in monthly_from_weekly:
+        m_idx = int(d[4:6]) - 1  # 0-based
+        label = MONTH_NAMES[m_idx]
+        auto_monthly.add(label)
+        conversions[d] = label
+
+    if monthly_from_weekly:
+        labels_ordered = sorted(auto_monthly, key=lambda x: MONTH_NAMES.index(x))
+        print(f"   🔄 偵測到月末日期序列 (gap > 14 天): {monthly_from_weekly} → {labels_ordered}")
+
+    # 3. 合併 explicit_monthly 與 auto_monthly
+    all_monthly = explicit_monthly | auto_monthly
+    monthly = list(all_monthly)
+
+    if true_weekly and monthly:
+        last_month_idx = int(true_weekly[-1][4:6]) - 1  # 0-based
         rotated = list(MONTH_NAMES[last_month_idx:]) + list(MONTH_NAMES[:last_month_idx])
         monthly.sort(key=lambda m: rotated.index(m))
+    elif monthly:
+        monthly.sort(key=lambda m: MONTH_NAMES.index(m))
 
-    return passdue + weekly + monthly
+    return passdue + true_weekly + monthly, conversions
 
 
 def extract_dates_from_files(detected_files):
@@ -301,8 +357,8 @@ def extract_dates_from_files(detected_files):
     else:
         print(f"  ⚠️ 日期不完全一致，共 {len(warnings)} 個差異，已取聯集 ({len(all_dates)} 個日期)")
 
-    date_cols = _sort_date_cols(all_dates)
-    return date_cols, per_file_dates, warnings
+    date_cols, conversions = _sort_date_cols(all_dates)
+    return date_cols, per_file_dates, warnings, conversions
 
 
 # 舊名稱保留做向後相容 (app.py 可能還在用)
@@ -325,13 +381,26 @@ def extract_dates_from_buyer_files(buyer_files):
 # Buyer 讀取器
 # ---------------------------------------------------------------------------
 
-def _build_date_col_map(ws, start_col, date_cols):
-    """建立 column → date_key 的映射，避免同名碰撞 (如 2026-JUL 和 2027-JUL)"""
+def _build_date_col_map(ws, start_col, date_cols, conversions=None):
+    """
+    建立 column → date_key 的映射，避免同名碰撞 (如 2026-JUL 和 2027-JUL)。
+
+    conversions: dict {原始 YYYYMMDD: 轉換後月份標籤 或 None}。
+                 當 _sort_date_cols 將月末日期轉為月份標籤時，讀取器需靠此 map
+                 把來源檔的原始 header 映射到最終 date_cols 的鍵值。
+    """
     date_col_map = {}
     seen_keys = set()
     for cell in ws[1]:
         if cell.value is not None and cell.column >= start_col:
             norm = _normalize_date_header(cell.value)
+            if norm is None:
+                continue
+            # 套用轉換 (例: 20270131 → JAN)
+            if conversions and norm in conversions:
+                norm = conversions[norm]
+                if norm is None:
+                    continue  # 被拒絕 (例: 20591231)
             if norm in date_cols and norm not in seen_keys:
                 date_col_map[cell.column] = norm
                 seen_keys.add(norm)
@@ -383,12 +452,12 @@ def match_plants_in_filename(filepath, plant_codes):
     return matched
 
 
-def _read_ketwadee(filepath, date_cols, buyer_label=None, plant_code=None):
+def _read_ketwadee(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
     """讀取 PSB5 Ketwadee: MRP sheet, 3 rows/part"""
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     ws = wb['MRP']
 
-    date_col_map = _build_date_col_map(ws, 16, date_cols)
+    date_col_map = _build_date_col_map(ws, 16, date_cols, conversions)
 
     results = []
     max_col = ws.max_column
@@ -437,12 +506,12 @@ def _read_ketwadee(filepath, date_cols, buyer_label=None, plant_code=None):
     return results
 
 
-def _read_kanyanat(filepath, date_cols, buyer_label=None, plant_code=None):
+def _read_kanyanat(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
     """讀取 PSB7 Kanyanat: Sheet1, 4 rows/part"""
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     ws = wb['Sheet1']
 
-    date_col_map = _build_date_col_map(ws, 25, date_cols)
+    date_col_map = _build_date_col_map(ws, 25, date_cols, conversions)
 
     results = []
     max_col = ws.max_column
@@ -490,12 +559,12 @@ def _read_kanyanat(filepath, date_cols, buyer_label=None, plant_code=None):
     return results
 
 
-def _read_weeraya(filepath, date_cols, buyer_label=None, plant_code=None):
+def _read_weeraya(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
     """讀取 PSB7 Weeraya: Sheet1, 5 rows/part"""
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     ws = wb['Sheet1']
 
-    date_col_map = _build_date_col_map(ws, 14, date_cols)
+    date_col_map = _build_date_col_map(ws, 14, date_cols, conversions)
 
     results = []
     max_col = ws.max_column
@@ -541,7 +610,7 @@ def _read_weeraya(filepath, date_cols, buyer_label=None, plant_code=None):
     return results
 
 
-def _read_india_iai1(filepath, date_cols, buyer_label=None, plant_code=None):
+def _read_india_iai1(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
     """
     讀取 India IAI1: PAN JIT sheet, 3 rows/part (Demand/Supply/Balance)
     col 3 = PLANT (每列讀), col 4 = PARTNO, col 7 = VENDOR PARTNO,
@@ -551,7 +620,7 @@ def _read_india_iai1(filepath, date_cols, buyer_label=None, plant_code=None):
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     ws = wb['PAN JIT']
 
-    date_col_map = _build_date_col_map(ws, 14, date_cols)
+    date_col_map = _build_date_col_map(ws, 14, date_cols, conversions)
 
     results = []
     max_col = ws.max_column
@@ -599,7 +668,7 @@ def _read_india_iai1(filepath, date_cols, buyer_label=None, plant_code=None):
     return results
 
 
-def _read_psw1_cew1(filepath, date_cols, buyer_label=None, plant_code=None):
+def _read_psw1_cew1(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
     """
     讀取 PSW1+CEW1: Sheet1, 5 rows/part (A-Demand/B-Supply/C-Net/D-ETD/E-Remark)
     col 3 = PLANT, col 6 = PN, col 8 = MFG (vendor part),
@@ -610,7 +679,7 @@ def _read_psw1_cew1(filepath, date_cols, buyer_label=None, plant_code=None):
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     ws = wb['Sheet1']
 
-    date_col_map = _build_date_col_map(ws, 14, date_cols)
+    date_col_map = _build_date_col_map(ws, 14, date_cols, conversions)
 
     results = []
     max_col = ws.max_column
@@ -659,7 +728,7 @@ def _read_psw1_cew1(filepath, date_cols, buyer_label=None, plant_code=None):
     return results
 
 
-def _read_mwc1ipc1(filepath, date_cols, buyer_label=None, plant_code=None):
+def _read_mwc1ipc1(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
     """
     讀取 MWC1+IPC1: Sheet1, 4 rows/part
     (GROSS REQTS/FIRM ORDERS/VENDOR CFM/NET AVAIL)
@@ -671,7 +740,7 @@ def _read_mwc1ipc1(filepath, date_cols, buyer_label=None, plant_code=None):
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     ws = wb['Sheet1']
 
-    date_col_map = _build_date_col_map(ws, 9, date_cols)
+    date_col_map = _build_date_col_map(ws, 9, date_cols, conversions)
 
     results = []
     max_col = ws.max_column
@@ -720,7 +789,7 @@ def _read_mwc1ipc1(filepath, date_cols, buyer_label=None, plant_code=None):
     return results
 
 
-def _read_nbq1(filepath, date_cols, buyer_label=None, plant_code=None):
+def _read_nbq1(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
     """
     讀取 NBQ1: PAN JIT sheet, 1 row/part
     col 1 = PARTNO, col 3 = VENDOR PARTNO, col 15 = STOCK,
@@ -731,7 +800,7 @@ def _read_nbq1(filepath, date_cols, buyer_label=None, plant_code=None):
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     ws = wb['PAN JIT']
 
-    date_col_map = _build_date_col_map(ws, 16, date_cols)
+    date_col_map = _build_date_col_map(ws, 16, date_cols, conversions)
 
     results = []
     max_col = ws.max_column
@@ -764,7 +833,7 @@ def _read_nbq1(filepath, date_cols, buyer_label=None, plant_code=None):
     return results
 
 
-def _read_svc1pwc1_diode_mos(filepath, date_cols, buyer_label=None, plant_code=None):
+def _read_svc1pwc1_diode_mos(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
     """
     讀取 SVC1+PWC1 DIODE&MOS: 同時處理 Diode 和 MOS 兩個 sheet, 1 row/part
     col 1 = PLANT (每列讀), col 3 = PARTNO, col 5 = VENDOR PARTNO, col 8 = STOCK,
@@ -779,7 +848,7 @@ def _read_svc1pwc1_diode_mos(filepath, date_cols, buyer_label=None, plant_code=N
         if sheet_name not in wb.sheetnames:
             continue
         ws = wb[sheet_name]
-        date_col_map = _build_date_col_map(ws, 9, date_cols)
+        date_col_map = _build_date_col_map(ws, 9, date_cols, conversions)
         max_col = ws.max_column
 
         for row in ws.iter_rows(min_row=2, max_row=ws.max_row,
@@ -1131,7 +1200,9 @@ def consolidate(forecast_files, reference_template, output_path,
         print(f"  [{FORMAT_LABELS.get(fmt, fmt)}] {os.path.basename(fp)}")
 
     # 2. 從所有檔案動態提取日期欄位 (取聯集)
-    date_cols, per_file_dates, date_warnings = extract_dates_from_files(detected)
+    #    conversions: {原始 YYYYMMDD: 月份標籤 或 None}，讀取器要用這個 map
+    #    把來源檔的月末日期轉換為月份標籤 (避免週/月欄位重複)。
+    date_cols, per_file_dates, date_warnings, conversions = extract_dates_from_files(detected)
     if not date_cols:
         return {
             'success': False, 'part_count': 0,
@@ -1139,6 +1210,13 @@ def consolidate(forecast_files, reference_template, output_path,
         }
 
     print(f"  統一日期欄位: {len(date_cols)} 個 ({date_cols[0]} ~ {date_cols[-1]})")
+    if conversions:
+        non_null_conv = {k: v for k, v in conversions.items() if v is not None}
+        rejected_conv = [k for k, v in conversions.items() if v is None]
+        if non_null_conv:
+            print(f"  月末→月份轉換: {non_null_conv}")
+        if rejected_conv:
+            print(f"  拒絕日期: {rejected_conv}")
 
     # 3. 讀取各檔案資料
     # Buyer 欄位暫時使用檔案名稱 (不含副檔名)，等客戶確認代碼→名稱對照後再調整邏輯。
@@ -1175,7 +1253,8 @@ def consolidate(forecast_files, reference_template, output_path,
 
         try:
             data = reader(fp, date_cols,
-                          buyer_label=buyer_label, plant_code=plant_code)
+                          buyer_label=buyer_label, plant_code=plant_code,
+                          conversions=conversions)
         except Exception as e:
             return {
                 'success': False, 'part_count': 0,
