@@ -20,48 +20,131 @@ from openpyxl.styles.colors import Color
 
 
 # ---------------------------------------------------------------------------
-# Buyer 自動偵測
+# 格式常數
 # ---------------------------------------------------------------------------
 
-def detect_buyer(filepath):
+FORMAT_KETWADEE = 'ketwadee'              # MRP sheet, 3 rows/part
+FORMAT_KANYANAT = 'kanyanat'              # Sheet1, 4 rows/part (col 24=TYPE)
+FORMAT_WEERAYA = 'weeraya'                # Sheet1, 5 rows/part (col 12=TYPE)
+FORMAT_INDIA_IAI1 = 'india_iai1'          # PAN JIT, 3 rows/part, 多PLANT
+FORMAT_PSW1_CEW1 = 'psw1_cew1'            # Sheet1, 5 rows/part (col 12=Status), 多PLANT
+FORMAT_MWC1IPC1 = 'mwc1ipc1'              # Sheet1, 4 rows/part (col 6=REQUEST ITEM), 多PLANT
+FORMAT_NBQ1 = 'nbq1'                      # PAN JIT, 1 row/part, 單PLANT檔名
+FORMAT_SVC1PWC1_DIODE_MOS = 'svc1pwc1_diode_mos'  # Diode+MOS, 1 row/part, 多PLANT
+
+FORMAT_LABELS = {
+    FORMAT_KETWADEE: 'Ketwadee (PSB5)',
+    FORMAT_KANYANAT: 'Kanyanat (PSB7)',
+    FORMAT_WEERAYA:  'Weeraya (PSB7)',
+    FORMAT_INDIA_IAI1: 'India IAI1/UPI2/DFI1',
+    FORMAT_PSW1_CEW1: 'PSW1+CEW1',
+    FORMAT_MWC1IPC1:  'MWC1+IPC1',
+    FORMAT_NBQ1:      'NBQ1',
+    FORMAT_SVC1PWC1_DIODE_MOS: 'SVC1+PWC1 (Diode&MOS)',
+}
+
+# 單 PLANT 檔案 (PLANT 從檔名比對)
+SINGLE_PLANT_FORMATS = {
+    FORMAT_KETWADEE, FORMAT_KANYANAT, FORMAT_WEERAYA, FORMAT_NBQ1,
+}
+# 多 PLANT 檔案 (PLANT 從檔案每列讀)
+MULTI_PLANT_FORMATS = {
+    FORMAT_INDIA_IAI1, FORMAT_PSW1_CEW1, FORMAT_MWC1IPC1, FORMAT_SVC1PWC1_DIODE_MOS,
+}
+
+
+# ---------------------------------------------------------------------------
+# 格式自動偵測
+# ---------------------------------------------------------------------------
+
+def _cell_str(ws, row, col):
+    """安全取 cell 字串值"""
+    try:
+        v = ws.cell(row=row, column=col).value
+        return str(v).strip() if v is not None else ''
+    except Exception:
+        return ''
+
+
+def detect_format(filepath):
     """
-    自動偵測 Forecast 檔案屬於哪個 Buyer。
-    Returns: 'Ketwadee' | 'Kanyanat' | 'Weeraya' | None
+    自動偵測 Delta Forecast 檔案屬於哪種格式。
+    Returns: FORMAT_* 常數之一，無法識別則回傳 None
     """
     try:
         wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
-        sheet_names = wb.sheetnames
+        sheets = wb.sheetnames
 
-        # Ketwadee: 有 MRP sheet
-        if 'MRP' in sheet_names:
+        # === 最明確: 兩個 sheet 組合 ===
+        if 'Diode' in sheets and 'MOS' in sheets:
             wb.close()
-            return 'Ketwadee'
+            return FORMAT_SVC1PWC1_DIODE_MOS
 
-        # Kanyanat / Weeraya 都用 Sheet1
-        if 'Sheet1' not in sheet_names:
+        # === 唯一 sheet 名稱: MRP → Ketwadee ===
+        if 'MRP' in sheets:
             wb.close()
-            return None
+            return FORMAT_KETWADEE
 
-        ws = wb['Sheet1']
-
-        # Kanyanat: col X (24) 有 'A-Demand'
-        for row in ws.iter_rows(min_row=2, max_row=min(20, ws.max_row or 20),
-                                min_col=24, max_col=24, values_only=True):
-            if row[0] and 'A-Demand' in str(row[0]):
+        # === PAN JIT sheet: 分辨 India IAI1 vs NBQ1 ===
+        if 'PAN JIT' in sheets:
+            ws = wb['PAN JIT']
+            h1 = _cell_str(ws, 1, 1)
+            h3 = _cell_str(ws, 1, 3)
+            h13 = _cell_str(ws, 1, 13)
+            # India IAI1: col 3 = PLANT, col 13 = Request
+            if h3.upper() == 'PLANT' and h13.lower() == 'request':
                 wb.close()
-                return 'Kanyanat'
-
-        # Weeraya: col L (12) 有 'Demand'
-        for row in ws.iter_rows(min_row=2, max_row=min(20, ws.max_row or 20),
-                                min_col=12, max_col=12, values_only=True):
-            if row[0] and str(row[0]).strip() == 'Demand':
+                return FORMAT_INDIA_IAI1
+            # NBQ1: col 1 = PARTNO, no PLANT/Request
+            if h1.upper() == 'PARTNO':
                 wb.close()
-                return 'Weeraya'
+                return FORMAT_NBQ1
+
+        # === Sheet1: 5 種格式 ===
+        if 'Sheet1' in sheets:
+            ws = wb['Sheet1']
+            h1 = _cell_str(ws, 1, 1)
+            h6 = _cell_str(ws, 1, 6)
+            h12 = _cell_str(ws, 1, 12)
+            h24 = _cell_str(ws, 1, 24)
+
+            # MWC1IPC1: col 1 = PLANT, col 6 = REQUEST ITEM
+            if h1.upper() == 'PLANT' and h6.upper() == 'REQUEST ITEM':
+                wb.close()
+                return FORMAT_MWC1IPC1
+
+            # PSW1+CEW1: col 12 = Status
+            if h12 == 'Status':
+                wb.close()
+                return FORMAT_PSW1_CEW1
+
+            # Weeraya: col 1 = Plant, col 12 = TYPE
+            if h1.lower() == 'plant' and h12.upper() == 'TYPE':
+                wb.close()
+                return FORMAT_WEERAYA
+
+            # Kanyanat: col 24 = TYPE (col 1 = NO, col 3 = Plant)
+            if h24.upper() == 'TYPE':
+                wb.close()
+                return FORMAT_KANYANAT
 
         wb.close()
         return None
     except Exception:
         return None
+
+
+def detect_buyer(filepath):
+    """
+    向後相容: 舊的 detect_buyer() 函式。
+    只回傳 'Ketwadee' / 'Kanyanat' / 'Weeraya' / None，其他新格式回傳 None。
+    """
+    fmt = detect_format(filepath)
+    return {
+        FORMAT_KETWADEE: 'Ketwadee',
+        FORMAT_KANYANAT: 'Kanyanat',
+        FORMAT_WEERAYA: 'Weeraya',
+    }.get(fmt)
 
 
 # ---------------------------------------------------------------------------
@@ -71,16 +154,18 @@ def detect_buyer(filepath):
 MONTH_NAMES = ('JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
                'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC')
 
-# 每個 Buyer header 中日期欄位的起始 column (1-based)
-_BUYER_DATE_START_COL = {
-    'Ketwadee': 16,   # col P onwards (MRP sheet)
-    'Kanyanat': 25,   # col Y onwards (Sheet1)
-    'Weeraya':  14,   # col N onwards (Sheet1)
-}
-_BUYER_SHEET = {
-    'Ketwadee': 'MRP',
-    'Kanyanat': 'Sheet1',
-    'Weeraya':  'Sheet1',
+# 每個格式: [(sheet_name, date_start_col), ...]
+# date_start_col 是 1-based，從該欄開始掃描至 max_col
+# 非日期欄會被 _normalize_date_header 自動過濾掉
+_FORMAT_SHEETS = {
+    FORMAT_KETWADEE:           [('MRP', 16)],
+    FORMAT_KANYANAT:           [('Sheet1', 25)],
+    FORMAT_WEERAYA:            [('Sheet1', 14)],
+    FORMAT_INDIA_IAI1:         [('PAN JIT', 14)],
+    FORMAT_PSW1_CEW1:          [('Sheet1', 14)],
+    FORMAT_MWC1IPC1:           [('Sheet1', 9)],
+    FORMAT_NBQ1:               [('PAN JIT', 16)],
+    FORMAT_SVC1PWC1_DIODE_MOS: [('Diode', 9), ('MOS', 9)],
 }
 
 
@@ -106,12 +191,26 @@ def _normalize_date_header(val):
     if isinstance(val, datetime):
         return val.strftime('%Y%m%d')
     s = str(val).strip()
-    if 'PAST' in s.upper() or 'PASSDUE' in s.upper():
-        return 'PASSDUE'
-    if 'OVER DUE' in s.upper():
+    if not s:
+        return None
+    s_upper = s.upper()
+    if 'PAST' in s_upper or 'PASSDUE' in s_upper or 'OVER DUE' in s_upper:
         return 'PASSDUE'
     if s.isdigit() and len(s) == 8:
         return s
+    # MM/DD/YY 或 MM/DD/YYYY (e.g. '03/30/26' → '20260330')
+    if '/' in s and ' ' not in s:
+        parts = s.split('/')
+        if len(parts) == 3:
+            try:
+                m, d, y = int(parts[0]), int(parts[1]), int(parts[2])
+                if 1 <= m <= 12 and 1 <= d <= 31:
+                    if y < 100:
+                        y += 2000
+                    if 2000 <= y <= 2099:
+                        return f'{y:04d}{m:02d}{d:02d}'
+            except ValueError:
+                pass
     # "2026-JUL" → "JUL" (不限定年份，自動適用任何年度)
     if '-' in s and len(s) >= 5:
         parts = s.split('-')
@@ -120,8 +219,8 @@ def _normalize_date_header(val):
             if month in MONTH_NAMES:
                 return month
     # 直接就是月份名 (JUL, AUG, ...)
-    if s.upper() in MONTH_NAMES:
-        return s.upper()
+    if s_upper in MONTH_NAMES:
+        return s_upper
     return None
 
 
@@ -142,68 +241,84 @@ def _sort_date_cols(dates):
     return passdue + weekly + monthly
 
 
-def extract_dates_from_buyer_files(buyer_files):
+def extract_dates_from_files(detected_files):
     """
-    從 Buyer 原始檔案的 header 動態提取所有日期欄位。
+    從每個檔案的 header 動態提取所有日期欄位 (支援全部 8 種格式)。
 
     Args:
-        buyer_files: dict {buyer_name: filepath} e.g. {'Ketwadee': 'path/to/file.xlsx'}
+        detected_files: list of (filepath, format_const) tuples
 
     Returns:
-        tuple(date_cols, per_buyer_dates, warnings)
+        tuple(date_cols, per_file_dates, warnings)
         - date_cols: list — 排序後的統一日期欄位 (聯集)
-        - per_buyer_dates: dict — 每個 Buyer 的日期集合 (供比對)
+        - per_file_dates: dict — {filename: set(date_keys)}
         - warnings: list — 日期不一致的警告訊息
     """
-    per_buyer_dates = {}
+    per_file_dates = {}
 
-    for buyer_name, filepath in buyer_files.items():
-        sheet_name = _BUYER_SHEET.get(buyer_name)
-        start_col = _BUYER_DATE_START_COL.get(buyer_name, 10)
+    for filepath, fmt in detected_files:
+        sheet_specs = _FORMAT_SHEETS.get(fmt, [])
+        file_key = os.path.basename(filepath)
 
         wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
-        if sheet_name and sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-        else:
-            ws = wb.active
+        file_dates = set()
 
-        buyer_dates = set()
-        for cell in ws[1]:
-            if cell.column >= start_col and cell.value is not None:
-                norm = _normalize_date_header(cell.value)
-                if norm is not None and norm not in buyer_dates:
-                    buyer_dates.add(norm)  # 同名只取第一個 (避免 2026-JUL / 2027-JUL 重複)
+        for sheet_name, start_col in sheet_specs:
+            if sheet_name not in wb.sheetnames:
+                continue
+            ws = wb[sheet_name]
+            for cell in ws[1]:
+                if cell.column >= start_col and cell.value is not None:
+                    norm = _normalize_date_header(cell.value)
+                    if norm is not None and norm not in file_dates:
+                        file_dates.add(norm)
         wb.close()
 
-        per_buyer_dates[buyer_name] = buyer_dates
-        print(f"  {buyer_name}: 偵測到 {len(buyer_dates)} 個日期欄位")
+        per_file_dates[file_key] = file_dates
+        print(f"  {FORMAT_LABELS.get(fmt, fmt)} [{file_key}]: 偵測到 {len(file_dates)} 個日期欄位")
 
-    # 聯集 = 所有 buyer 的日期
+    # 聯集 = 所有檔案的日期
     all_dates = set()
-    for dates in per_buyer_dates.values():
+    for dates in per_file_dates.values():
         all_dates |= dates
 
-    # 比對差異
+    # 比對差異 (僅顯示警告，不阻擋)
     warnings = []
-    buyers = list(per_buyer_dates.keys())
-    for i, b1 in enumerate(buyers):
-        for b2 in buyers[i + 1:]:
-            only_in_b1 = per_buyer_dates[b1] - per_buyer_dates[b2]
-            only_in_b2 = per_buyer_dates[b2] - per_buyer_dates[b1]
-            if only_in_b1:
-                msg = f'{b1} 有但 {b2} 沒有的日期: {sorted(only_in_b1)}'
+    keys = list(per_file_dates.keys())
+    for i, k1 in enumerate(keys):
+        for k2 in keys[i + 1:]:
+            only_in_k1 = per_file_dates[k1] - per_file_dates[k2]
+            only_in_k2 = per_file_dates[k2] - per_file_dates[k1]
+            if only_in_k1:
+                msg = f'{k1} 有但 {k2} 沒有的日期: {sorted(only_in_k1)}'
                 warnings.append(msg)
-                print(f"  ⚠️ {msg}")
-            if only_in_b2:
-                msg = f'{b2} 有但 {b1} 沒有的日期: {sorted(only_in_b2)}'
+            if only_in_k2:
+                msg = f'{k2} 有但 {k1} 沒有的日期: {sorted(only_in_k2)}'
                 warnings.append(msg)
-                print(f"  ⚠️ {msg}")
 
     if not warnings:
-        print(f"  ✅ 3 個 Buyer 日期完全一致 ({len(all_dates)} 個日期)")
+        print(f"  ✅ 所有檔案日期完全一致 ({len(all_dates)} 個日期)")
+    else:
+        print(f"  ⚠️ 日期不完全一致，共 {len(warnings)} 個差異，已取聯集 ({len(all_dates)} 個日期)")
 
     date_cols = _sort_date_cols(all_dates)
-    return date_cols, per_buyer_dates, warnings
+    return date_cols, per_file_dates, warnings
+
+
+# 舊名稱保留做向後相容 (app.py 可能還在用)
+def extract_dates_from_buyer_files(buyer_files):
+    """Deprecated: 使用 extract_dates_from_files()"""
+    # 將舊 dict 格式轉換為新 list 格式
+    old_format_map = {
+        'Ketwadee': FORMAT_KETWADEE,
+        'Kanyanat': FORMAT_KANYANAT,
+        'Weeraya': FORMAT_WEERAYA,
+    }
+    detected_files = [
+        (fp, old_format_map.get(name, FORMAT_KETWADEE))
+        for name, fp in buyer_files.items()
+    ]
+    return extract_dates_from_files(detected_files)
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +536,277 @@ def _read_weeraya(filepath, date_cols, buyer_label=None, plant_code=None):
             i += 5
         else:
             i += 1
+
+    wb.close()
+    return results
+
+
+def _read_india_iai1(filepath, date_cols, buyer_label=None, plant_code=None):
+    """
+    讀取 India IAI1: PAN JIT sheet, 3 rows/part (Demand/Supply/Balance)
+    col 3 = PLANT (每列讀), col 4 = PARTNO, col 7 = VENDOR PARTNO,
+    col 11 = Stock, col 13 = Request (marker), col 14+ = dates.
+    多 PLANT 檔案 — 每列從 col 3 讀 PLANT。
+    """
+    wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+    ws = wb['PAN JIT']
+
+    date_col_map = _build_date_col_map(ws, 14, date_cols)
+
+    results = []
+    max_col = ws.max_column
+    rows = list(ws.iter_rows(min_row=2, max_row=ws.max_row,
+                             min_col=1, max_col=max_col, values_only=False))
+    i = 0
+    while i < len(rows):
+        row = rows[i]
+        marker = row[12].value if len(row) > 12 else None  # col 13
+
+        if marker == 'Demand':
+            row_plant = row[2].value if len(row) > 2 else None  # col 3
+            part_no = row[3].value if len(row) > 3 else None     # col 4
+            vendor_part = row[6].value if len(row) > 6 else None  # col 7
+            stock = row[10].value if len(row) > 10 else 0        # col 11
+
+            def read_vals(r):
+                data = {}
+                for col_idx, date_key in date_col_map.items():
+                    if col_idx - 1 < len(r):
+                        v = r[col_idx - 1].value
+                        data[date_key] = v if v is not None else 0
+                    else:
+                        data[date_key] = 0
+                return data
+
+            demand = read_vals(row)
+            supply = read_vals(rows[i + 1]) if i + 1 < len(rows) else {}
+            balance = read_vals(rows[i + 2]) if i + 2 < len(rows) else {}
+
+            results.append({
+                'buyer': buyer_label or 'India',
+                'plant': str(row_plant).strip() if row_plant else (plant_code or ''),
+                'part_no': _to_partno(part_no),
+                'vendor_part': str(vendor_part) if vendor_part else '',
+                'stock': stock or 0, 'on_way': None,
+                'demand': demand, 'supply': supply,
+                'balance_override': balance,
+            })
+            i += 3
+        else:
+            i += 1
+
+    wb.close()
+    return results
+
+
+def _read_psw1_cew1(filepath, date_cols, buyer_label=None, plant_code=None):
+    """
+    讀取 PSW1+CEW1: Sheet1, 5 rows/part (A-Demand/B-Supply/C-Net/D-ETD/E-Remark)
+    col 3 = PLANT, col 6 = PN, col 8 = MFG (vendor part),
+    col 12 = Status (marker), col 13 = STOCK, col 14+ = dates (MM/DD/YY).
+    取 A-Demand→Demand, B-Supply→Supply, C-Net→Balance, D/E 跳過。
+    多 PLANT 檔案 — 每列從 col 3 讀 PLANT。
+    """
+    wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+    ws = wb['Sheet1']
+
+    date_col_map = _build_date_col_map(ws, 14, date_cols)
+
+    results = []
+    max_col = ws.max_column
+    rows = list(ws.iter_rows(min_row=2, max_row=ws.max_row,
+                             min_col=1, max_col=max_col, values_only=False))
+    i = 0
+    while i < len(rows):
+        row = rows[i]
+        marker = row[11].value if len(row) > 11 else None  # col 12
+
+        if marker == 'A-Demand':
+            row_plant = row[2].value if len(row) > 2 else None   # col 3
+            part_no = row[5].value if len(row) > 5 else None      # col 6 = PN
+            vendor_part = row[7].value if len(row) > 7 else None  # col 8 = MFG
+            stock = row[12].value if len(row) > 12 else 0         # col 13
+
+            def read_vals(r):
+                data = {}
+                for col_idx, date_key in date_col_map.items():
+                    if col_idx - 1 < len(r):
+                        v = r[col_idx - 1].value
+                        data[date_key] = v if v is not None else 0
+                    else:
+                        data[date_key] = 0
+                return data
+
+            demand = read_vals(row)
+            supply = read_vals(rows[i + 1]) if i + 1 < len(rows) else {}
+            balance = read_vals(rows[i + 2]) if i + 2 < len(rows) else {}
+            # rows[i+3] = D-ETD, rows[i+4] = E-Remark → 跳過
+
+            results.append({
+                'buyer': buyer_label or 'PSW1+CEW1',
+                'plant': str(row_plant).strip() if row_plant else (plant_code or ''),
+                'part_no': _to_partno(part_no),
+                'vendor_part': str(vendor_part) if vendor_part else '',
+                'stock': stock or 0, 'on_way': None,
+                'demand': demand, 'supply': supply,
+                'balance_override': balance,
+            })
+            i += 5
+        else:
+            i += 1
+
+    wb.close()
+    return results
+
+
+def _read_mwc1ipc1(filepath, date_cols, buyer_label=None, plant_code=None):
+    """
+    讀取 MWC1+IPC1: Sheet1, 4 rows/part
+    (GROSS REQTS/FIRM ORDERS/VENDOR CFM/NET AVAIL)
+    col 1 = PLANT, col 2 = PARTNO, col 3 = VENDOR PARTNO,
+    col 6 = REQUEST ITEM (marker), col 7 = PLANT STOCK, col 9+ = dates.
+    取 GROSS REQTS→Demand, VENDOR CFM→Supply, NET AVAIL→Balance, FIRM ORDERS 跳過。
+    多 PLANT 檔案 — 每列從 col 1 讀 PLANT。
+    """
+    wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+    ws = wb['Sheet1']
+
+    date_col_map = _build_date_col_map(ws, 9, date_cols)
+
+    results = []
+    max_col = ws.max_column
+    rows = list(ws.iter_rows(min_row=2, max_row=ws.max_row,
+                             min_col=1, max_col=max_col, values_only=False))
+    i = 0
+    while i < len(rows):
+        row = rows[i]
+        marker = row[5].value if len(row) > 5 else None  # col 6
+
+        if marker == 'GROSS REQTS':
+            row_plant = row[0].value if len(row) > 0 else None    # col 1
+            part_no = row[1].value if len(row) > 1 else None       # col 2
+            vendor_part = row[2].value if len(row) > 2 else None   # col 3
+            stock = row[6].value if len(row) > 6 else 0            # col 7
+
+            def read_vals(r):
+                data = {}
+                for col_idx, date_key in date_col_map.items():
+                    if col_idx - 1 < len(r):
+                        v = r[col_idx - 1].value
+                        data[date_key] = v if v is not None else 0
+                    else:
+                        data[date_key] = 0
+                return data
+
+            demand = read_vals(row)  # GROSS REQTS
+            # rows[i+1] = FIRM ORDERS → 跳過
+            supply = read_vals(rows[i + 2]) if i + 2 < len(rows) else {}    # VENDOR CFM
+            balance = read_vals(rows[i + 3]) if i + 3 < len(rows) else {}   # NET AVAIL
+
+            results.append({
+                'buyer': buyer_label or 'MWC1+IPC1',
+                'plant': str(row_plant).strip() if row_plant else (plant_code or ''),
+                'part_no': _to_partno(part_no),
+                'vendor_part': str(vendor_part) if vendor_part else '',
+                'stock': stock or 0, 'on_way': None,
+                'demand': demand, 'supply': supply,
+                'balance_override': balance,
+            })
+            i += 4
+        else:
+            i += 1
+
+    wb.close()
+    return results
+
+
+def _read_nbq1(filepath, date_cols, buyer_label=None, plant_code=None):
+    """
+    讀取 NBQ1: PAN JIT sheet, 1 row/part
+    col 1 = PARTNO, col 3 = VENDOR PARTNO, col 15 = STOCK,
+    col 16 = PASSDUE, col 17+ = 週/月日期。
+    無 marker column。無 PLANT column → 從檔名比對。
+    Demand = 當列日期值, Supply = 空, Balance = 公式 (由產出器處理)。
+    """
+    wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+    ws = wb['PAN JIT']
+
+    date_col_map = _build_date_col_map(ws, 16, date_cols)
+
+    results = []
+    max_col = ws.max_column
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row,
+                            min_col=1, max_col=max_col, values_only=False):
+        part_no = row[0].value if len(row) > 0 else None       # col 1
+        if part_no is None or str(part_no).strip() == '':
+            continue
+        vendor_part = row[2].value if len(row) > 2 else None   # col 3
+        stock = row[14].value if len(row) > 14 else 0          # col 15
+
+        demand = {}
+        for col_idx, date_key in date_col_map.items():
+            if col_idx - 1 < len(row):
+                v = row[col_idx - 1].value
+                demand[date_key] = v if v is not None else 0
+            else:
+                demand[date_key] = 0
+
+        results.append({
+            'buyer': buyer_label or 'NBQ1',
+            'plant': plant_code or '',
+            'part_no': _to_partno(part_no),
+            'vendor_part': str(vendor_part) if vendor_part else '',
+            'stock': stock or 0, 'on_way': None,
+            'demand': demand, 'supply': {},  # Supply 留空
+        })
+
+    wb.close()
+    return results
+
+
+def _read_svc1pwc1_diode_mos(filepath, date_cols, buyer_label=None, plant_code=None):
+    """
+    讀取 SVC1+PWC1 DIODE&MOS: 同時處理 Diode 和 MOS 兩個 sheet, 1 row/part
+    col 1 = PLANT (每列讀), col 3 = PARTNO, col 5 = VENDOR PARTNO, col 8 = STOCK,
+    col 9+ = 日期 (中間夾 NET/SHORTAGE/CFM/出貨/交期 — 非日期欄由 normalizer 自動過濾)。
+    Demand = 當列日期值, Supply = 空, Balance = 公式。
+    多 PLANT 檔案。
+    """
+    wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+    results = []
+
+    for sheet_name in ('Diode', 'MOS'):
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        date_col_map = _build_date_col_map(ws, 9, date_cols)
+        max_col = ws.max_column
+
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row,
+                                min_col=1, max_col=max_col, values_only=False):
+            row_plant = row[0].value if len(row) > 0 else None    # col 1
+            part_no = row[2].value if len(row) > 2 else None       # col 3
+            if part_no is None or str(part_no).strip() == '':
+                continue
+            vendor_part = row[4].value if len(row) > 4 else None   # col 5
+            stock = row[7].value if len(row) > 7 else 0            # col 8
+
+            demand = {}
+            for col_idx, date_key in date_col_map.items():
+                if col_idx - 1 < len(row):
+                    v = row[col_idx - 1].value
+                    demand[date_key] = v if v is not None else 0
+                else:
+                    demand[date_key] = 0
+
+            results.append({
+                'buyer': buyer_label or 'SVC1+PWC1',
+                'plant': str(row_plant).strip() if row_plant else (plant_code or ''),
+                'part_no': _to_partno(part_no),
+                'vendor_part': str(vendor_part) if vendor_part else '',
+                'stock': stock or 0, 'on_way': None,
+                'demand': demand, 'supply': {},  # Supply 留空
+            })
 
     wb.close()
     return results
@@ -665,90 +1051,143 @@ def _generate_consolidated_excel(all_source, output_path, reference_path,
 # 主要入口
 # ---------------------------------------------------------------------------
 
+FORMAT_READERS = {
+    FORMAT_KETWADEE:           _read_ketwadee,
+    FORMAT_KANYANAT:           _read_kanyanat,
+    FORMAT_WEERAYA:            _read_weeraya,
+    FORMAT_INDIA_IAI1:         _read_india_iai1,
+    FORMAT_PSW1_CEW1:          _read_psw1_cew1,
+    FORMAT_MWC1IPC1:           _read_mwc1ipc1,
+    FORMAT_NBQ1:               _read_nbq1,
+    FORMAT_SVC1PWC1_DIODE_MOS: _read_svc1pwc1_diode_mos,
+}
+
+# 向後相容: 舊 API
 BUYER_READERS = {
     'Ketwadee': _read_ketwadee,
     'Kanyanat': _read_kanyanat,
-    'Weeraya': _read_weeraya,
+    'Weeraya':  _read_weeraya,
 }
+
+
+def detect_all_formats(forecast_files):
+    """
+    Pre-detection: 偵測所有檔案的格式，一次回傳所有識別結果。
+    Returns:
+        tuple(detected, unknown)
+        - detected: list of (filepath, format_const) tuples (成功識別)
+        - unknown: list of filepaths (無法識別)
+    """
+    detected, unknown = [], []
+    for fp in forecast_files:
+        fmt = detect_format(fp)
+        if fmt is None:
+            unknown.append(fp)
+        else:
+            detected.append((fp, fmt))
+    return detected, unknown
 
 
 def consolidate(forecast_files, reference_template, output_path,
                 erp_mapping=None, plant_codes=None):
     """
-    合併多個 Delta Forecast 檔案為匯總格式 Excel。
+    合併多個 Delta Forecast 檔案為匯總格式 Excel (支援 8 種格式)。
 
     Args:
-        forecast_files: list of file paths (3 個 Buyer 檔案)
+        forecast_files: list of file paths (1 個或多個，任何格式組合)
         reference_template: 匯總格式模板路徑 (用於取得表頭格式，不用於日期)
         output_path: 輸出檔案路徑
         erp_mapping: dict {Plant: (ERP客戶簡稱, ERP送貨地點)}, 已棄用
-        plant_codes: list of valid PLANT codes, 用於從檔名比對 PLANT。
-                     若為 None 則 fallback 到舊的寫死值 (PSB5/PSB7)。
-                     建議由 customer_mappings 的 region 欄位提取。
+        plant_codes: list of valid PLANT codes, 用於從檔名比對單 PLANT 檔案的 PLANT。
+                     建議由 customer_mappings 的 region 欄位提取
+                     (例: ['PSB5', 'PSB7', 'IAI1', 'IPC1'])。
 
     Returns:
-        dict with keys: success, part_count, buyer_stats, date_warnings, message
+        dict with keys: success, part_count, format_stats, unknown_files,
+                        date_warnings, message
     """
-    # 1. 偵測每個檔案的 Buyer
-    buyer_files = {}
-    for fp in forecast_files:
-        buyer = detect_buyer(fp)
-        if buyer is None:
-            return {
-                'success': False, 'part_count': 0,
-                'message': f'無法識別檔案格式: {os.path.basename(fp)}'
-            }
-        if buyer in buyer_files:
-            return {
-                'success': False, 'part_count': 0,
-                'message': f'重複的 Buyer: {buyer} (每個 Buyer 只能上傳一個檔案)'
-            }
-        buyer_files[buyer] = fp
+    if not forecast_files:
+        return {
+            'success': False, 'part_count': 0,
+            'message': '未提供任何 Forecast 檔案'
+        }
 
-    print(f"Delta 合併: 偵測到 {len(buyer_files)} 個 Buyer: {list(buyer_files.keys())}")
+    # 1. 預先偵測所有檔案格式 (任一失敗即回報所有失敗檔案)
+    detected, unknown = detect_all_formats(forecast_files)
+    if unknown:
+        unknown_names = [os.path.basename(fp) for fp in unknown]
+        return {
+            'success': False, 'part_count': 0,
+            'unknown_files': unknown_names,
+            'message': '無法識別以下檔案格式 (請確認為 Delta 8 種標準格式): '
+                       + ', '.join(unknown_names)
+        }
 
-    # 2. 從 Buyer 原始檔案動態提取日期欄位（不依賴模板）
-    date_cols, per_buyer_dates, date_warnings = extract_dates_from_buyer_files(buyer_files)
+    print(f"Delta 合併: 偵測到 {len(detected)} 個檔案")
+    for fp, fmt in detected:
+        print(f"  [{FORMAT_LABELS.get(fmt, fmt)}] {os.path.basename(fp)}")
+
+    # 2. 從所有檔案動態提取日期欄位 (取聯集)
+    date_cols, per_file_dates, date_warnings = extract_dates_from_files(detected)
     if not date_cols:
         return {
             'success': False, 'part_count': 0,
-            'message': '無法從 Buyer 檔案提取日期欄位'
+            'message': '無法從 Forecast 檔案提取日期欄位'
         }
 
     print(f"  統一日期欄位: {len(date_cols)} 個 ({date_cols[0]} ~ {date_cols[-1]})")
 
-    # 3. 讀取各 Buyer 資料
-    # Buyer 欄位暫時使用檔案名稱 (不含副檔名)，等客戶確認代碼→名稱對照後再調整邏輯
-    # PLANT 欄位從 mapping 表的 region 提取英文代碼 (如 'PSB5 泰國' → 'PSB5')，
-    # 再從檔名中比對出現的代碼 (大小寫無關)。
+    # 3. 讀取各檔案資料
+    # Buyer 欄位暫時使用檔案名稱 (不含副檔名)，等客戶確認代碼→名稱對照後再調整邏輯。
+    # PLANT 欄位:
+    #   - 單 PLANT 檔案: 從檔名比對 plant_codes (例: 'PSB5 Ketwadee.xlsx' → 'PSB5')
+    #   - 多 PLANT 檔案: 每列從工作表欄位讀取 (不使用檔名)
     all_source = []
-    buyer_stats = {}
-    for buyer_name in ['Ketwadee', 'Kanyanat', 'Weeraya']:
-        if buyer_name in buyer_files:
-            reader = BUYER_READERS[buyer_name]
-            fp = buyer_files[buyer_name]
-            buyer_label = os.path.splitext(os.path.basename(fp))[0]
+    format_stats = {}  # {filename: count}
 
-            # 從檔名比對 PLANT 代碼
-            plant_code = None
-            if plant_codes:
-                matched = match_plants_in_filename(fp, plant_codes)
-                if matched:
-                    plant_code = matched[0]  # 單一 PLANT 檔案取第一個
-                    if len(matched) > 1:
-                        print(f"  ⚠️ {buyer_label}: 檔名中有多個 PLANT {matched}, 取 {plant_code}")
+    for fp, fmt in detected:
+        reader = FORMAT_READERS.get(fmt)
+        if reader is None:
+            print(f"  ⚠️ 跳過未註冊 reader 的格式: {fmt} ({os.path.basename(fp)})")
+            continue
 
+        buyer_label = os.path.splitext(os.path.basename(fp))[0]
+        file_key = os.path.basename(fp)
+
+        # 單 PLANT 檔案才需從檔名比對 PLANT 代碼
+        plant_code = None
+        if fmt in SINGLE_PLANT_FORMATS and plant_codes:
+            matched = match_plants_in_filename(fp, plant_codes)
+            if matched:
+                plant_code = matched[0]
+                if len(matched) > 1:
+                    print(f"  ⚠️ {file_key}: 檔名中有多個 PLANT {matched}, 取 {plant_code}")
+
+        try:
             data = reader(fp, date_cols,
                           buyer_label=buyer_label, plant_code=plant_code)
-            buyer_stats[buyer_name] = len(data)
-            all_source.extend(data)
-            plant_display = plant_code or '(寫死預設值)'
-            print(f"  {buyer_name} ({buyer_label}): {len(data)} 個料號, PLANT={plant_display}")
+        except Exception as e:
+            return {
+                'success': False, 'part_count': 0,
+                'message': f'讀取檔案失敗 [{file_key}] ({FORMAT_LABELS.get(fmt, fmt)}): {e}'
+            }
+
+        format_stats[file_key] = len(data)
+        all_source.extend(data)
+
+        if fmt in SINGLE_PLANT_FORMATS:
+            plant_display = plant_code or '(未比對到)'
+            print(f"  {file_key} [{FORMAT_LABELS.get(fmt, fmt)}]: "
+                  f"{len(data)} 個料號, PLANT={plant_display}")
+        else:
+            unique_plants = sorted({d.get('plant', '') for d in data if d.get('plant')})
+            print(f"  {file_key} [{FORMAT_LABELS.get(fmt, fmt)}]: "
+                  f"{len(data)} 個料號, 多 PLANT={unique_plants}")
 
     if not all_source:
         return {
             'success': False, 'part_count': 0,
-            'message': '未讀取到任何料號資料'
+            'message': '未讀取到任何料號資料 (檔案可能為空或格式異常)'
         }
 
     # 4. 產出匯總格式 Excel（日期表頭由 date_cols 動態產生）
@@ -761,8 +1200,13 @@ def consolidate(forecast_files, reference_template, output_path,
     result = {
         'success': True,
         'part_count': part_count,
-        'buyer_stats': buyer_stats,
-        'message': f'成功合併 {part_count} 個料號'
+        'format_stats': format_stats,
+        # 向後相容: buyer_stats 用舊的 3 Buyer 名稱 filter
+        'buyer_stats': {
+            name: sum(cnt for fk, cnt in format_stats.items() if name.lower() in fk.lower())
+            for name in ('Ketwadee', 'Kanyanat', 'Weeraya')
+        },
+        'message': f'成功合併 {part_count} 個料號 ({len(detected)} 個檔案)'
     }
     if date_warnings:
         result['date_warnings'] = date_warnings
