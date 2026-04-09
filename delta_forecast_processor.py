@@ -13,7 +13,7 @@ Buyer 格式:
 
 import openpyxl
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from copy import copy
 from openpyxl.styles import (Font, Alignment, PatternFill, Border, Side)
 from openpyxl.styles.colors import Color
@@ -224,77 +224,125 @@ def _normalize_date_header(val):
     return None
 
 
-def _sort_date_cols(dates):
+def _sort_date_cols(dates, anchor_date=None):
     """
-    排序日期欄位: PASSDUE → 週日期(YYYYMMDD) → 月份(從最後週日期的月份開始)
+    方案二 (匯總格式模式): 固定 26 欄 = PASSDUE + 16 週 + 9 月
 
-    自動處理兩種異常情況:
-    1. 拒絕不合理的日期: 年份 > 當前年份 + 5 (例: 20591231 會被過濾)
-    2. 偵測「月末日期冒充週日期」: 若週日期排序後連續兩個日期間隔 > 14 天,
-       則從該處切分; 後段日期視為月末桶, 依年月轉換為月份標籤 (JAN~DEC)。
+    - PASSDUE: 源檔裡既有的必要欄位 (來自 "PASSDUE"/"PAST DUE" 等標籤)，
+               直接對應，不會有週日期折入此欄。
+    - W1~W16 (K~Z): **以來源檔最早的週日期 (Monday) 為 W1 起點**，產生 16 個
+                    連續週一 (YYYYMMDD)。若沒有任何週日期則 fallback 使用 anchor
+                    所在週的週一。
+    - M1~M9 (AA~AI): 從 W16 次週起算的 9 個月份標籤 (MMM 縮寫)
+
+    來源檔案的日期欄會依據落點映射到固定欄位：
+    - 落在 W1~W16 範圍 → 對應週 Monday (若非 Monday 則取該週週一)
+    - 落在 M1~M9 範圍 → 對應月份標籤 (多筆會在 reader 累加)
+    - 超出 M9 範圍 (太未來) → 丟棄
+    - 早於 W1 (理論上不應發生，因為 W1=最早週) → 丟棄並警告
+    - 月份標籤不在 M1~M9 → 丟棄
+
+    Args:
+        dates: set/iterable of normalized date keys from source files
+        anchor_date: datetime, 備援基準 (預設 = datetime.now()，僅在無任何週日期時使用)
 
     Returns:
         tuple(date_cols, conversions)
-        - date_cols: list — 排序後的日期欄位
-        - conversions: dict — {原始 YYYYMMDD: 轉換後的月份標籤 或 None (被拒絕)}
-                       讀取器在比對原始檔案 header 時使用此 map 修正對應關係。
+        - date_cols: ['PASSDUE', YYYYMMDD×16, MMM×9] 固定 26 欄
+        - conversions: dict {原始 key: 轉換後 key 或 None}
     """
-    passdue = [d for d in dates if d == 'PASSDUE']
-    raw_weekly = sorted([d for d in dates if d.isdigit() and len(d) == 8])
-    explicit_monthly = set(d for d in dates if d in MONTH_NAMES)
+    # 1. 找出來源檔最早的週日期 (Monday) 作為 W1 起點
+    weekly_source = []
+    for d in dates:
+        if isinstance(d, str) and d.isdigit() and len(d) == 8:
+            try:
+                weekly_source.append(datetime.strptime(d, '%Y%m%d'))
+            except ValueError:
+                pass
 
+    if weekly_source:
+        earliest = min(weekly_source)
+        # 對齊到該週的週一 (weekday 0 = Monday)
+        first_monday = earliest - timedelta(days=earliest.weekday())
+        first_monday = first_monday.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        # Fallback: 使用 anchor 所在週的週一
+        anchor = anchor_date or datetime.now()
+        first_monday = anchor - timedelta(days=anchor.weekday())
+        first_monday = first_monday.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # 2. 固定 16 週 Monday (K~Z)
+    weekly_mondays = [first_monday + timedelta(weeks=i) for i in range(16)]
+    weekly_keys = [m.strftime('%Y%m%d') for m in weekly_mondays]
+    last_monday = weekly_mondays[-1]
+    w16_sunday = last_monday + timedelta(days=6)
+
+    # 3. 固定 9 個月份 (AA~AI, 從 W16 次週起算)
+    w17_monday = last_monday + timedelta(weeks=1)
+    monthly_keys = []
+    cy, cm = w17_monday.year, w17_monday.month
+    for _ in range(9):
+        monthly_keys.append(MONTH_NAMES[cm - 1])
+        cm += 1
+        if cm > 12:
+            cm = 1
+            cy += 1
+    monthly_key_set = set(monthly_keys)
+
+    final_cols = ['PASSDUE'] + weekly_keys + monthly_keys
+
+    # 4. 建立 conversions
     conversions = {}
+    rejected = []
+    folded_to_month = {}
 
-    # 1. Sanity check: 拒絕年份 > 當前 + 5
-    current_year = datetime.now().year
-    sanity_max_year = current_year + 5
-    sane_weekly = []
-    for d in raw_weekly:
-        year = int(d[:4])
-        if year > sanity_max_year:
-            conversions[d] = None  # 拒絕
+    for d in dates:
+        if d == 'PASSDUE':
+            continue
+        if d in MONTH_NAMES:
+            if d not in monthly_key_set:
+                conversions[d] = None
+                rejected.append(d)
+            continue
+        if isinstance(d, str) and d.isdigit() and len(d) == 8:
+            try:
+                dt = datetime.strptime(d, '%Y%m%d')
+            except ValueError:
+                conversions[d] = None
+                rejected.append(d)
+                continue
+            if dt < first_monday:
+                # 不應發生 (W1 = 最早週)，但若發生則丟棄並警告
+                conversions[d] = None
+                rejected.append(d)
+            elif dt <= w16_sunday:
+                days_from_w1 = (dt - first_monday).days
+                week_idx = days_from_w1 // 7
+                target_key = weekly_keys[week_idx]
+                if target_key != d:
+                    conversions[d] = target_key
+            else:
+                # 超出 W16 → 折疊到對應月份
+                m_label = MONTH_NAMES[dt.month - 1]
+                if m_label in monthly_key_set:
+                    conversions[d] = m_label
+                    folded_to_month.setdefault(m_label, []).append(d)
+                else:
+                    conversions[d] = None
+                    rejected.append(d)
         else:
-            sane_weekly.append(d)
-    rejected = [d for d, v in conversions.items() if v is None]
+            conversions[d] = None
+            rejected.append(d)
+
+    print(f"   📅 方案二起始週 (W1): {weekly_keys[0]}, 結束週 (W16): {weekly_keys[-1]}")
+    print(f"   📅 月份範圍 (M1~M9): {monthly_keys[0]} ~ {monthly_keys[-1]}")
     if rejected:
-        print(f"   ⚠️ 拒絕超出合理範圍的日期 (year > {sanity_max_year}): {rejected}")
+        print(f"   ⚠️ 丟棄超出範圍的日期: {rejected}")
+    if folded_to_month:
+        for m, src_list in folded_to_month.items():
+            print(f"   🔄 折疊到 {m}: {src_list}")
 
-    # 2. 偵測 gap > 14 天 → 後段視為月末桶
-    split_idx = len(sane_weekly)
-    for i in range(len(sane_weekly) - 1):
-        cur = datetime.strptime(sane_weekly[i], '%Y%m%d')
-        nxt = datetime.strptime(sane_weekly[i + 1], '%Y%m%d')
-        if (nxt - cur).days > 14:
-            split_idx = i + 1
-            break
-
-    true_weekly = sane_weekly[:split_idx]
-    monthly_from_weekly = sane_weekly[split_idx:]
-
-    # 將月末 YYYYMMDD 轉換為月份標籤 (JAN~DEC)
-    auto_monthly = set()
-    for d in monthly_from_weekly:
-        m_idx = int(d[4:6]) - 1  # 0-based
-        label = MONTH_NAMES[m_idx]
-        auto_monthly.add(label)
-        conversions[d] = label
-
-    if monthly_from_weekly:
-        labels_ordered = sorted(auto_monthly, key=lambda x: MONTH_NAMES.index(x))
-        print(f"   🔄 偵測到月末日期序列 (gap > 14 天): {monthly_from_weekly} → {labels_ordered}")
-
-    # 3. 合併 explicit_monthly 與 auto_monthly
-    all_monthly = explicit_monthly | auto_monthly
-    monthly = list(all_monthly)
-
-    if true_weekly and monthly:
-        last_month_idx = int(true_weekly[-1][4:6]) - 1  # 0-based
-        rotated = list(MONTH_NAMES[last_month_idx:]) + list(MONTH_NAMES[:last_month_idx])
-        monthly.sort(key=lambda m: rotated.index(m))
-    elif monthly:
-        monthly.sort(key=lambda m: MONTH_NAMES.index(m))
-
-    return passdue + true_weekly + monthly, conversions
+    return final_cols, conversions
 
 
 def extract_dates_from_files(detected_files):
@@ -383,28 +431,55 @@ def extract_dates_from_buyer_files(buyer_files):
 
 def _build_date_col_map(ws, start_col, date_cols, conversions=None):
     """
-    建立 column → date_key 的映射，避免同名碰撞 (如 2026-JUL 和 2027-JUL)。
+    建立 column → date_key 的映射。
 
-    conversions: dict {原始 YYYYMMDD: 轉換後月份標籤 或 None}。
-                 當 _sort_date_cols 將月末日期轉為月份標籤時，讀取器需靠此 map
-                 把來源檔的原始 header 映射到最終 date_cols 的鍵值。
+    方案二支援多個 source 欄位映射到同一個 target key (折疊/累加)：
+    - 例: 來源 20260406 + 20260407 都映射到同一個週 Monday → reader 需累加兩者
+    - 例: 來源 20261015 + 20261101 都映射到 OCT 月份欄 → reader 需累加
+
+    conversions: dict {原始 key: 轉換後 key 或 None (丟棄)}。
     """
     date_col_map = {}
-    seen_keys = set()
+    date_cols_set = set(date_cols)
     for cell in ws[1]:
         if cell.value is not None and cell.column >= start_col:
             norm = _normalize_date_header(cell.value)
             if norm is None:
                 continue
-            # 套用轉換 (例: 20270131 → JAN)
+            # 套用轉換 (例: 20261015 → OCT, 20260330 → PASSDUE)
             if conversions and norm in conversions:
                 norm = conversions[norm]
                 if norm is None:
-                    continue  # 被拒絕 (例: 20591231)
-            if norm in date_cols and norm not in seen_keys:
+                    continue  # 被丟棄
+            if norm in date_cols_set:
                 date_col_map[cell.column] = norm
-                seen_keys.add(norm)
     return date_col_map
+
+
+def _read_row_dates(row, date_col_map):
+    """
+    從單一資料 row 讀取日期欄位值，支援累加 (多個 source 欄位 → 同一 target key)。
+
+    Args:
+        row: tuple of Cell objects (from openpyxl iter_rows, values_only=False)
+        date_col_map: dict {col_idx (1-based): target_date_key}
+
+    Returns:
+        dict {target_date_key: accumulated_number}
+    """
+    data = {}
+    for col_idx, date_key in date_col_map.items():
+        if col_idx - 1 >= len(row):
+            continue
+        v = row[col_idx - 1].value
+        if v is None or v == '':
+            continue
+        try:
+            v_num = float(v)
+        except (ValueError, TypeError):
+            continue
+        data[date_key] = data.get(date_key, 0) + v_num
+    return data
 
 
 def _to_partno(val):
@@ -473,23 +548,8 @@ def _read_ketwadee(filepath, date_cols, buyer_label=None, plant_code=None, conve
             vendor_part = row[3].value
             stock = row[7].value or 0
 
-            demand = {}
-            for col_idx, date_key in date_col_map.items():
-                if col_idx - 1 < len(row):
-                    v = row[col_idx - 1].value
-                    demand[date_key] = v if v is not None else 0
-                else:
-                    demand[date_key] = 0
-
-            supply = {}
-            if i + 1 < len(rows):
-                supply_row = rows[i + 1]
-                for col_idx, date_key in date_col_map.items():
-                    if col_idx - 1 < len(supply_row):
-                        v = supply_row[col_idx - 1].value
-                        supply[date_key] = v if v is not None else 0
-                    else:
-                        supply[date_key] = 0
+            demand = _read_row_dates(row, date_col_map)
+            supply = _read_row_dates(rows[i + 1], date_col_map) if i + 1 < len(rows) else {}
 
             results.append({
                 'buyer': buyer_label or 'Ketwadee', 'plant': plant_code or 'PSB5',
@@ -526,23 +586,8 @@ def _read_kanyanat(filepath, date_cols, buyer_label=None, plant_code=None, conve
             part_no = row[4].value
             vendor_part = row[5].value
 
-            demand = {}
-            for col_idx, date_key in date_col_map.items():
-                if col_idx - 1 < len(row):
-                    v = row[col_idx - 1].value
-                    demand[date_key] = v if v is not None else 0
-                else:
-                    demand[date_key] = 0
-
-            supply = {}
-            if i + 1 < len(rows):
-                supply_row = rows[i + 1]
-                for col_idx, date_key in date_col_map.items():
-                    if col_idx - 1 < len(supply_row):
-                        v = supply_row[col_idx - 1].value
-                        supply[date_key] = v if v is not None else 0
-                    else:
-                        supply[date_key] = 0
+            demand = _read_row_dates(row, date_col_map)
+            supply = _read_row_dates(rows[i + 1], date_col_map) if i + 1 < len(rows) else {}
 
             results.append({
                 'buyer': buyer_label or 'Kanyanat', 'plant': plant_code or 'PSB7',
@@ -580,19 +625,9 @@ def _read_weeraya(filepath, date_cols, buyer_label=None, plant_code=None, conver
             vendor_part = row[4].value
             stock = row[12].value or 0
 
-            def read_date_values(r):
-                data = {}
-                for col_idx, date_key in date_col_map.items():
-                    if col_idx - 1 < len(r):
-                        v = r[col_idx - 1].value
-                        data[date_key] = v if v is not None else 0
-                    else:
-                        data[date_key] = 0
-                return data
-
-            demand = read_date_values(row)
-            supply = read_date_values(rows[i + 2]) if i + 2 < len(rows) else {}
-            balance_data = read_date_values(rows[i + 3]) if i + 3 < len(rows) else {}
+            demand = _read_row_dates(row, date_col_map)
+            supply = _read_row_dates(rows[i + 2], date_col_map) if i + 2 < len(rows) else {}
+            balance_data = _read_row_dates(rows[i + 3], date_col_map) if i + 3 < len(rows) else {}
 
             results.append({
                 'buyer': buyer_label or 'Weeraya', 'plant': plant_code or 'PSB7',
@@ -637,19 +672,9 @@ def _read_india_iai1(filepath, date_cols, buyer_label=None, plant_code=None, con
             vendor_part = row[6].value if len(row) > 6 else None  # col 7
             stock = row[10].value if len(row) > 10 else 0        # col 11
 
-            def read_vals(r):
-                data = {}
-                for col_idx, date_key in date_col_map.items():
-                    if col_idx - 1 < len(r):
-                        v = r[col_idx - 1].value
-                        data[date_key] = v if v is not None else 0
-                    else:
-                        data[date_key] = 0
-                return data
-
-            demand = read_vals(row)
-            supply = read_vals(rows[i + 1]) if i + 1 < len(rows) else {}
-            balance = read_vals(rows[i + 2]) if i + 2 < len(rows) else {}
+            demand = _read_row_dates(row, date_col_map)
+            supply = _read_row_dates(rows[i + 1], date_col_map) if i + 1 < len(rows) else {}
+            balance = _read_row_dates(rows[i + 2], date_col_map) if i + 2 < len(rows) else {}
 
             results.append({
                 'buyer': buyer_label or 'India',
@@ -696,19 +721,9 @@ def _read_psw1_cew1(filepath, date_cols, buyer_label=None, plant_code=None, conv
             vendor_part = row[7].value if len(row) > 7 else None  # col 8 = MFG
             stock = row[12].value if len(row) > 12 else 0         # col 13
 
-            def read_vals(r):
-                data = {}
-                for col_idx, date_key in date_col_map.items():
-                    if col_idx - 1 < len(r):
-                        v = r[col_idx - 1].value
-                        data[date_key] = v if v is not None else 0
-                    else:
-                        data[date_key] = 0
-                return data
-
-            demand = read_vals(row)
-            supply = read_vals(rows[i + 1]) if i + 1 < len(rows) else {}
-            balance = read_vals(rows[i + 2]) if i + 2 < len(rows) else {}
+            demand = _read_row_dates(row, date_col_map)
+            supply = _read_row_dates(rows[i + 1], date_col_map) if i + 1 < len(rows) else {}
+            balance = _read_row_dates(rows[i + 2], date_col_map) if i + 2 < len(rows) else {}
             # rows[i+3] = D-ETD, rows[i+4] = E-Remark → 跳過
 
             results.append({
@@ -757,20 +772,10 @@ def _read_mwc1ipc1(filepath, date_cols, buyer_label=None, plant_code=None, conve
             vendor_part = row[2].value if len(row) > 2 else None   # col 3
             stock = row[6].value if len(row) > 6 else 0            # col 7
 
-            def read_vals(r):
-                data = {}
-                for col_idx, date_key in date_col_map.items():
-                    if col_idx - 1 < len(r):
-                        v = r[col_idx - 1].value
-                        data[date_key] = v if v is not None else 0
-                    else:
-                        data[date_key] = 0
-                return data
-
-            demand = read_vals(row)  # GROSS REQTS
+            demand = _read_row_dates(row, date_col_map)  # GROSS REQTS
             # rows[i+1] = FIRM ORDERS → 跳過
-            supply = read_vals(rows[i + 2]) if i + 2 < len(rows) else {}    # VENDOR CFM
-            balance = read_vals(rows[i + 3]) if i + 3 < len(rows) else {}   # NET AVAIL
+            supply = _read_row_dates(rows[i + 2], date_col_map) if i + 2 < len(rows) else {}   # VENDOR CFM
+            balance = _read_row_dates(rows[i + 3], date_col_map) if i + 3 < len(rows) else {}  # NET AVAIL
 
             results.append({
                 'buyer': buyer_label or 'MWC1+IPC1',
@@ -812,13 +817,7 @@ def _read_nbq1(filepath, date_cols, buyer_label=None, plant_code=None, conversio
         vendor_part = row[2].value if len(row) > 2 else None   # col 3
         stock = row[14].value if len(row) > 14 else 0          # col 15
 
-        demand = {}
-        for col_idx, date_key in date_col_map.items():
-            if col_idx - 1 < len(row):
-                v = row[col_idx - 1].value
-                demand[date_key] = v if v is not None else 0
-            else:
-                demand[date_key] = 0
+        demand = _read_row_dates(row, date_col_map)
 
         results.append({
             'buyer': buyer_label or 'NBQ1',
@@ -860,13 +859,7 @@ def _read_svc1pwc1_diode_mos(filepath, date_cols, buyer_label=None, plant_code=N
             vendor_part = row[4].value if len(row) > 4 else None   # col 5
             stock = row[7].value if len(row) > 7 else 0            # col 8
 
-            demand = {}
-            for col_idx, date_key in date_col_map.items():
-                if col_idx - 1 < len(row):
-                    v = row[col_idx - 1].value
-                    demand[date_key] = v if v is not None else 0
-                else:
-                    demand[date_key] = 0
+            demand = _read_row_dates(row, date_col_map)
 
             results.append({
                 'buyer': buyer_label or 'SVC1+PWC1',
