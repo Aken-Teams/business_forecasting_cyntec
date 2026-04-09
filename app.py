@@ -3799,39 +3799,60 @@ def run_forecast():
         is_delta = processor_user and processor_user['username'] == 'delta'
 
         if is_delta:
-            # ===== Delta 專用處理：合併後的匯總格式即為最終輸出 =====
+            # ===== Delta 專用處理：映射過的 forecast + ERP/Transit 填入 =====
             import shutil
+            from delta_forecast_step4 import process_delta_forecast
 
-            # Delta 的 cleaned 檔案就是合併後的匯總格式，直接作為最終輸出
-            if has_single_cleaned:
+            # Delta 的來源 forecast：優先使用映射階段產生的 integrated_forecast.xlsx
+            integrated_forecast = os.path.join(processed_folder, 'integrated_forecast.xlsx')
+            if os.path.exists(integrated_forecast):
+                forecast_source = integrated_forecast
+            elif has_single_cleaned:
                 forecast_source = single_cleaned_file
             elif multi_cleaned_files:
                 forecast_source = multi_cleaned_files[0]
             else:
-                forecast_source = forecast_file
+                log_process(user['id'], 'forecast', 'failed', 'Delta: 找不到 forecast 來源檔案')
+                return jsonify({'success': False, 'message': 'Delta: 找不到 forecast 來源檔案'})
 
             output_filename = 'forecast_result.xlsx'
             result_file = os.path.join(processed_folder, output_filename)
+
+            # 先複製一份作為工作檔，避免修改到 integrated_forecast
             shutil.copy2(forecast_source, result_file)
+
+            try:
+                stats = process_delta_forecast(
+                    forecast_file=result_file,
+                    erp_file=integrated_erp,
+                    transit_file=integrated_transit if has_transit else None,
+                    output_file=result_file,
+                )
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                log_process(user['id'], 'forecast', 'failed', f'Delta Forecast 處理失敗: {str(e)}')
+                return jsonify({'success': False, 'message': f'Delta Forecast 處理失敗: {str(e)}'})
 
             file_size = os.path.getsize(result_file)
             duration = time.time() - start_time
 
-            print(f"=== Delta Forecast 處理完成：直接使用匯總格式，耗時 {duration:.2f} 秒 ===")
+            print(f"=== Delta Forecast 處理完成：耗時 {duration:.2f} 秒 ===")
 
             log_activity(user['id'], user['username'], 'run_forecast',
-                       f"Delta Forecast 處理完成（匯總格式直接輸出）", get_client_ip(), request.headers.get('User-Agent'))
+                       f"Delta Forecast 處理完成 (ERP 填入 {stats['erp_filled']}, Transit 填入 {stats['transit_filled']})",
+                       get_client_ip(), request.headers.get('User-Agent'))
 
             return jsonify({
                 'success': True,
                 'message': f'Delta Forecast 處理完成',
                 'stats': {
-                    'erp_filled': 0,
-                    'erp_skipped': 0,
-                    'transit_filled': 0,
-                    'transit_skipped': 0,
-                    'erp_source': '匯總格式（已合併）',
-                    'transit_source': '匯總格式（已合併）'
+                    'erp_filled': stats['erp_filled'],
+                    'erp_skipped': stats['erp_skipped'],
+                    'transit_filled': stats['transit_filled'],
+                    'transit_skipped': stats['transit_skipped'],
+                    'erp_source': f"ERP 匹配 {stats['erp_matched_rows']} 列",
+                    'transit_source': f"Transit 匹配 {stats['transit_matched_rows']} 列" if has_transit else '無 Transit'
                 },
                 'duration': round(duration, 2),
                 'file_size': file_size,
