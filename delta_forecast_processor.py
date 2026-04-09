@@ -1089,7 +1089,7 @@ def detect_all_formats(forecast_files):
 
 
 def consolidate(forecast_files, reference_template, output_path,
-                erp_mapping=None, plant_codes=None):
+                erp_mapping=None, plant_codes=None, file_labels=None):
     """
     合併多個 Delta Forecast 檔案為匯總格式 Excel (支援 8 種格式)。
 
@@ -1101,6 +1101,9 @@ def consolidate(forecast_files, reference_template, output_path,
         plant_codes: list of valid PLANT codes, 用於從檔名比對單 PLANT 檔案的 PLANT。
                      建議由 customer_mappings 的 region 欄位提取
                      (例: ['PSB5', 'PSB7', 'IAI1', 'IPC1'])。
+        file_labels: dict {filepath: label}，用於自訂 Buyer 欄位顯示名稱。
+                     通常由 app.py 傳入原始檔名 (因為暫存檔名被改成 forecast_temp_N)。
+                     若未提供則使用 basename without ext。
 
     Returns:
         dict with keys: success, part_count, format_stats, unknown_files,
@@ -1151,13 +1154,20 @@ def consolidate(forecast_files, reference_template, output_path,
             print(f"  ⚠️ 跳過未註冊 reader 的格式: {fmt} ({os.path.basename(fp)})")
             continue
 
-        buyer_label = os.path.splitext(os.path.basename(fp))[0]
+        # Buyer 顯示名稱 & 檔名比對用途:
+        # 優先使用呼叫端傳入的原始檔名 (因為上傳時 app.py 會把檔案改名成 forecast_temp_N)
+        label_for_match = file_labels.get(fp) if file_labels else None
+        if label_for_match:
+            buyer_label = os.path.splitext(label_for_match)[0]
+        else:
+            buyer_label = os.path.splitext(os.path.basename(fp))[0]
         file_key = os.path.basename(fp)
 
-        # 單 PLANT 檔案才需從檔名比對 PLANT 代碼
+        # 單 PLANT 檔案才需從檔名比對 PLANT 代碼 (用原始檔名，不用 temp 檔名)
         plant_code = None
         if fmt in SINGLE_PLANT_FORMATS and plant_codes:
-            matched = match_plants_in_filename(fp, plant_codes)
+            match_target = label_for_match if label_for_match else fp
+            matched = match_plants_in_filename(match_target, plant_codes)
             if matched:
                 plant_code = matched[0]
                 if len(matched) > 1:

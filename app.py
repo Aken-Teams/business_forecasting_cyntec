@@ -1378,8 +1378,12 @@ def upload_forecast():
         # 使用資料夾管理結構（IT 測試模式下也使用 IT 人員的 user_id）
         upload_folder, session_timestamp = get_or_create_session_folder(user['id'], 'uploads', upload_session_id)
 
+        # Delta 台達: 支援 8 種格式，1+ 檔案任何組合。統一走多檔合併路徑，
+        # 不論實際上傳幾個檔案。
+        is_delta_upload_early = (template_username == 'delta')
+
         # ========== 處理多檔案上傳 ==========
-        if len(files_list) == 1:
+        if len(files_list) == 1 and not is_delta_upload_early:
             # 單檔案上傳：保留原始副檔名
             file = files_list[0]
             original_filename = file.filename
@@ -1466,30 +1470,30 @@ def upload_forecast():
                 temp_files.append((file.filename, temp_filepath, original_ext))
                 print(f"  暫存文件 {idx + 1}: {file.filename} -> {temp_filepath}")
 
-            # ========== Delta 台達：使用自動偵測 buyer 驗證 ==========
+            # ========== Delta 台達：8 種格式自動偵測 (1+ 檔案任何組合) ==========
             is_delta_upload = (template_username == 'delta')
 
             if is_delta_upload:
-                from delta_forecast_processor import detect_buyer, consolidate as delta_consolidate
+                from delta_forecast_processor import (
+                    detect_format, FORMAT_LABELS, consolidate as delta_consolidate,
+                )
 
-                # 偵測每個檔案的 buyer
-                detected_buyers = {}
+                # 偵測每個檔案的格式 (8 種之一)
+                detected_formats = []  # list of (original_name, temp_path, fmt)
                 for original_name, temp_path, _ in temp_files:
-                    buyer = detect_buyer(temp_path)
-                    if buyer is None:
+                    fmt = detect_format(temp_path)
+                    if fmt is None:
                         validation_errors.append({
                             'filename': original_name,
-                            'message': '無法辨識 Buyer 格式（需為 Ketwadee / Kanyanat / Weeraya）',
-                            'details': []
-                        })
-                    elif buyer in detected_buyers:
-                        validation_errors.append({
-                            'filename': original_name,
-                            'message': f'重複的 Buyer：{buyer}（已存在 {detected_buyers[buyer]}）',
-                            'details': []
+                            'message': '無法辨識 Delta Forecast 格式',
+                            'details': [
+                                '支援格式 (共 8 種): Ketwadee (PSB5) / Kanyanat (PSB7) / '
+                                'Weeraya (PSB7) / India IAI1+UPI2 / PSW1+CEW1 / '
+                                'MWC1+IPC1 / NBQ1 / SVC1+PWC1 (Diode&MOS)'
+                            ]
                         })
                     else:
-                        detected_buyers[buyer] = original_name
+                        detected_formats.append((original_name, temp_path, fmt))
                         file_size = os.path.getsize(temp_path)
                         total_size += file_size
                         files_info.append({
@@ -1497,17 +1501,16 @@ def upload_forecast():
                             'rows': 0,
                             'columns': 0,
                             'size': file_size,
-                            'buyer': buyer
+                            'format': FORMAT_LABELS.get(fmt, fmt),
                         })
-                        print(f"  ✅ {original_name}: Buyer={buyer}")
+                        print(f"  ✅ {original_name}: {FORMAT_LABELS.get(fmt, fmt)}")
 
-                # 需要恰好 3 個不同 buyer
-                if not validation_errors and len(detected_buyers) != 3:
-                    missing = set(['Ketwadee', 'Kanyanat', 'Weeraya']) - set(detected_buyers.keys())
+                # 至少要有 1 個有效格式
+                if not validation_errors and not detected_formats:
                     validation_errors.append({
                         'filename': '(整體)',
-                        'message': f'需要 3 個不同 Buyer 的檔案，目前只有 {len(detected_buyers)} 個',
-                        'details': [f'缺少: {", ".join(missing)}'] if missing else []
+                        'message': '未找到任何可識別的 Delta Forecast 檔案',
+                        'details': [],
                     })
 
             else:
@@ -1572,19 +1575,44 @@ def upload_forecast():
             if not is_delta_upload and not all_dataframes:
                 return jsonify({'success': False, 'message': '沒有有效的 Forecast 文件'})
 
-            # ========== Delta 台達：自動合併 3 檔為匯總格式 ==========
+            # ========== Delta 台達：8 格式自動合併 ==========
             if is_delta_upload:
                 import time
-                print(f"=== Delta 自動合併模式：合併 {len(temp_files)} 個 Buyer 檔案 ===")
+                print(f"=== Delta 自動合併模式：合併 {len(temp_files)} 個 Forecast 檔案 ===")
                 merge_start = time.time()
 
                 try:
+                    # 從 customer_mappings 讀取 PLANT 代碼 (region 欄位)，
+                    # 用於單 PLANT 檔案的檔名比對 (如 Ketwadee/Kanyanat/Weeraya/NBQ1)
+                    from database import get_customer_mappings_raw
+                    mapping_user_id = int(customer_id) if test_mode and customer_id else user['id']
+                    raw_mappings = get_customer_mappings_raw(mapping_user_id) or []
+                    plant_codes = []
+                    for m in raw_mappings:
+                        region = m.get('region') if isinstance(m, dict) else None
+                        if region:
+                            # 容許兩種格式: 純代碼 'PSB5' 或 舊格式 'PSB5 泰國' (取第一個 token)
+                            first = str(region).split()[0] if str(region).split() else ''
+                            if first and first not in plant_codes:
+                                plant_codes.append(first)
+                    print(f"  從 mapping 載入 {len(plant_codes)} 個 PLANT 代碼: {plant_codes}")
+
                     file_paths = [temp_path for _, temp_path, _ in temp_files]
+                    # 原始檔名對應: 暫存檔 forecast_temp_N.xlsx → 使用者上傳的原檔名
+                    # 用於 Buyer 欄位顯示 (避免出現 'forecast_temp_0')
+                    file_labels = {
+                        temp_path: original_name
+                        for original_name, temp_path, _ in temp_files
+                    }
                     reference_template = os.path.join('compare', 'delta', 'consolidated_template.xlsx')
                     final_filename = 'forecast_data.xlsx'
                     final_filepath = os.path.join(upload_folder, final_filename)
 
-                    result = delta_consolidate(file_paths, reference_template, final_filepath)
+                    result = delta_consolidate(
+                        file_paths, reference_template, final_filepath,
+                        plant_codes=plant_codes,
+                        file_labels=file_labels,
+                    )
 
                     if not result['success']:
                         for _, temp_path, _ in temp_files:
@@ -1613,13 +1641,14 @@ def upload_forecast():
                     filenames_str = ', '.join(original_filenames)
                     log_upload(user['id'], 'forecast', filenames_str, merged_size, result['part_count'], 0, 'success')
                     log_activity(user['id'], user['username'], 'upload_forecast',
-                               f"Delta Forecast 合併上傳成功：{len(files_list)} 個 Buyer 檔案已合併為匯總格式", get_client_ip(), request.headers.get('User-Agent'))
+                               f"Delta Forecast 合併上傳成功：{len(files_list)} 個檔案合併為匯總格式", get_client_ip(), request.headers.get('User-Agent'))
 
                     # 檢查在途需求
-                    mapping_user_id = int(customer_id) if test_mode and customer_id else user['id']
                     transit_check = check_transit_requirements_from_forecast(final_filepath, mapping_user_id, template_username)
 
-                    buyer_info = ', '.join([f"{b}: {f}" for b, f in result.get('buyer_stats', {}).items()])
+                    format_stats = result.get('format_stats', {})
+                    format_info = ', '.join([f'{os.path.basename(k)}: {v} 筆'
+                                             for k, v in format_stats.items()])
                     response_data = {
                         'success': True,
                         'message': f'Delta {len(files_list)} 個 Forecast 檔案合併成功（{result["part_count"]} 個料號）',
@@ -1630,8 +1659,11 @@ def upload_forecast():
                         'merge_mode': False,
                         'saved_filename': final_filename,
                         'delta_consolidation': True,
-                        'buyer_stats': buyer_info
+                        'format_stats': format_info,
+                        'buyer_stats': format_info,  # 向後相容 UI
                     }
+                    if result.get('date_warnings'):
+                        response_data['date_warnings'] = result['date_warnings']
 
                     if transit_check['message']:
                         response_data['transit_check'] = transit_check
