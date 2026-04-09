@@ -233,7 +233,42 @@ def _to_partno(val):
         return str(val)
 
 
-def _read_ketwadee(filepath, date_cols):
+def extract_plant_codes_from_regions(regions):
+    """
+    從 mapping 表的 region 欄位提取 PLANT 代碼。
+    例: ['PSB5 泰國', 'IPC1 東莞'] → ['PSB5', 'IPC1']
+    """
+    codes = []
+    for r in regions:
+        if not r:
+            continue
+        parts = str(r).split()
+        if parts:
+            codes.append(parts[0])
+    return codes
+
+
+def match_plants_in_filename(filepath, plant_codes):
+    """
+    從檔名中搜尋 PLANT 代碼 (case-insensitive)。
+    回傳檔名中出現的所有 PLANT 代碼，依長度降冪排序 (長的優先)。
+
+    Args:
+        filepath: 檔案路徑
+        plant_codes: 有效的 PLANT 代碼清單 (如 ['PSB5', 'PSB7', 'IPC1'])
+
+    Returns:
+        list of matched codes, e.g. ['PSB5'] or ['IAI1', 'UPI2', 'DFI1']
+    """
+    if not plant_codes:
+        return []
+    fn = os.path.splitext(os.path.basename(filepath))[0].upper()
+    matched = [code for code in plant_codes if code.upper() in fn]
+    matched.sort(key=len, reverse=True)
+    return matched
+
+
+def _read_ketwadee(filepath, date_cols, buyer_label=None, plant_code=None):
     """讀取 PSB5 Ketwadee: MRP sheet, 3 rows/part"""
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     ws = wb['MRP']
@@ -273,7 +308,7 @@ def _read_ketwadee(filepath, date_cols):
                         supply[date_key] = 0
 
             results.append({
-                'buyer': 'Ketwadee', 'plant': 'PSB5',
+                'buyer': buyer_label or 'Ketwadee', 'plant': plant_code or 'PSB5',
                 'part_no': _to_partno(part_no),
                 'vendor_part': str(vendor_part) if vendor_part else '',
                 'stock': stock, 'on_way': None,
@@ -287,7 +322,7 @@ def _read_ketwadee(filepath, date_cols):
     return results
 
 
-def _read_kanyanat(filepath, date_cols):
+def _read_kanyanat(filepath, date_cols, buyer_label=None, plant_code=None):
     """讀取 PSB7 Kanyanat: Sheet1, 4 rows/part"""
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     ws = wb['Sheet1']
@@ -326,7 +361,7 @@ def _read_kanyanat(filepath, date_cols):
                         supply[date_key] = 0
 
             results.append({
-                'buyer': 'Kanyanat', 'plant': 'PSB7',
+                'buyer': buyer_label or 'Kanyanat', 'plant': plant_code or 'PSB7',
                 'part_no': _to_partno(part_no),
                 'vendor_part': str(vendor_part) if vendor_part else '',
                 'stock': None, 'on_way': None,
@@ -340,7 +375,7 @@ def _read_kanyanat(filepath, date_cols):
     return results
 
 
-def _read_weeraya(filepath, date_cols):
+def _read_weeraya(filepath, date_cols, buyer_label=None, plant_code=None):
     """讀取 PSB7 Weeraya: Sheet1, 5 rows/part"""
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     ws = wb['Sheet1']
@@ -376,7 +411,7 @@ def _read_weeraya(filepath, date_cols):
             balance_data = read_date_values(rows[i + 3]) if i + 3 < len(rows) else {}
 
             results.append({
-                'buyer': 'Weeraya', 'plant': 'PSB7',
+                'buyer': buyer_label or 'Weeraya', 'plant': plant_code or 'PSB7',
                 'part_no': _to_partno(part_no),
                 'vendor_part': str(vendor_part) if vendor_part else '',
                 'stock': stock, 'on_way': None,
@@ -400,12 +435,10 @@ def _generate_consolidated_excel(all_source, output_path, reference_path,
     """
     產出匯總格式 Excel, 格式與原始模板完全一致。
     Balance 行使用 Excel 公式。
+    C/D 欄位 (ERP 客戶簡稱、ERP 送貨地點) 留空，由第三步驟 forecast 處理時
+    透過 customer_mappings 表自動填入，consolidation 階段不寫入。
     """
-    if erp_mapping is None:
-        erp_mapping = {
-            'PSB5': ('台達泰國', '台達PSB5SH'),
-            'PSB7': ('台達泰國', '台達PSB7SH'),
-        }
+    # erp_mapping 已棄用，保留參數做相容性
 
     wb_ref = openpyxl.load_workbook(reference_path)
     ws_ref = wb_ref[wb_ref.sheetnames[0]]
@@ -520,7 +553,8 @@ def _generate_consolidated_excel(all_source, output_path, reference_path,
         part_no = item['part_no']
         vendor_part = item['vendor_part']
         stock = item['stock']
-        erp_name, erp_location = erp_mapping.get(plant, ('', ''))
+        # ERP 客戶簡稱、ERP 送貨地點 留空 (第三步驟由 mapping 表填入)
+        erp_name, erp_location = '', ''
 
         # --- Demand ---
         demand_row = row_num
@@ -638,7 +672,8 @@ BUYER_READERS = {
 }
 
 
-def consolidate(forecast_files, reference_template, output_path, erp_mapping=None):
+def consolidate(forecast_files, reference_template, output_path,
+                erp_mapping=None, plant_codes=None):
     """
     合併多個 Delta Forecast 檔案為匯總格式 Excel。
 
@@ -646,7 +681,10 @@ def consolidate(forecast_files, reference_template, output_path, erp_mapping=Non
         forecast_files: list of file paths (3 個 Buyer 檔案)
         reference_template: 匯總格式模板路徑 (用於取得表頭格式，不用於日期)
         output_path: 輸出檔案路徑
-        erp_mapping: dict {Plant: (ERP客戶簡稱, ERP送貨地點)}, optional
+        erp_mapping: dict {Plant: (ERP客戶簡稱, ERP送貨地點)}, 已棄用
+        plant_codes: list of valid PLANT codes, 用於從檔名比對 PLANT。
+                     若為 None 則 fallback 到舊的寫死值 (PSB5/PSB7)。
+                     建議由 customer_mappings 的 region 欄位提取。
 
     Returns:
         dict with keys: success, part_count, buyer_stats, date_warnings, message
@@ -680,15 +718,32 @@ def consolidate(forecast_files, reference_template, output_path, erp_mapping=Non
     print(f"  統一日期欄位: {len(date_cols)} 個 ({date_cols[0]} ~ {date_cols[-1]})")
 
     # 3. 讀取各 Buyer 資料
+    # Buyer 欄位暫時使用檔案名稱 (不含副檔名)，等客戶確認代碼→名稱對照後再調整邏輯
+    # PLANT 欄位從 mapping 表的 region 提取英文代碼 (如 'PSB5 泰國' → 'PSB5')，
+    # 再從檔名中比對出現的代碼 (大小寫無關)。
     all_source = []
     buyer_stats = {}
     for buyer_name in ['Ketwadee', 'Kanyanat', 'Weeraya']:
         if buyer_name in buyer_files:
             reader = BUYER_READERS[buyer_name]
-            data = reader(buyer_files[buyer_name], date_cols)
+            fp = buyer_files[buyer_name]
+            buyer_label = os.path.splitext(os.path.basename(fp))[0]
+
+            # 從檔名比對 PLANT 代碼
+            plant_code = None
+            if plant_codes:
+                matched = match_plants_in_filename(fp, plant_codes)
+                if matched:
+                    plant_code = matched[0]  # 單一 PLANT 檔案取第一個
+                    if len(matched) > 1:
+                        print(f"  ⚠️ {buyer_label}: 檔名中有多個 PLANT {matched}, 取 {plant_code}")
+
+            data = reader(fp, date_cols,
+                          buyer_label=buyer_label, plant_code=plant_code)
             buyer_stats[buyer_name] = len(data)
             all_source.extend(data)
-            print(f"  {buyer_name}: {len(data)} 個料號")
+            plant_display = plant_code or '(寫死預設值)'
+            print(f"  {buyer_name} ({buyer_label}): {len(data)} 個料號, PLANT={plant_display}")
 
     if not all_source:
         return {
