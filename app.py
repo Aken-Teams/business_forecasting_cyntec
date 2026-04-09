@@ -1466,39 +1466,84 @@ def upload_forecast():
                 temp_files.append((file.filename, temp_filepath, original_ext))
                 print(f"  暫存文件 {idx + 1}: {file.filename} -> {temp_filepath}")
 
-            # 驗證並讀取每個檔案
-            for original_name, temp_path, _ in temp_files:
-                print(f"驗證 Forecast 文件: {original_name}（用戶: {template_username}）")
-                is_valid, message, details = validate_forecast_format(temp_path, template_username)
+            # ========== Delta 台達：使用自動偵測 buyer 驗證 ==========
+            is_delta_upload = (template_username == 'delta')
 
-                if not is_valid:
+            if is_delta_upload:
+                from delta_forecast_processor import detect_buyer, consolidate as delta_consolidate
+
+                # 偵測每個檔案的 buyer
+                detected_buyers = {}
+                for original_name, temp_path, _ in temp_files:
+                    buyer = detect_buyer(temp_path)
+                    if buyer is None:
+                        validation_errors.append({
+                            'filename': original_name,
+                            'message': '無法辨識 Buyer 格式（需為 Ketwadee / Kanyanat / Weeraya）',
+                            'details': []
+                        })
+                    elif buyer in detected_buyers:
+                        validation_errors.append({
+                            'filename': original_name,
+                            'message': f'重複的 Buyer：{buyer}（已存在 {detected_buyers[buyer]}）',
+                            'details': []
+                        })
+                    else:
+                        detected_buyers[buyer] = original_name
+                        file_size = os.path.getsize(temp_path)
+                        total_size += file_size
+                        files_info.append({
+                            'name': original_name,
+                            'rows': 0,
+                            'columns': 0,
+                            'size': file_size,
+                            'buyer': buyer
+                        })
+                        print(f"  ✅ {original_name}: Buyer={buyer}")
+
+                # 需要恰好 3 個不同 buyer
+                if not validation_errors and len(detected_buyers) != 3:
+                    missing = set(['Ketwadee', 'Kanyanat', 'Weeraya']) - set(detected_buyers.keys())
                     validation_errors.append({
-                        'filename': original_name,
-                        'message': message,
-                        'details': details
+                        'filename': '(整體)',
+                        'message': f'需要 3 個不同 Buyer 的檔案，目前只有 {len(detected_buyers)} 個',
+                        'details': [f'缺少: {", ".join(missing)}'] if missing else []
                     })
-                    continue
 
-                try:
-                    df = pd.read_excel(temp_path)
-                    file_size = os.path.getsize(temp_path)
-                    total_size += file_size
+            else:
+                # 非 Delta：使用原有驗證邏輯
+                for original_name, temp_path, _ in temp_files:
+                    print(f"驗證 Forecast 文件: {original_name}（用戶: {template_username}）")
+                    is_valid, message, details = validate_forecast_format(temp_path, template_username)
 
-                    all_dataframes.append(df)
-                    files_info.append({
-                        'name': original_name,
-                        'rows': len(df),
-                        'columns': len(df.columns),
-                        'size': file_size
-                    })
-                    print(f"  ✅ {original_name}: {len(df)} 行, {len(df.columns)} 欄位")
+                    if not is_valid:
+                        validation_errors.append({
+                            'filename': original_name,
+                            'message': message,
+                            'details': details
+                        })
+                        continue
 
-                except Exception as e:
-                    validation_errors.append({
-                        'filename': original_name,
-                        'message': f'讀取失敗: {str(e)}',
-                        'details': []
-                    })
+                    try:
+                        df = pd.read_excel(temp_path)
+                        file_size = os.path.getsize(temp_path)
+                        total_size += file_size
+
+                        all_dataframes.append(df)
+                        files_info.append({
+                            'name': original_name,
+                            'rows': len(df),
+                            'columns': len(df.columns),
+                            'size': file_size
+                        })
+                        print(f"  ✅ {original_name}: {len(df)} 行, {len(df.columns)} 欄位")
+
+                    except Exception as e:
+                        validation_errors.append({
+                            'filename': original_name,
+                            'message': f'讀取失敗: {str(e)}',
+                            'details': []
+                        })
 
             # 如果有驗證錯誤
             if validation_errors:
@@ -1524,14 +1569,92 @@ def upload_forecast():
                 })
 
             # 檢查是否有有效檔案
-            if not all_dataframes:
+            if not is_delta_upload and not all_dataframes:
                 return jsonify({'success': False, 'message': '沒有有效的 Forecast 文件'})
+
+            # ========== Delta 台達：自動合併 3 檔為匯總格式 ==========
+            if is_delta_upload:
+                import time
+                print(f"=== Delta 自動合併模式：合併 {len(temp_files)} 個 Buyer 檔案 ===")
+                merge_start = time.time()
+
+                try:
+                    file_paths = [temp_path for _, temp_path, _ in temp_files]
+                    reference_template = os.path.join('compare', 'delta', 'consolidated_template.xlsx')
+                    final_filename = 'forecast_data.xlsx'
+                    final_filepath = os.path.join(upload_folder, final_filename)
+
+                    result = delta_consolidate(file_paths, reference_template, final_filepath)
+
+                    if not result['success']:
+                        for _, temp_path, _ in temp_files:
+                            if os.path.exists(temp_path):
+                                os.remove(temp_path)
+                        return jsonify({
+                            'success': False,
+                            'message': f'Delta 合併失敗: {result["message"]}'
+                        })
+
+                    # 清理暫存檔案
+                    for _, temp_path, _ in temp_files:
+                        if os.path.exists(temp_path) and temp_path != final_filepath:
+                            os.remove(temp_path)
+
+                    merged_size = os.path.getsize(final_filepath)
+                    duration = time.time() - merge_start
+                    print(f"=== Delta 合併完成：{result['part_count']} 個料號，耗時 {duration:.2f} 秒 ===")
+
+                    # 儲存 session
+                    set_user_file_path('forecast', final_filepath)
+                    session['forecast_merge_mode'] = False
+                    session.modified = True
+
+                    # 記錄日誌
+                    filenames_str = ', '.join(original_filenames)
+                    log_upload(user['id'], 'forecast', filenames_str, merged_size, result['part_count'], 0, 'success')
+                    log_activity(user['id'], user['username'], 'upload_forecast',
+                               f"Delta Forecast 合併上傳成功：{len(files_list)} 個 Buyer 檔案已合併為匯總格式", get_client_ip(), request.headers.get('User-Agent'))
+
+                    # 檢查在途需求
+                    mapping_user_id = int(customer_id) if test_mode and customer_id else user['id']
+                    transit_check = check_transit_requirements_from_forecast(final_filepath, mapping_user_id, template_username)
+
+                    buyer_info = ', '.join([f"{b}: {f}" for b, f in result.get('buyer_stats', {}).items()])
+                    response_data = {
+                        'success': True,
+                        'message': f'Delta {len(files_list)} 個 Forecast 檔案合併成功（{result["part_count"]} 個料號）',
+                        'file_count': len(files_list),
+                        'total_rows': result['part_count'],
+                        'total_size': merged_size,
+                        'files': files_info,
+                        'merge_mode': False,
+                        'saved_filename': final_filename,
+                        'delta_consolidation': True,
+                        'buyer_stats': buyer_info
+                    }
+
+                    if transit_check['message']:
+                        response_data['transit_check'] = transit_check
+
+                    return jsonify(response_data)
+
+                except Exception as e:
+                    print(f"Delta 合併處理錯誤: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+                    for _, temp_path, _ in temp_files:
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
+                    return jsonify({
+                        'success': False,
+                        'message': f'Delta 合併處理失敗: {str(e)}'
+                    })
 
             # ========== 根據合併選項處理 ==========
             # Liteon: 不用 LibreOffice 合併（會丟失 Plant/Buyer 且合併全部 sheets）
             # Liteon 的智慧合併在 run_forecast 時由 merge_liteon_forecast_files() 處理
             is_liteon_upload = (template_username == 'liteon')
-            if merge_files and not is_liteon_upload:
+            if merge_files and not is_liteon_upload and not is_delta_upload:
                 # 非 Liteon 合併模式：使用 LibreOffice 跨平台方案，保留格式
                 import shutil
                 import time
@@ -2594,7 +2717,13 @@ def process_forecast_cleanup():
                     wb = load_workbook(file_path)
                     cleaned_count = 0
 
-                    if username == 'liteon':
+                    if username == 'delta':
+                        # 台達：合併後的匯總格式不需要清理 Supply 列
+                        # 直接複製到 cleaned 目錄即可
+                        ws = wb.active
+                        cleaned_count = 0  # Delta 不清理
+
+                    elif username == 'liteon':
                         # 光寶：指定讀取 Daily+Weekly+Monthly sheet
                         # 清理條件：C欄(column 3) = "Commit" 時，清零 J~BY 欄(column 10~77)
                         if 'Daily+Weekly+Monthly' in wb.sheetnames:
@@ -3460,11 +3589,54 @@ def run_forecast():
 
         # Pegatron (user_id=5) 使用專用處理器
         # Liteon (user_id=6) 使用專用處理器
+        # Delta: 使用 username 判斷（不依賴 hardcoded ID）
         # 在 IT 測試模式下，使用被測試客戶的 ID 來判斷
         is_pegatron = processor_user_id == 5
         is_liteon = processor_user_id == 6
+        processor_user = get_user_by_id(processor_user_id)
+        is_delta = processor_user and processor_user['username'] == 'delta'
 
-        if is_liteon:
+        if is_delta:
+            # ===== Delta 專用處理：合併後的匯總格式即為最終輸出 =====
+            import shutil
+
+            # Delta 的 cleaned 檔案就是合併後的匯總格式，直接作為最終輸出
+            if has_single_cleaned:
+                forecast_source = single_cleaned_file
+            elif multi_cleaned_files:
+                forecast_source = multi_cleaned_files[0]
+            else:
+                forecast_source = forecast_file
+
+            output_filename = 'forecast_result.xlsx'
+            result_file = os.path.join(processed_folder, output_filename)
+            shutil.copy2(forecast_source, result_file)
+
+            file_size = os.path.getsize(result_file)
+            duration = time.time() - start_time
+
+            print(f"=== Delta Forecast 處理完成：直接使用匯總格式，耗時 {duration:.2f} 秒 ===")
+
+            log_activity(user['id'], user['username'], 'run_forecast',
+                       f"Delta Forecast 處理完成（匯總格式直接輸出）", get_client_ip(), request.headers.get('User-Agent'))
+
+            return jsonify({
+                'success': True,
+                'message': f'Delta Forecast 處理完成',
+                'stats': {
+                    'erp_filled': 0,
+                    'erp_skipped': 0,
+                    'transit_filled': 0,
+                    'transit_skipped': 0,
+                    'erp_source': '匯總格式（已合併）',
+                    'transit_source': '匯總格式（已合併）'
+                },
+                'duration': round(duration, 2),
+                'file_size': file_size,
+                'output_filename': output_filename
+            })
+
+        elif is_liteon:
             # ===== Liteon 專用處理：使用 LiteonForecastProcessor =====
             from liteon_forecast_processor import LiteonForecastProcessor
 

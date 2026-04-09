@@ -185,8 +185,9 @@
                             </div>
                         </div>
 
-                        <!-- Forecast 合併選項 - 獨立醒目區塊 -->
-                        <div class="merge-option-banner" id="merge-option-banner">
+                        <!-- Forecast 合併選項 - 獨立醒目區塊（Delta 台達隱藏，使用自動合併邏輯） -->
+                        <div class="merge-option-banner" id="merge-option-banner"
+                             {% if user and user.username == 'delta' %}style="display: none;"{% endif %}>
                             <div class="merge-option-content">
                                 <div class="merge-option-icon">
                                     <i class="fas fa-object-group"></i>
@@ -509,6 +510,9 @@
     </div>
 
 
+    <script>
+        window.CURRENT_USERNAME = '{{ user.username if user else "" }}';
+    </script>
     <script src="{{ url_for('static', filename='js/main.js') }}?v={{ version }}"></script>
 
     <!-- 登出功能 -->

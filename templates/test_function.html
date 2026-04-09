@@ -676,6 +676,8 @@
 
     <!-- IT 測試模式初始化腳本（必須在 main.js 之前） -->
     <script>
+        window.CURRENT_USERNAME = '{{ user.username if user else "" }}';
+
         // IT 測試模式全域設定
         window.IT_TEST_MODE = {
             enabled: true,

@@ -34,6 +34,19 @@ function getTestCustomerInfo() {
     return null;
 }
 
+// 取得目前有效的 username（IT 測試模式用客戶的 username，否則用登入者的）
+function getEffectiveUsername() {
+    if (isITTestMode()) {
+        return window.IT_TEST_MODE.selectedCustomer.username || '';
+    }
+    return window.CURRENT_USERNAME || '';
+}
+
+// 判斷目前是否為 Delta 台達客戶
+function isDeltaCustomer() {
+    return getEffectiveUsername() === 'delta';
+}
+
 // 為 FormData 添加測試模式參數
 function appendTestModeParams(formData) {
     if (isITTestMode()) {
@@ -126,7 +139,35 @@ function resetAllStates() {
         showSection('upload');
     }
 
+    // Delta 台達：隱藏合併選項，顯示上傳提示
+    updateDeltaUI();
+
     console.log('🔄 所有狀態已重置');
+}
+
+// 更新 Delta 台達相關 UI 元素
+function updateDeltaUI() {
+    const mergeBanner = document.getElementById('merge-option-banner');
+    const forecastUploadBox = document.getElementById('forecast-upload-box');
+
+    if (isDeltaCustomer()) {
+        // 隱藏合併選項
+        if (mergeBanner) mergeBanner.style.display = 'none';
+        // 更新 forecast 上傳提示
+        const forecastHint = forecastUploadBox ? forecastUploadBox.querySelector('.upload-hint, .upload-text') : null;
+        if (forecastHint) {
+            forecastHint.setAttribute('data-original-text', forecastHint.textContent);
+            forecastHint.textContent = '請上傳 3 個 Forecast 檔案 (Ketwadee + Kanyanat + Weeraya)';
+        }
+    } else {
+        // 恢復合併選項
+        if (mergeBanner) mergeBanner.style.display = '';
+        // 恢復原始提示
+        const forecastHint = forecastUploadBox ? forecastUploadBox.querySelector('.upload-hint, .upload-text') : null;
+        if (forecastHint && forecastHint.getAttribute('data-original-text')) {
+            forecastHint.textContent = forecastHint.getAttribute('data-original-text');
+        }
+    }
 }
 
 // 儲存上傳檔案的詳細資訊
