@@ -4,12 +4,20 @@
 
 ## 🌟 功能特色
 
+- **多客戶支援**: 廣達 (Quanta)、台達 (Delta) 獨立處理流程
 - **文件上傳**: 支援ERP淨需求文件和Forecast文件上傳
 - **數據清理**: 自動清理Forecast文件中的特定數據
 - **映射整合**: 可視化配置客戶簡稱與地區的映射關係
 - **FORECAST處理**: 超高速批量處理，性能提升20倍
 - **累加邏輯**: 支援數據累加，避免覆蓋問題
 - **結果下載**: 一鍵下載所有處理結果
+
+### 🆕 台達 (Delta) 專屬流程
+- **8 檔合併**: 自動合併 8 個不同 PLANT 格式 Forecast (Ketwadee/Kanyanat/Weeraya/India IAI1/PSW1+CEW1/MWC1+IPC1/NBQ1/SVC1+PWC1)
+- **匯總格式模式 (方案二)**: 固定 26 日期欄 = `PASSDUE + 16 週 + 9 月`
+- **動態 W1 起點**: 以來源檔最早的週一為 W1，避免 PASSDUE 被誤折疊
+- **多對一累加**: 同月份的多個週末日期自動折疊累加至月份欄
+- **Transit + ERP 回填**: 將 Transit 和 ERP 淨需求回填到合併後的 Forecast
 
 ## 🎨 設計風格
 
@@ -36,7 +44,7 @@ python app.py
 
 ### 3. 訪問系統
 
-打開瀏覽器訪問：`http://localhost:5000`
+打開瀏覽器訪問：`http://localhost:12058`
 
 ## 📋 使用流程
 
@@ -69,6 +77,41 @@ python app.py
 - 下載整合後的ERP文件
 - 下載FORECAST處理結果
 
+---
+
+## 🏭 台達 (Delta) 專屬使用流程
+
+### Step 1 — 上傳 8 個 Forecast 檔案
+| 類別 | 檔名範例 | PLANT |
+|------|---------|-------|
+| Ketwadee | `PSBG PSB5- Ketwadee...xlsx` | PSB5 |
+| Kanyanat | `PSBG PSB7_Kanyanat.S...xlsx` | PSB7 |
+| Weeraya | `PSBG PSB7-Weeraya...xlsx` | PSB7 |
+| India IAI1 | `PSBG (India IAI1&UPI2&DFI1 DIODES)...xlsx` | IAI1/UPI2 |
+| PSW1+CEW1 | `PSBG PSW1+CEW1-...xlsx` | PSW1/CEW1 |
+| MWC1+IPC1 | `強茂 MWC1IPC1 MRP...xlsx` | MWC1/IPC1 |
+| NBQ1 | `NBQ1.xlsx` | NBQ1 |
+| SVC1+PWC1 Diode&MOS | `MRP(SVC1PWC1 DIODE&MOS)...xlsx` | SVC1/PWC1 |
+
+系統自動合併為匯總格式 (方案二)：
+- K~Z 欄: **W1~W16** 週 (以來源檔最早週一起算)
+- AA~AI 欄: **9 個月份** (W16 次週起算)
+- PASSDUE 欄: 來自源檔明確標籤，不會從日期折入
+
+### Step 2 — 上傳 ERP + Transit
+- **ERP 淨需求**: `0408-上午淨需求 (台達).xlsx` (含 "PJOMR006 for SBU" 工作表)
+- **Transit 在途**: 可選，若無則跳過
+
+### Step 3 — 映射整合
+系統依據 DB 的 Delta 客戶映射表 (11 筆) 填入：
+- 客戶需求地區 / 斷點 / ETD / ETA
+- Forecast C/D 欄 (客戶簡稱 + 送貨地點)
+
+### Step 4 — Transit + ERP 回填
+- **Transit**: 依 (客戶簡稱, 送貨地點, 料號) 回填在途數量
+- **ERP**: 依 (客戶簡稱, 送貨地點, 料號) 回填淨需求至對應週/月欄位
+- 依 ETA 自動歸入 W1~W16 或月份欄位
+
 ## 🛠️ 技術架構
 
 ### 後端
@@ -86,9 +129,14 @@ python app.py
 ```
 business_forecasting/
 ├── app.py                          # Flask主應用
-├── ultra_fast_forecast_processor.py # FORECAST處理核心
+├── ultra_fast_forecast_processor.py # 廣達 FORECAST處理核心
+├── delta_forecast_processor.py     # 台達 8檔合併 + 方案二匯總格式
+├── delta_forecast_step4.py         # 台達 Transit + ERP 回填
+├── database.py                     # MySQL 使用者 / 映射表
 ├── requirements.txt                # 依賴包列表
 ├── README.md                      # 說明文檔
+├── docs/
+│   └── delta_meeting_notes.md     # 台達會議紀錄
 ├── templates/                     # HTML模板
 │   ├── index.html                 # 主頁面
 │   └── mapping.html               # 映射配置頁面
