@@ -1623,6 +1623,15 @@ def upload_forecast():
                             'message': f'Delta 合併失敗: {result["message"]}'
                         })
 
+                    # 保留客戶原始檔案（合併前），存到 originals 子資料夾
+                    originals_folder = os.path.join(upload_folder, 'originals')
+                    os.makedirs(originals_folder, exist_ok=True)
+                    for original_name, temp_path, _ in temp_files:
+                        if os.path.exists(temp_path) and temp_path != final_filepath:
+                            import shutil
+                            dest = os.path.join(originals_folder, original_name)
+                            shutil.copy2(temp_path, dest)
+
                     # 清理暫存檔案
                     for _, temp_path, _ in temp_files:
                         if os.path.exists(temp_path) and temp_path != final_filepath:
