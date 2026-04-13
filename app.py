@@ -3622,7 +3622,12 @@ def process_erp_mapping():
         # 依 PLANT(B) 查 mapping 表的 region，帶入 C(客戶簡稱) 和 D(送貨地點)
         forecast_cd_msg = ''
         if is_delta:
-            forecast_file = find_file_with_extensions(upload_folder, 'forecast_data')
+            # 優先使用 cleaned_forecast (Step 2 已清零 Supply)，避免殘留舊值
+            cleaned_forecast_file = os.path.join(processed_folder, 'cleaned_forecast.xlsx')
+            if os.path.exists(cleaned_forecast_file):
+                forecast_file = cleaned_forecast_file
+            else:
+                forecast_file = find_file_with_extensions(upload_folder, 'forecast_data')
             if forecast_file and os.path.exists(forecast_file):
                 print("🔧 開始填入 Delta Forecast C/D 欄位...")
 

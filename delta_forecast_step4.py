@@ -237,8 +237,12 @@ def fill_transit_into_forecast(ws, date_col_map, transit_file):
     skipped = 0
     matched_rows = 0
 
-    # 掃描 forecast 每一列
+    # 只掃描 Supply 列 (column I == "Supply")
     for r in range(2, ws.max_row + 1):
+        row_type = ws.cell(row=r, column=9).value  # I 欄 = row type
+        if row_type is None or str(row_type).strip() != 'Supply':
+            continue
+
         plant_v = ws.cell(row=r, column=2).value
         customer_v = ws.cell(row=r, column=3).value
         location_v = ws.cell(row=r, column=4).value
@@ -271,7 +275,7 @@ def fill_transit_into_forecast(ws, date_col_map, transit_file):
                 cell.value = qty
             filled += 1
 
-    print(f"  ✅ Transit 填入: {filled} 筆 (跳過 {skipped}, 匹配 forecast 列數 {matched_rows})")
+    print(f"  ✅ Transit 填入 Supply: {filled} 筆 (跳過 {skipped}, 匹配 forecast 列數 {matched_rows})")
     return filled, skipped, matched_rows
 
 
@@ -338,8 +342,9 @@ def calculate_eta_target_date(schedule_date, breakpoint_text, eta_text):
 
 def fill_erp_into_forecast(ws, date_col_map, erp_file):
     """
-    把 ERP 的淨需求依 (排程斷點 + ETA) 推算的目標日期填入 forecast。
+    把 ERP 的淨需求依 (排程斷點 + ETA) 推算的目標日期填入 forecast 的 Supply 列。
     值 = 淨需求 × 1000
+    填完後回寫 ERP「已分配」欄位。
 
     Returns:
         (filled_count, skipped_count, matched_rows)
@@ -361,9 +366,14 @@ def fill_erp_into_forecast(ws, date_col_map, erp_file):
             print(f"  ⚠️ ERP 缺少欄位: {col}")
             return 0, 0, 0
 
-    # 建立 lookup: (plant, customer, location, partno) → [erp_row_dict, ...]
+    # 確保「已分配」欄位存在且為 string 型別
+    if '已分配' not in erp_df.columns:
+        erp_df['已分配'] = ''
+    erp_df['已分配'] = erp_df['已分配'].astype(str).replace('nan', '')
+
+    # 建立 lookup: (plant, customer, location, partno) → [(erp_df_idx, erp_row_dict), ...]
     lookup = {}
-    for _, row in erp_df.iterrows():
+    for idx, row in erp_df.iterrows():
         plant = str(row['客戶需求地區']).strip() if pd.notna(row['客戶需求地區']) else ''
         customer = str(row['客戶簡稱']).strip() if pd.notna(row['客戶簡稱']) else ''
         location = str(row['送貨地點']).strip() if pd.notna(row['送貨地點']) else ''
@@ -377,12 +387,12 @@ def fill_erp_into_forecast(ws, date_col_map, erp_file):
             continue
 
         key = (plant, customer, location, partno)
-        lookup.setdefault(key, []).append({
+        lookup.setdefault(key, []).append((idx, {
             '淨需求': row['淨需求'],
             '排程出貨日期': row['排程出貨日期'],
             '排程出貨日期斷點': row['排程出貨日期斷點'],
             'ETA': row['ETA'],
-        })
+        }))
 
     print(f"  ERP lookup: {len(lookup)} 筆 unique keys, {sum(len(v) for v in lookup.values())} 筆記錄")
 
@@ -390,7 +400,12 @@ def fill_erp_into_forecast(ws, date_col_map, erp_file):
     skipped = 0
     matched_rows = 0
 
+    # 只掃描 Supply 列 (column I == "Supply")
     for r in range(2, ws.max_row + 1):
+        row_type = ws.cell(row=r, column=9).value  # I 欄 = row type
+        if row_type is None or str(row_type).strip() != 'Supply':
+            continue
+
         plant_v = ws.cell(row=r, column=2).value
         customer_v = ws.cell(row=r, column=3).value
         location_v = ws.cell(row=r, column=4).value
@@ -410,7 +425,7 @@ def fill_erp_into_forecast(ws, date_col_map, erp_file):
             continue
 
         matched_rows += 1
-        for erp_row in lookup[key]:
+        for erp_idx, erp_row in lookup[key]:
             target = calculate_eta_target_date(
                 erp_row['排程出貨日期'],
                 erp_row['排程出貨日期斷點'],
@@ -440,7 +455,14 @@ def fill_erp_into_forecast(ws, date_col_map, erp_file):
             cell.value = (old or 0) + value
             filled += 1
 
-    print(f"  ✅ ERP 填入: {filled} 筆 (跳過 {skipped}, 匹配 forecast 列數 {matched_rows})")
+            # 標記 ERP「已分配」
+            erp_df.at[erp_idx, '已分配'] = 'Y'
+
+    # 回寫 ERP 檔案 (更新已分配欄位)
+    erp_df.to_excel(erp_file, index=False)
+    allocated_count = (erp_df['已分配'] == 'Y').sum()
+    print(f"  ✅ ERP 填入 Supply: {filled} 筆 (跳過 {skipped}, 匹配 forecast 列數 {matched_rows})")
+    print(f"  ✅ ERP 已分配標記: {allocated_count} 筆")
     return filled, skipped, matched_rows
 
 

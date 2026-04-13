@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PYTHONIOENCODING=utf-8 python tmp/delta_e2e/debug_erp_fill.py)"
+    ]
+  }
+}
