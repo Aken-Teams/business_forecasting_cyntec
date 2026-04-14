@@ -605,6 +605,32 @@ def extract_plant_mrp_from_forecast(forecast_file):
         print(f"  ⚠️ 無法從 {forecast_file} 提取 Plant/MRP ID: {e}")
         return None, None
 
+def _is_delta_consolidated_format(filepath):
+    """
+    判斷檔案是否為 Delta 匯總格式 (已合併的 26 欄格式)。
+    檢查: header A=Buyer, B=PLANT, E=PARTNO, I=Date，且 row 2 的 I 欄為 Demand/Supply/Balance。
+    """
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+        ws = wb.active
+        h1 = ws.cell(1, 1).value   # A = Buyer
+        h2 = ws.cell(1, 2).value   # B = PLANT
+        h5 = ws.cell(1, 5).value   # E = PARTNO
+        h9 = ws.cell(1, 9).value   # I = Date
+        r2_i = ws.cell(2, 9).value  # Row 2, I = row type
+        wb.close()
+        if (str(h1 or '').strip() == 'Buyer' and
+            str(h2 or '').strip() == 'PLANT' and
+            str(h5 or '').strip() == 'PARTNO' and
+            str(h9 or '').strip() == 'Date' and
+            str(r2_i or '').strip() in ('Demand', 'Supply', 'Balance')):
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def is_xls_format(file_path):
     """
     檢查檔案是否為舊版 .xls 格式
@@ -1495,7 +1521,61 @@ def upload_forecast():
                         converted_temp_files.append((original_name, temp_path, ext))
                 temp_files = converted_temp_files
 
-                # 偵測每個檔案的格式 (8 種之一)
+                # === 自動偵測：是否為已匯總格式 (直接上傳，跳過合併) ===
+                mapping_user_id = int(customer_id) if test_mode and customer_id else user['id']
+                if len(temp_files) == 1:
+                    _orig_name, _check_path, _ = temp_files[0]
+                    if _is_delta_consolidated_format(_check_path):
+                        print(f"✅ Delta 匯總格式直接上傳: {_orig_name}")
+                        import shutil
+                        final_filename = 'forecast_data.xlsx'
+                        final_filepath = os.path.join(upload_folder, final_filename)
+                        if _check_path != final_filepath:
+                            shutil.copy2(_check_path, final_filepath)
+                            os.remove(_check_path)
+
+                        # 保留原始檔案
+                        originals_folder = os.path.join(upload_folder, 'originals')
+                        os.makedirs(originals_folder, exist_ok=True)
+                        shutil.copy2(final_filepath, os.path.join(originals_folder, _orig_name))
+
+                        # 讀取行數和欄位
+                        import openpyxl as _opx
+                        _wb = _opx.load_workbook(final_filepath, read_only=True)
+                        _ws = _wb.active
+                        _columns_list = [c.value for c in _ws[1] if c.value is not None]
+                        _total_rows = _ws.max_row
+                        _part_count = max(0, (_total_rows - 1) // 3)
+                        _wb.close()
+
+                        merged_size = os.path.getsize(final_filepath)
+                        set_user_file_path('forecast', final_filepath)
+                        session['forecast_merge_mode'] = False
+                        session.modified = True
+
+                        log_upload(user['id'], 'forecast', _orig_name, merged_size, _part_count, 0, 'success')
+                        log_activity(user['id'], user['username'], 'upload_forecast',
+                                   f"Delta 匯總格式直接上傳成功：{_part_count} 個料號", get_client_ip(), request.headers.get('User-Agent'))
+
+                        transit_check = check_transit_requirements_from_forecast(final_filepath, mapping_user_id, template_username)
+                        response_data = {
+                            'success': True,
+                            'message': f'Delta 匯總格式直接上傳成功（{_part_count} 個料號）',
+                            'file_count': 1,
+                            'rows': _part_count,
+                            'columns': _columns_list,
+                            'total_rows': _part_count,
+                            'total_size': merged_size,
+                            'files': [{'name': _orig_name, 'rows': _part_count, 'columns': len(_columns_list), 'size': merged_size, 'format': '匯總格式 (直接上傳)'}],
+                            'merge_mode': False,
+                            'saved_filename': final_filename,
+                            'delta_consolidation': True,
+                        }
+                        if transit_check['message']:
+                            response_data['transit_check'] = transit_check
+                        return jsonify(response_data)
+
+                # 偵測每個檔案的格式 (9 種之一)
                 detected_formats = []  # list of (original_name, temp_path, fmt)
                 for original_name, temp_path, _ in temp_files:
                     fmt = detect_format(temp_path)
