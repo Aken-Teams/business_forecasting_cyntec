@@ -31,6 +31,7 @@ FORMAT_PSW1_CEW1 = 'psw1_cew1'            # Sheet1, 5 rows/part (col 12=Status),
 FORMAT_MWC1IPC1 = 'mwc1ipc1'              # Sheet1, 4 rows/part (col 6=REQUEST ITEM), 多PLANT
 FORMAT_NBQ1 = 'nbq1'                      # PAN JIT, 1 row/part, 單PLANT檔名
 FORMAT_SVC1PWC1_DIODE_MOS = 'svc1pwc1_diode_mos'  # Diode+MOS, 1 row/part, 多PLANT
+FORMAT_PSBG = 'psbg'                              # Sheet1, 3 rows/part (col 15=Filter), 單PLANT
 
 FORMAT_LABELS = {
     FORMAT_KETWADEE: 'Ketwadee (PSB5)',
@@ -41,11 +42,12 @@ FORMAT_LABELS = {
     FORMAT_MWC1IPC1:  'MWC1+IPC1',
     FORMAT_NBQ1:      'NBQ1',
     FORMAT_SVC1PWC1_DIODE_MOS: 'SVC1+PWC1 (Diode&MOS)',
+    FORMAT_PSBG:     'PSBG (PSB5 PANJIT)',
 }
 
 # 單 PLANT 檔案 (PLANT 從檔名比對)
 SINGLE_PLANT_FORMATS = {
-    FORMAT_KETWADEE, FORMAT_KANYANAT, FORMAT_WEERAYA, FORMAT_NBQ1,
+    FORMAT_KETWADEE, FORMAT_KANYANAT, FORMAT_WEERAYA, FORMAT_NBQ1, FORMAT_PSBG,
 }
 # 多 PLANT 檔案 (PLANT 從檔案每列讀)
 MULTI_PLANT_FORMATS = {
@@ -123,6 +125,12 @@ def detect_format(filepath):
                 wb.close()
                 return FORMAT_WEERAYA
 
+            # PSBG: col 15 = Filter (values: 1.Demand/2.Supply/3.Net)
+            h15 = _cell_str(ws, 1, 15)
+            if h15.lower() == 'filter':
+                wb.close()
+                return FORMAT_PSBG
+
             # Kanyanat: col 24 = TYPE (col 1 = NO, col 3 = Plant)
             if h24.upper() == 'TYPE':
                 wb.close()
@@ -166,6 +174,7 @@ _FORMAT_SHEETS = {
     FORMAT_MWC1IPC1:           [('Sheet1', 9)],
     FORMAT_NBQ1:               [('PAN JIT', 16)],
     FORMAT_SVC1PWC1_DIODE_MOS: [('Diode', 9), ('MOS', 9)],
+    FORMAT_PSBG:               [('Sheet1', 16)],
 }
 
 
@@ -874,6 +883,60 @@ def _read_svc1pwc1_diode_mos(filepath, date_cols, buyer_label=None, plant_code=N
     return results
 
 
+def _read_psbg(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
+    """
+    讀取 PSBG (PSB5 PANJIT): Sheet1, 3 rows/part.
+    col 3 = Part No, col 4 = Vendor Part, col 8 = STOCK, col 11 = Ship in Transit,
+    col 15 = Filter (1.Demand / 2.Supply / 3.Net), dates from col 16.
+    單 PLANT 檔案 — PLANT 從檔名比對。
+    """
+    wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+    ws = wb['Sheet1']
+
+    date_col_map = _build_date_col_map(ws, 16, date_cols, conversions)
+    max_col = ws.max_column
+
+    # 每 3 行一組: 1.Demand / 2.Supply / 3.Net
+    pending = {}  # part_no → dict
+    results = []
+
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row,
+                            min_col=1, max_col=max_col, values_only=False):
+        part_no = row[2].value if len(row) > 2 else None       # col 3
+        if part_no is None or str(part_no).strip() == '':
+            continue
+        filter_val = row[14].value if len(row) > 14 else None   # col 15
+        fv = str(filter_val).strip() if filter_val else ''
+
+        pn = _to_partno(part_no)
+
+        if fv == '1.Demand':
+            vendor_part = row[3].value if len(row) > 3 else None  # col 4
+            stock = row[7].value if len(row) > 7 else 0           # col 8
+            on_way = row[10].value if len(row) > 10 else None     # col 11
+            demand = _read_row_dates(row, date_col_map)
+            pending[pn] = {
+                'buyer': buyer_label or 'PSBG',
+                'plant': plant_code or '',
+                'part_no': pn,
+                'vendor_part': str(vendor_part) if vendor_part else '',
+                'stock': stock or 0,
+                'on_way': on_way or 0,
+                'demand': demand,
+                'supply': {},
+            }
+        elif fv == '2.Supply' and pn in pending:
+            pending[pn]['supply'] = _read_row_dates(row, date_col_map)
+        elif fv == '3.Net' and pn in pending:
+            results.append(pending.pop(pn))
+
+    # 剩餘未完成的 (只有 Demand 沒有 Net)
+    results.extend(pending.values())
+
+    wb.close()
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Excel 產出
 # ---------------------------------------------------------------------------
@@ -1122,6 +1185,7 @@ FORMAT_READERS = {
     FORMAT_MWC1IPC1:           _read_mwc1ipc1,
     FORMAT_NBQ1:               _read_nbq1,
     FORMAT_SVC1PWC1_DIODE_MOS: _read_svc1pwc1_diode_mos,
+    FORMAT_PSBG:               _read_psbg,
 }
 
 # 向後相容: 舊 API
@@ -1282,6 +1346,7 @@ def consolidate(forecast_files, reference_template, output_path,
     result = {
         'success': True,
         'part_count': part_count,
+        'date_col_count': len(date_cols),
         'format_stats': format_stats,
         # 向後相容: buyer_stats 用舊的 3 Buyer 名稱 filter
         'buyer_stats': {

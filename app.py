@@ -1478,6 +1478,23 @@ def upload_forecast():
                     detect_format, FORMAT_LABELS, consolidate as delta_consolidate,
                 )
 
+                # .xls → .xlsx 自動轉換 (openpyxl 不支援 .xls)
+                from libreoffice_utils import convert_xls_to_xlsx
+                converted_temp_files = []
+                for original_name, temp_path, ext in temp_files:
+                    if ext.lower() == '.xls':
+                        print(f"  🔄 轉換 .xls → .xlsx: {original_name}")
+                        xlsx_path = convert_xls_to_xlsx(temp_path, os.path.dirname(temp_path))
+                        if xlsx_path and os.path.exists(xlsx_path):
+                            os.remove(temp_path)
+                            converted_temp_files.append((original_name, xlsx_path, '.xlsx'))
+                        else:
+                            converted_temp_files.append((original_name, temp_path, ext))
+                            print(f"  ⚠️ 轉換失敗，使用原始 .xls: {original_name}")
+                    else:
+                        converted_temp_files.append((original_name, temp_path, ext))
+                temp_files = converted_temp_files
+
                 # 偵測每個檔案的格式 (8 種之一)
                 detected_formats = []  # list of (original_name, temp_path, fmt)
                 for original_name, temp_path, _ in temp_files:
@@ -1641,6 +1658,12 @@ def upload_forecast():
                     duration = time.time() - merge_start
                     print(f"=== Delta 合併完成：{result['part_count']} 個料號，耗時 {duration:.2f} 秒 ===")
 
+                    # 更新 files_info 的 rows/columns
+                    date_col_count = result.get('date_col_count', 0)
+                    for fi in files_info:
+                        fi['rows'] = result['part_count']
+                        fi['columns'] = date_col_count
+
                     # 儲存 session
                     set_user_file_path('forecast', final_filepath)
                     session['forecast_merge_mode'] = False
@@ -1658,10 +1681,19 @@ def upload_forecast():
                     format_stats = result.get('format_stats', {})
                     format_info = ', '.join([f'{os.path.basename(k)}: {v} 筆'
                                              for k, v in format_stats.items()])
+                    # 讀取合併後的欄位名稱供前端顯示
+                    import openpyxl as _opx
+                    _wb_info = _opx.load_workbook(final_filepath, read_only=True)
+                    _ws_info = _wb_info.active
+                    _columns_list = [c.value for c in _ws_info[1] if c.value is not None]
+                    _wb_info.close()
+
                     response_data = {
                         'success': True,
                         'message': f'Delta {len(files_list)} 個 Forecast 檔案合併成功（{result["part_count"]} 個料號）',
                         'file_count': len(files_list),
+                        'rows': result['part_count'],
+                        'columns': _columns_list,
                         'total_rows': result['part_count'],
                         'total_size': merged_size,
                         'files': files_info,
