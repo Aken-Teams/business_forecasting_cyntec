@@ -4566,6 +4566,70 @@ def check_files():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
+@app.route('/api/delta/download_backfilled_zip')
+@login_required
+def download_backfilled_zip():
+    """Delta 專用: 將 Step 4 結果 Supply 回填到各 buyer 原檔, 打包 ZIP 下載。"""
+    user = get_current_user()
+
+    processed_folder = session.get('current_processed_folder')
+    if not processed_folder:
+        processed_folder, _ = get_session_folder_path(user['id'], 'processed')
+    upload_folder, _ = get_session_folder_path(user['id'], 'uploads')
+
+    if not processed_folder or not upload_folder:
+        return jsonify({'success': False, 'message': '找不到當前 session'}), 400
+
+    originals_dir = os.path.join(upload_folder, 'originals')
+    forecast_result = os.path.join(processed_folder, 'forecast_result.xlsx')
+
+    if not os.path.isdir(originals_dir) or not os.listdir(originals_dir):
+        return jsonify({'success': False,
+                        'message': '找不到原始上傳檔案 (originals 資料夾)'}), 404
+    if not os.path.exists(forecast_result):
+        return jsonify({'success': False,
+                        'message': 'Step 4 尚未執行 (找不到 forecast_result.xlsx)'}), 400
+
+    # 取 plant_codes (與 consolidate 同來源)
+    try:
+        from database import get_customer_mappings_raw
+        raw = get_customer_mappings_raw(user['id']) or []
+        plant_codes = []
+        for m in raw:
+            region = m.get('region') if isinstance(m, dict) else None
+            if region:
+                first = str(region).split()[0] if str(region).split() else ''
+                if first and first not in plant_codes:
+                    plant_codes.append(first)
+    except Exception as e:
+        print(f"⚠️ 讀取 plant_codes 失敗: {e}")
+        plant_codes = []
+
+    zip_path = os.path.join(processed_folder, 'backfilled_originals.zip')
+    try:
+        from delta_original_backfill import backfill_session_to_zip
+        result = backfill_session_to_zip(
+            originals_dir, forecast_result, zip_path, plant_codes=plant_codes,
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False,
+                        'message': f'回填 ZIP 產生失敗: {e}'}), 500
+
+    if not result.get('success'):
+        return jsonify(result), 500
+
+    log_activity(user['id'], user['username'], 'download',
+                 f"下載回填 ZIP: {result['n_files_success']}/{result['n_files_total']} 成功",
+                 get_client_ip(), request.headers.get('User-Agent'))
+
+    session_timestamp = session.get('current_session_timestamp', '')
+    download_name = (f'backfilled_originals_{session_timestamp}.zip'
+                     if session_timestamp else 'backfilled_originals.zip')
+    return send_file(zip_path, as_attachment=True, download_name=download_name)
+
+
 @app.route('/download/<filename>')
 @login_required
 def download_file(filename):

@@ -2026,18 +2026,90 @@ function updateDownloadSectionSingleFile(filename) {
         // 移除多檔案模式的 class
         downloadContainer.classList.remove('multi-file-mode');
 
+        let extraItem = '';
+        if (isDeltaCustomer()) {
+            extraItem = `
+            <div class="download-item" id="backfilled-download-item">
+                <i class="fas fa-file-archive"></i>
+                <div class="download-info">
+                    <div class="download-title">回填至原格式 (ZIP)</div>
+                    <div class="download-desc">Supply 回填至客戶原 Excel 檔, 保留樣式</div>
+                </div>
+                <button class="btn btn-secondary" onclick="downloadBackfilledZip(this)">
+                    <i class="fas fa-download"></i> 下載 ZIP
+                </button>
+            </div>
+            `;
+        }
+
         downloadContainer.innerHTML = `
             <div class="download-item">
                 <i class="fas fa-file-excel"></i>
                 <div class="download-info">
                     <div class="download-title">FORECAST處理結果</div>
-                    <div class="download-desc">${outputFilename}</div>
+                    <div class="download-desc">${outputFilename}${isDeltaCustomer() ? ' (匯總格式)' : ''}</div>
                 </div>
                 <button class="btn btn-primary" onclick="downloadFile('${outputFilename}')">
                     <i class="fas fa-download"></i> 下載
                 </button>
             </div>
+            ${extraItem}
         `;
+    }
+}
+
+// 下載回填至原格式的 ZIP (Delta 專用)
+async function downloadBackfilledZip(btn) {
+    const origText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 產生中...';
+    try {
+        const resp = await fetch('/api/delta/download_backfilled_zip');
+        console.log('[backfill_zip] status:', resp.status, resp.statusText,
+                    'content-type:', resp.headers.get('Content-Type'));
+        if (!resp.ok) {
+            let errMsg = `HTTP ${resp.status} ${resp.statusText}`;
+            const ct = resp.headers.get('Content-Type') || '';
+            if (ct.includes('application/json')) {
+                try {
+                    const err = await resp.json();
+                    console.warn('[backfill_zip] error JSON:', err);
+                    if (err && err.message) errMsg = err.message;
+                } catch (je) {
+                    console.warn('[backfill_zip] JSON parse failed:', je);
+                }
+            } else {
+                try {
+                    const txt = await resp.text();
+                    console.warn('[backfill_zip] non-JSON body:',
+                                 txt.slice(0, 200));
+                    if (resp.status === 404) {
+                        errMsg = '找不到 endpoint (請確認 Flask 伺服器已重啟)';
+                    }
+                } catch (_) {}
+            }
+            showNotification('產生 ZIP 失敗: ' + errMsg, 'error');
+            return;
+        }
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        // 從 Content-Disposition 取檔名
+        const cd = resp.headers.get('Content-Disposition') || '';
+        const m = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+        a.download = m ? decodeURIComponent(m[1]) : 'backfilled.zip';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        showNotification('ZIP 下載開始', 'success');
+    } catch (e) {
+        console.error('[backfill_zip] exception:', e);
+        showNotification('下載失敗: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = origText;
     }
 }
 

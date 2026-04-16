@@ -1217,6 +1217,8 @@ body {
     display: flex;
     justify-content: center;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 24px;
     min-height: 200px;
 }
 

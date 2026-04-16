@@ -386,10 +386,20 @@
                                 <i class="fas fa-file-excel"></i>
                                 <div class="download-info">
                                     <div class="download-title">FORECAST處理結果</div>
-                                    <div class="download-desc">forecast_result.xlsx</div>
+                                    <div class="download-desc">forecast_result.xlsx (匯總格式)</div>
                                 </div>
                                 <button class="btn btn-primary" onclick="downloadFile('forecast_result.xlsx')">
                                     <i class="fas fa-download"></i> 下載
+                                </button>
+                            </div>
+                            <div class="download-item" id="backfilled-download-item" style="display: none;">
+                                <i class="fas fa-file-archive"></i>
+                                <div class="download-info">
+                                    <div class="download-title">回填至原格式 (ZIP)</div>
+                                    <div class="download-desc">Supply 回填至客戶原 Excel 檔, 保留樣式</div>
+                                </div>
+                                <button class="btn btn-secondary" onclick="downloadBackfilledZip(this)">
+                                    <i class="fas fa-download"></i> 下載 ZIP
                                 </button>
                             </div>
                         </div>
