@@ -32,6 +32,12 @@ FORMAT_MWC1IPC1 = 'mwc1ipc1'              # Sheet1, 4 rows/part (col 6=REQUEST I
 FORMAT_NBQ1 = 'nbq1'                      # PAN JIT, 1 row/part, 單PLANT檔名
 FORMAT_SVC1PWC1_DIODE_MOS = 'svc1pwc1_diode_mos'  # Diode+MOS, 1 row/part, 多PLANT
 FORMAT_PSBG = 'psbg'                              # Sheet1, 3 rows/part (col 15=Filter), 單PLANT
+FORMAT_EIBG_EISBG = 'eibg_eisbg'                  # Sheet1, col1=ITEM, flat (Demand only), 單PLANT
+FORMAT_FMBG = 'fmbg'                              # Sheet1, col12=REQUEST ITEM, 3 rows/part (A-Demand/B-CFM/C-Bal), 多PLANT
+FORMAT_IABG = 'iabg'                              # Sheet1, col9=SHIP, flat (Demand only), 多PLANT
+FORMAT_ICTBG_NTL7 = 'ictbg_ntl7'                  # Sheet1, col10=REQUEST ITEM, 4 rows/part (GROSS REQTS/...), 多PLANT
+FORMAT_ICTBG_PSB9_MRP = 'ictbg_psb9_mrp'          # PSB9_MRP* sheet, col14=Type, 4 rows/part (DEMAND/SUPPLY/NET/Remark), 多PLANT
+FORMAT_ICTBG_PSB9_SIRIRAHT = 'ictbg_psb9_siriraht'  # Sheet1, col15=REQUEST ITEM (1Demand/2Supply/3Balance), 3 rows/part, 多PLANT
 
 FORMAT_LABELS = {
     FORMAT_KETWADEE: 'Ketwadee (PSB5)',
@@ -43,15 +49,24 @@ FORMAT_LABELS = {
     FORMAT_NBQ1:      'NBQ1',
     FORMAT_SVC1PWC1_DIODE_MOS: 'SVC1+PWC1 (Diode&MOS)',
     FORMAT_PSBG:     'PSBG (PSB5 PANJIT)',
+    FORMAT_EIBG_EISBG: 'EIBG/EISBG (UPW1)',
+    FORMAT_FMBG:       'FMBG (TPC5/EMN3)',
+    FORMAT_IABG:       'IABG (IMW1)',
+    FORMAT_ICTBG_NTL7: 'ICTBG (NTL7)',
+    FORMAT_ICTBG_PSB9_MRP:      'ICTBG PSB9 Kaewarin',
+    FORMAT_ICTBG_PSB9_SIRIRAHT: 'ICTBG PSB9 Siriraht',
 }
 
 # 單 PLANT 檔案 (PLANT 從檔名比對)
 SINGLE_PLANT_FORMATS = {
     FORMAT_KETWADEE, FORMAT_KANYANAT, FORMAT_WEERAYA, FORMAT_NBQ1, FORMAT_PSBG,
+    FORMAT_EIBG_EISBG,
 }
 # 多 PLANT 檔案 (PLANT 從檔案每列讀)
 MULTI_PLANT_FORMATS = {
     FORMAT_INDIA_IAI1, FORMAT_PSW1_CEW1, FORMAT_MWC1IPC1, FORMAT_SVC1PWC1_DIODE_MOS,
+    FORMAT_FMBG, FORMAT_IABG, FORMAT_ICTBG_NTL7, FORMAT_ICTBG_PSB9_MRP,
+    FORMAT_ICTBG_PSB9_SIRIRAHT,
 }
 
 
@@ -87,6 +102,12 @@ def detect_format(filepath):
             wb.close()
             return FORMAT_KETWADEE
 
+        # === PSB9_MRP* sheet → ICTBG PSB9 Kaewarin ===
+        for s in sheets:
+            if s.startswith('PSB9_MRP'):
+                wb.close()
+                return FORMAT_ICTBG_PSB9_MRP
+
         # === PAN JIT sheet: 分辨 India IAI1 vs NBQ1 ===
         if 'PAN JIT' in sheets:
             ws = wb['PAN JIT']
@@ -102,18 +123,38 @@ def detect_format(filepath):
                 wb.close()
                 return FORMAT_NBQ1
 
-        # === Sheet1: 5 種格式 ===
+        # === Sheet1: 多種格式 ===
         if 'Sheet1' in sheets:
             ws = wb['Sheet1']
             h1 = _cell_str(ws, 1, 1)
             h6 = _cell_str(ws, 1, 6)
+            h9 = _cell_str(ws, 1, 9)
+            h10 = _cell_str(ws, 1, 10)
+            h11 = _cell_str(ws, 1, 11)
             h12 = _cell_str(ws, 1, 12)
+            h13 = _cell_str(ws, 1, 13)
+            h15 = _cell_str(ws, 1, 15)
             h24 = _cell_str(ws, 1, 24)
+
+            # EIBG/EISBG: col 1 = ITEM, col 11 = OTW (flat, Demand only)
+            if h1.upper() == 'ITEM' and h11.upper() == 'OTW':
+                wb.close()
+                return FORMAT_EIBG_EISBG
 
             # MWC1IPC1: col 1 = PLANT, col 6 = REQUEST ITEM
             if h1.upper() == 'PLANT' and h6.upper() == 'REQUEST ITEM':
                 wb.close()
                 return FORMAT_MWC1IPC1
+
+            # ICTBG NTL7: col 1 = PLANT, col 10 = REQUEST ITEM (4 rows/part)
+            if h1.upper() == 'PLANT' and h10.upper() == 'REQUEST ITEM':
+                wb.close()
+                return FORMAT_ICTBG_NTL7
+
+            # FMBG: col 1 = PLANT, col 12 = REQUEST ITEM, col 9 = 出貨 (3 rows/part)
+            if h1.upper() == 'PLANT' and h12.upper() == 'REQUEST ITEM':
+                wb.close()
+                return FORMAT_FMBG
 
             # PSW1+CEW1: col 12 = Status
             if h12 == 'Status':
@@ -125,11 +166,20 @@ def detect_format(filepath):
                 wb.close()
                 return FORMAT_WEERAYA
 
+            # ICTBG PSB9 Siriraht: col 15 = REQUEST ITEM (1Demand/2Supply/3Balance)
+            if h15.upper() == 'REQUEST ITEM':
+                wb.close()
+                return FORMAT_ICTBG_PSB9_SIRIRAHT
+
             # PSBG: col 15 = Filter (values: 1.Demand/2.Supply/3.Net)
-            h15 = _cell_str(ws, 1, 15)
             if h15.lower() == 'filter':
                 wb.close()
                 return FORMAT_PSBG
+
+            # IABG: col 1 = PLANT, col 9 = SHIP, col 13 = PASSDUE (flat)
+            if h1.upper() == 'PLANT' and h9.upper() == 'SHIP' and h13.upper() == 'PASSDUE':
+                wb.close()
+                return FORMAT_IABG
 
             # Kanyanat: col 24 = TYPE (col 1 = NO, col 3 = Plant)
             if h24.upper() == 'TYPE':
@@ -175,7 +225,22 @@ _FORMAT_SHEETS = {
     FORMAT_NBQ1:               [('PAN JIT', 16)],
     FORMAT_SVC1PWC1_DIODE_MOS: [('Diode', 9), ('MOS', 9)],
     FORMAT_PSBG:               [('Sheet1', 16)],
+    FORMAT_EIBG_EISBG:         [('Sheet1', 12)],
+    FORMAT_FMBG:               [('Sheet1', 16)],
+    FORMAT_IABG:               [('Sheet1', 13)],
+    FORMAT_ICTBG_NTL7:         [('Sheet1', 13)],
+    # FORMAT_ICTBG_PSB9_MRP: sheet 名稱動態 (PSB9_MRP*)，extract_dates 時特殊處理
+    FORMAT_ICTBG_PSB9_MRP:     [],
+    FORMAT_ICTBG_PSB9_SIRIRAHT:[('Sheet1', 16)],
 }
+
+
+def _get_ictbg_psb9_mrp_sheet(wb):
+    """找到 PSB9_MRP* sheet (名稱可能包含日期，例 'PSB9_MRP 0413')"""
+    for s in wb.sheetnames:
+        if s.startswith('PSB9_MRP'):
+            return s
+    return wb.sheetnames[0] if wb.sheetnames else None
 
 
 def read_date_cols_from_template(template_path):
@@ -376,15 +441,24 @@ def extract_dates_from_files(detected_files):
         wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
         file_dates = set()
 
+        # ICTBG PSB9 MRP 的 sheet 名稱動態 (PSB9_MRP + 日期)
+        if fmt == FORMAT_ICTBG_PSB9_MRP:
+            sheet_name = _get_ictbg_psb9_mrp_sheet(wb)
+            sheet_specs = [(sheet_name, 15)] if sheet_name else []
+
         for sheet_name, start_col in sheet_specs:
             if sheet_name not in wb.sheetnames:
                 continue
             ws = wb[sheet_name]
-            for cell in ws[1]:
-                if cell.column >= start_col and cell.value is not None:
-                    norm = _normalize_date_header(cell.value)
-                    if norm is not None and norm not in file_dates:
-                        file_dates.add(norm)
+            for col_idx, cell in enumerate(ws[1], start=1):
+                if col_idx < start_col:
+                    continue
+                v = getattr(cell, 'value', None)
+                if v is None:
+                    continue
+                norm = _normalize_date_header(v)
+                if norm is not None and norm not in file_dates:
+                    file_dates.add(norm)
         wb.close()
 
         per_file_dates[file_key] = file_dates
@@ -450,18 +524,22 @@ def _build_date_col_map(ws, start_col, date_cols, conversions=None):
     """
     date_col_map = {}
     date_cols_set = set(date_cols)
-    for cell in ws[1]:
-        if cell.value is not None and cell.column >= start_col:
-            norm = _normalize_date_header(cell.value)
+    for col_idx, cell in enumerate(ws[1], start=1):
+        if col_idx < start_col:
+            continue
+        v = getattr(cell, 'value', None)
+        if v is None:
+            continue
+        norm = _normalize_date_header(v)
+        if norm is None:
+            continue
+        # 套用轉換 (例: 20261015 → OCT, 20260330 → PASSDUE)
+        if conversions and norm in conversions:
+            norm = conversions[norm]
             if norm is None:
-                continue
-            # 套用轉換 (例: 20261015 → OCT, 20260330 → PASSDUE)
-            if conversions and norm in conversions:
-                norm = conversions[norm]
-                if norm is None:
-                    continue  # 被丟棄
-            if norm in date_cols_set:
-                date_col_map[cell.column] = norm
+                continue  # 被丟棄
+        if norm in date_cols_set:
+            date_col_map[col_idx] = norm
     return date_col_map
 
 
@@ -937,6 +1015,300 @@ def _read_psbg(filepath, date_cols, buyer_label=None, plant_code=None, conversio
     return results
 
 
+def _read_eibg_eisbg(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
+    """
+    讀取 EIBG/EISBG: Sheet1, 1 row/part (flat, Demand only).
+    col 1 = ITEM, col 3 = PARTNO, col 4 = VENDOR PARTNO, col 10 = PLANT STOCK,
+    col 11 = OTW, col 12+ = dates.
+    單 PLANT 檔案 — PLANT 從檔名比對。
+    Demand = 當列日期值, Supply = 空, Balance = 公式 (由產出器處理)。
+    """
+    wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+    ws = wb['Sheet1']
+
+    date_col_map = _build_date_col_map(ws, 12, date_cols, conversions)
+
+    results = []
+    max_col = ws.max_column
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row,
+                            min_col=1, max_col=max_col, values_only=False):
+        part_no = row[2].value if len(row) > 2 else None       # col 3
+        if part_no is None or str(part_no).strip() == '':
+            continue
+        vendor_part = row[3].value if len(row) > 3 else None   # col 4
+        stock = row[9].value if len(row) > 9 else 0            # col 10 PLANT STOCK
+        on_way = row[10].value if len(row) > 10 else None      # col 11 OTW
+
+        demand = _read_row_dates(row, date_col_map)
+
+        results.append({
+            'buyer': buyer_label or 'EIBG',
+            'plant': plant_code or '',
+            'part_no': _to_partno(part_no),
+            'vendor_part': str(vendor_part) if vendor_part else '',
+            'stock': stock or 0, 'on_way': on_way or 0,
+            'demand': demand, 'supply': {},
+        })
+
+    wb.close()
+    return results
+
+
+def _read_fmbg(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
+    """
+    讀取 FMBG: Sheet1, 3 rows/part (A-Demand/B-CFM/C-Bal).
+    col 1 = PLANT, col 5 = PARTNO, col 7 = VENDOR PARTNO, col 12 = REQUEST ITEM,
+    col 15 = PLANT STOCK, col 16+ = dates (含 PASSDUE).
+    A-Demand → Demand, B-CFM → Supply, C-Bal → Balance。
+    多 PLANT 檔案 — 每列從 col 1 讀 PLANT。
+    """
+    wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+    ws = wb['Sheet1']
+
+    date_col_map = _build_date_col_map(ws, 16, date_cols, conversions)
+
+    results = []
+    max_col = ws.max_column
+    rows = list(ws.iter_rows(min_row=2, max_row=ws.max_row,
+                             min_col=1, max_col=max_col, values_only=False))
+    i = 0
+    while i < len(rows):
+        row = rows[i]
+        marker = row[11].value if len(row) > 11 else None  # col 12
+
+        if marker == 'A-Demand':
+            row_plant = row[0].value if len(row) > 0 else None    # col 1
+            part_no = row[4].value if len(row) > 4 else None       # col 5
+            vendor_part = row[6].value if len(row) > 6 else None   # col 7
+            stock = row[14].value if len(row) > 14 else 0          # col 15
+
+            demand = _read_row_dates(row, date_col_map)
+            supply = _read_row_dates(rows[i + 1], date_col_map) if i + 1 < len(rows) else {}
+            balance = _read_row_dates(rows[i + 2], date_col_map) if i + 2 < len(rows) else {}
+
+            results.append({
+                'buyer': buyer_label or 'FMBG',
+                'plant': str(row_plant).strip() if row_plant else (plant_code or ''),
+                'part_no': _to_partno(part_no),
+                'vendor_part': str(vendor_part) if vendor_part else '',
+                'stock': stock or 0, 'on_way': None,
+                'demand': demand, 'supply': supply,
+                'balance_override': balance,
+            })
+            i += 3
+        else:
+            i += 1
+
+    wb.close()
+    return results
+
+
+def _read_iabg(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
+    """
+    讀取 IABG: Sheet1, 1 row/part (flat, Demand only).
+    col 1 = PLANT, col 4 = PARTNO, col 5 = VENDOR PARTNO, col 12 = PLANT STOCK,
+    col 13+ = dates (含 PASSDUE).
+    多 PLANT 檔案 — 每列從 col 1 讀 PLANT。
+    Demand = 當列日期值, Supply = 空, Balance = 公式 (由產出器處理)。
+    """
+    wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+    ws = wb['Sheet1']
+
+    date_col_map = _build_date_col_map(ws, 13, date_cols, conversions)
+
+    results = []
+    max_col = ws.max_column
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row,
+                            min_col=1, max_col=max_col, values_only=False):
+        row_plant = row[0].value if len(row) > 0 else None    # col 1
+        part_no = row[3].value if len(row) > 3 else None       # col 4
+        if part_no is None or str(part_no).strip() == '':
+            continue
+        vendor_part = row[4].value if len(row) > 4 else None   # col 5
+        stock = row[11].value if len(row) > 11 else 0          # col 12
+
+        demand = _read_row_dates(row, date_col_map)
+
+        results.append({
+            'buyer': buyer_label or 'IABG',
+            'plant': str(row_plant).strip() if row_plant else (plant_code or ''),
+            'part_no': _to_partno(part_no),
+            'vendor_part': str(vendor_part) if vendor_part else '',
+            'stock': stock or 0, 'on_way': None,
+            'demand': demand, 'supply': {},
+        })
+
+    wb.close()
+    return results
+
+
+def _read_ictbg_ntl7(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
+    """
+    讀取 ICTBG NTL7: Sheet1, 4 rows/part (GROSS REQTS/FIRM ORDERS/Vendor Cfm/NET AVAIL).
+    col 1 = PLANT, col 2 = PARTNO, col 7 = VENDOR PARTNO, col 10 = REQUEST ITEM,
+    col 11 = PLANT STOCK, col 13+ = dates (含 PASSDUE).
+    GROSS REQTS → Demand, Vendor Cfm → Supply, NET AVAIL → Balance, FIRM ORDERS 跳過。
+    多 PLANT 檔案 — 每列從 col 1 讀 PLANT。
+    """
+    wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+    ws = wb['Sheet1']
+
+    date_col_map = _build_date_col_map(ws, 13, date_cols, conversions)
+
+    results = []
+    max_col = ws.max_column
+    rows = list(ws.iter_rows(min_row=2, max_row=ws.max_row,
+                             min_col=1, max_col=max_col, values_only=False))
+    i = 0
+    while i < len(rows):
+        row = rows[i]
+        marker = row[9].value if len(row) > 9 else None  # col 10
+
+        if marker == 'GROSS REQTS':
+            row_plant = row[0].value if len(row) > 0 else None    # col 1
+            part_no = row[1].value if len(row) > 1 else None       # col 2
+            vendor_part = row[6].value if len(row) > 6 else None   # col 7
+            stock = row[10].value if len(row) > 10 else 0          # col 11
+
+            demand = _read_row_dates(row, date_col_map)
+            # rows[i+1] = FIRM ORDERS → 跳過
+            supply = _read_row_dates(rows[i + 2], date_col_map) if i + 2 < len(rows) else {}   # Vendor Cfm
+            balance = _read_row_dates(rows[i + 3], date_col_map) if i + 3 < len(rows) else {}  # NET AVAIL
+
+            results.append({
+                'buyer': buyer_label or 'ICTBG-NTL7',
+                'plant': str(row_plant).strip() if row_plant else (plant_code or ''),
+                'part_no': _to_partno(part_no),
+                'vendor_part': str(vendor_part) if vendor_part else '',
+                'stock': stock or 0, 'on_way': None,
+                'demand': demand, 'supply': supply,
+                'balance_override': balance,
+            })
+            i += 4
+        else:
+            i += 1
+
+    wb.close()
+    return results
+
+
+def _read_ictbg_psb9_mrp(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
+    """
+    讀取 ICTBG PSB9 Kaewarin: sheet 名稱 PSB9_MRP*, 4 rows/part (DEMAND/SUPPLY/NET/Remark).
+    col 1 = Plant, col 3 = Part No, col 8 = Vendor Part, col 11 = STOCK QTY,
+    col 14 = Type, col 15+ = dates (含 PAST DUE).
+    DEMAND → Demand, SUPPLY → Supply, NET → Balance, Remark 跳過。
+    多 PLANT 檔案 — 每列從 col 1 讀 PLANT。
+    """
+    wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+    sheet_name = _get_ictbg_psb9_mrp_sheet(wb)
+    if not sheet_name or sheet_name not in wb.sheetnames:
+        wb.close()
+        return []
+    ws = wb[sheet_name]
+
+    date_col_map = _build_date_col_map(ws, 15, date_cols, conversions)
+
+    results = []
+    max_col = ws.max_column
+    rows = list(ws.iter_rows(min_row=2, max_row=ws.max_row,
+                             min_col=1, max_col=max_col, values_only=False))
+    i = 0
+    while i < len(rows):
+        row = rows[i]
+        marker = row[13].value if len(row) > 13 else None  # col 14 Type
+        marker_str = str(marker).strip().upper() if marker else ''
+
+        if marker_str == 'DEMAND':
+            row_plant = row[0].value if len(row) > 0 else None    # col 1
+            part_no = row[2].value if len(row) > 2 else None       # col 3
+            vendor_part = row[7].value if len(row) > 7 else None   # col 8
+            stock = row[10].value if len(row) > 10 else 0          # col 11
+
+            demand = _read_row_dates(row, date_col_map)
+            # 尋找同料號的 SUPPLY 與 NET 行 (可能有 Remark 在中間或後面)
+            supply, balance = {}, {}
+            j = i + 1
+            next_demand = i + 1
+            while j < len(rows) and j < i + 5:
+                m = rows[j][13].value if len(rows[j]) > 13 else None
+                m_str = str(m).strip().upper() if m else ''
+                if m_str == 'DEMAND':
+                    next_demand = j
+                    break
+                if m_str == 'SUPPLY':
+                    supply = _read_row_dates(rows[j], date_col_map)
+                elif m_str == 'NET':
+                    balance = _read_row_dates(rows[j], date_col_map)
+                j += 1
+                next_demand = j
+
+            results.append({
+                'buyer': buyer_label or 'ICTBG-PSB9',
+                'plant': str(row_plant).strip() if row_plant else (plant_code or ''),
+                'part_no': _to_partno(part_no),
+                'vendor_part': str(vendor_part) if vendor_part else '',
+                'stock': stock or 0, 'on_way': None,
+                'demand': demand, 'supply': supply,
+                'balance_override': balance,
+            })
+            i = next_demand
+        else:
+            i += 1
+
+    wb.close()
+    return results
+
+
+def _read_ictbg_psb9_siriraht(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
+    """
+    讀取 ICTBG PSB9 Siriraht: Sheet1, 3 rows/part (1Demand/2Supply/3Balance).
+    col 1 = PLANT, col 4 = PARTNO, col 6 = VENDOR PARTNO, col 12 = PSB9 STOCK,
+    col 15 = REQUEST ITEM, col 16+ = dates (含 PASSDUE).
+    多 PLANT 檔案 — 每列從 col 1 讀 PLANT。
+    """
+    wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+    ws = wb['Sheet1']
+
+    date_col_map = _build_date_col_map(ws, 16, date_cols, conversions)
+
+    results = []
+    max_col = ws.max_column
+    rows = list(ws.iter_rows(min_row=2, max_row=ws.max_row,
+                             min_col=1, max_col=max_col, values_only=False))
+    i = 0
+    while i < len(rows):
+        row = rows[i]
+        marker = row[14].value if len(row) > 14 else None  # col 15
+        marker_str = str(marker).strip() if marker else ''
+
+        if marker_str == '1Demand':
+            row_plant = row[0].value if len(row) > 0 else None    # col 1
+            part_no = row[3].value if len(row) > 3 else None       # col 4
+            vendor_part = row[5].value if len(row) > 5 else None   # col 6
+            stock = row[11].value if len(row) > 11 else 0          # col 12
+
+            demand = _read_row_dates(row, date_col_map)
+            supply = _read_row_dates(rows[i + 1], date_col_map) if i + 1 < len(rows) else {}
+            balance = _read_row_dates(rows[i + 2], date_col_map) if i + 2 < len(rows) else {}
+
+            results.append({
+                'buyer': buyer_label or 'ICTBG-PSB9-S',
+                'plant': str(row_plant).strip() if row_plant else (plant_code or ''),
+                'part_no': _to_partno(part_no),
+                'vendor_part': str(vendor_part) if vendor_part else '',
+                'stock': stock or 0, 'on_way': None,
+                'demand': demand, 'supply': supply,
+                'balance_override': balance,
+            })
+            i += 3
+        else:
+            i += 1
+
+    wb.close()
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Excel 產出
 # ---------------------------------------------------------------------------
@@ -1186,6 +1558,12 @@ FORMAT_READERS = {
     FORMAT_NBQ1:               _read_nbq1,
     FORMAT_SVC1PWC1_DIODE_MOS: _read_svc1pwc1_diode_mos,
     FORMAT_PSBG:               _read_psbg,
+    FORMAT_EIBG_EISBG:         _read_eibg_eisbg,
+    FORMAT_FMBG:               _read_fmbg,
+    FORMAT_IABG:               _read_iabg,
+    FORMAT_ICTBG_NTL7:         _read_ictbg_ntl7,
+    FORMAT_ICTBG_PSB9_MRP:     _read_ictbg_psb9_mrp,
+    FORMAT_ICTBG_PSB9_SIRIRAHT:_read_ictbg_psb9_siriraht,
 }
 
 # 向後相容: 舊 API
@@ -1318,11 +1696,26 @@ def consolidate(forecast_files, reference_template, output_path,
                 'message': f'讀取檔案失敗 [{file_key}] ({FORMAT_LABELS.get(fmt, fmt)}): {e}'
             }
 
+        # PLANT 統一驗證: 不在 mapping 表 (plant_codes) 內的一律設為空白
+        # 適用所有 reader (單 PLANT / 多 PLANT) — 確保 PLANT 欄完全來自 mapping 表
+        if plant_codes:
+            valid_upper = {str(p).strip().upper() for p in plant_codes if p}
+            invalid_seen = set()
+            for item in data:
+                p = item.get('plant') or ''
+                if p and str(p).strip().upper() not in valid_upper:
+                    invalid_seen.add(str(p).strip())
+                    item['plant'] = ''
+            if invalid_seen:
+                print(f"  ⚠️ {file_key}: PLANT 不在 mapping 表，已留空: {sorted(invalid_seen)}")
+
         format_stats[file_key] = len(data)
         all_source.extend(data)
 
         if fmt in SINGLE_PLANT_FORMATS:
-            plant_display = plant_code or '(未比對到)'
+            # 單 PLANT 顯示: 從 data 看實際使用的 PLANT (可能因 mapping 驗證被清空)
+            actual = next((d.get('plant') for d in data if d.get('plant')), None)
+            plant_display = actual or '(未比對到)'
             print(f"  {file_key} [{FORMAT_LABELS.get(fmt, fmt)}]: "
                   f"{len(data)} 個料號, PLANT={plant_display}")
         else:
