@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(PYTHONIOENCODING=utf-8 python tmp/delta_e2e/debug_erp_fill.py)"
+      "Bash(PYTHONIOENCODING=utf-8 python tmp/delta_e2e/debug_erp_fill.py)",
+      "Bash(PYTHONIOENCODING=utf-8 python D:/tmp/phase3_validate.py)"
+    ],
+    "additionalDirectories": [
+      "D:\\tmp"
     ]
   }
 }

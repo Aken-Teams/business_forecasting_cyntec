@@ -421,7 +421,7 @@ def _sort_date_cols(dates, anchor_date=None):
 
 def extract_dates_from_files(detected_files):
     """
-    從每個檔案的 header 動態提取所有日期欄位 (支援全部 8 種格式)。
+    從每個檔案的 header 動態提取所有日期欄位 (支援全部 15 種格式)。
 
     Args:
         detected_files: list of (filepath, format_const) tuples
@@ -1592,10 +1592,73 @@ def detect_all_formats(forecast_files):
     return detected, unknown
 
 
+# ---------------------------------------------------------------------------
+# 漂移版 fallback (補強 detect_format 認不出時)
+# ---------------------------------------------------------------------------
+
+def _extract_dates_from_drift_files(drift_files):
+    """用統一 reader 從漂移版檔案提取日期 keys (補強 extract_dates_from_files)。
+
+    Args:
+        drift_files: list of (filepath, matched_fmt, score)
+
+    Returns:
+        tuple(all_dates, per_file_dates)
+    """
+    from delta_unified_reader import (
+        find_valid_sheets, scan_headers, find_first_date_col, collect_date_cols,
+        _read_header_row,
+    )
+    all_dates = set()
+    per_file_dates = {}
+    for fp, _matched_fmt, _score in drift_files:
+        file_key = os.path.basename(fp)
+        try:
+            wb = openpyxl.load_workbook(fp, read_only=True, data_only=True)
+        except Exception as e:
+            print(f"  ⚠️ 漂移版日期提取失敗 [{file_key}]: {e}")
+            per_file_dates[file_key] = set()
+            continue
+        try:
+            sheets = find_valid_sheets(wb)
+            file_dates = set()
+            for sheet_name, header_row in sheets:
+                ws = wb[sheet_name]
+                header_values = _read_header_row(ws, header_row)
+                _found, headers = scan_headers(header_values)
+                date_start = find_first_date_col(headers, header_values)
+                date_col_map = collect_date_cols(date_start, header_values)
+                file_dates.update(date_col_map.values())
+            per_file_dates[file_key] = file_dates
+            all_dates.update(file_dates)
+            print(f"  漂移版 [{file_key}]: 偵測到 {len(file_dates)} 個日期欄位")
+        finally:
+            wb.close()
+    return all_dates, per_file_dates
+
+
+def _read_drift_file(fp, date_cols, buyer_label, plant_code, conversions, plant_codes):
+    """用統一 reader 讀取漂移版檔案, 輸出格式與 FORMAT_READERS 一致。"""
+    from delta_unified_reader import read_buyer_file
+    # 統一 reader 用 plant_codes 對檔內無 PLANT 欄的單 PLANT 檔案做檔名 fallback
+    use_codes = plant_codes if plant_codes else ([plant_code] if plant_code else None)
+    data = read_buyer_file(
+        fp, plant_codes=use_codes, date_cols=date_cols, conversions=conversions,
+    )
+    # 統一 buyer 顯示標籤 (對齊 hardcoded reader 行為)
+    if buyer_label:
+        for d in data:
+            d['buyer'] = buyer_label
+    return data
+
+
 def consolidate(forecast_files, reference_template, output_path,
                 erp_mapping=None, plant_codes=None, file_labels=None):
     """
-    合併多個 Delta Forecast 檔案為匯總格式 Excel (支援 8 種格式)。
+    合併多個 Delta Forecast 檔案為匯總格式 Excel (支援 15 種格式)。
+
+    若 detect_format 認不出, 會嘗試「指紋比對」找已知 15 格式的漂移版本,
+    若仍認不出 (真正第 16 格式) 則維持拒絕。
 
     Args:
         forecast_files: list of file paths (1 個或多個，任何格式組合)
@@ -1619,25 +1682,58 @@ def consolidate(forecast_files, reference_template, output_path,
             'message': '未提供任何 Forecast 檔案'
         }
 
-    # 1. 預先偵測所有檔案格式 (任一失敗即回報所有失敗檔案)
+    # 1. 預先偵測所有檔案格式
     detected, unknown = detect_all_formats(forecast_files)
+
+    # 1.5 對 unknown 嘗試指紋比對 (補強: 區分「漂移版」vs「真正第 16 格式」)
+    drift_files = []   # list of (fp, matched_fmt, score) — 用統一 reader 處理
+    truly_unknown = []  # 真正未知格式 — 維持現有拒絕
     if unknown:
-        unknown_names = [os.path.basename(fp) for fp in unknown]
+        try:
+            from delta_format_fingerprint import match_known_format_fingerprint
+            for fp in unknown:
+                m, s = match_known_format_fingerprint(fp)
+                if m:
+                    drift_files.append((fp, m, s))
+                    print(f"  🔄 漂移版偵測: {os.path.basename(fp)} → "
+                          f"{FORMAT_LABELS.get(m, m)} (相似度 {s})")
+                else:
+                    truly_unknown.append(fp)
+        except Exception as e:
+            print(f"  ⚠️ 指紋比對失敗 ({e}), 視所有 unknown 為真正未知")
+            truly_unknown = list(unknown)
+
+    if truly_unknown:
+        unknown_names = [os.path.basename(fp) for fp in truly_unknown]
         return {
             'success': False, 'part_count': 0,
             'unknown_files': unknown_names,
-            'message': '無法識別以下檔案格式 (請確認為 Delta 8 種標準格式): '
+            'message': '無法識別以下檔案格式 (請確認為 Delta 15 種標準格式): '
                        + ', '.join(unknown_names)
         }
 
-    print(f"Delta 合併: 偵測到 {len(detected)} 個檔案")
+    print(f"Delta 合併: 偵測到 {len(detected)} 個已知格式檔案"
+          + (f", {len(drift_files)} 個漂移版檔案" if drift_files else ""))
     for fp, fmt in detected:
         print(f"  [{FORMAT_LABELS.get(fmt, fmt)}] {os.path.basename(fp)}")
+    for fp, m, s in drift_files:
+        print(f"  [{FORMAT_LABELS.get(m, m)} 漂移版] {os.path.basename(fp)}")
 
     # 2. 從所有檔案動態提取日期欄位 (取聯集)
     #    conversions: {原始 YYYYMMDD: 月份標籤 或 None}，讀取器要用這個 map
     #    把來源檔的月末日期轉換為月份標籤 (避免週/月欄位重複)。
     date_cols, per_file_dates, date_warnings, conversions = extract_dates_from_files(detected)
+
+    # 2.5 將漂移版的日期合併入聯集後重新 sort
+    if drift_files:
+        drift_dates, drift_per_file = _extract_dates_from_drift_files(drift_files)
+        all_dates = set()
+        for s in per_file_dates.values():
+            all_dates.update(s)
+        all_dates.update(drift_dates)
+        per_file_dates.update(drift_per_file)
+        date_cols, conversions = _sort_date_cols(all_dates)
+
     if not date_cols:
         return {
             'success': False, 'part_count': 0,
@@ -1723,6 +1819,58 @@ def consolidate(forecast_files, reference_template, output_path,
             print(f"  {file_key} [{FORMAT_LABELS.get(fmt, fmt)}]: "
                   f"{len(data)} 個料號, 多 PLANT={unique_plants}")
 
+    # 3.5 漂移版 — 走統一 reader (補強路徑)
+    drift_stats = {}
+    for fp, matched_fmt, score in drift_files:
+        label_for_match = file_labels.get(fp) if file_labels else None
+        if label_for_match:
+            buyer_label = os.path.splitext(label_for_match)[0]
+        else:
+            buyer_label = os.path.splitext(os.path.basename(fp))[0]
+        file_key = os.path.basename(fp)
+
+        # 單 PLANT 漂移版檔名比對 PLANT
+        plant_code = None
+        if matched_fmt in SINGLE_PLANT_FORMATS and plant_codes:
+            match_target = label_for_match if label_for_match else fp
+            matched = match_plants_in_filename(match_target, plant_codes)
+            if matched:
+                plant_code = matched[0]
+
+        try:
+            data = _read_drift_file(fp, date_cols, buyer_label, plant_code,
+                                    conversions, plant_codes)
+        except Exception as e:
+            return {
+                'success': False, 'part_count': 0,
+                'message': f'讀取漂移版檔案失敗 [{file_key}] '
+                           f'({FORMAT_LABELS.get(matched_fmt, matched_fmt)} 漂移版): {e}'
+            }
+
+        # PLANT 統一驗證 (與 detected 路徑一致)
+        if plant_codes:
+            valid_upper = {str(p).strip().upper() for p in plant_codes if p}
+            invalid_seen = set()
+            for item in data:
+                p = item.get('plant') or ''
+                if p and str(p).strip().upper() not in valid_upper:
+                    invalid_seen.add(str(p).strip())
+                    item['plant'] = ''
+            if invalid_seen:
+                print(f"  ⚠️ {file_key} (漂移版): PLANT 不在 mapping 表，已留空: {sorted(invalid_seen)}")
+
+        format_stats[file_key] = len(data)
+        drift_stats[file_key] = {
+            'matched_fmt': matched_fmt,
+            'matched_label': FORMAT_LABELS.get(matched_fmt, matched_fmt),
+            'score': score,
+            'part_count': len(data),
+        }
+        all_source.extend(data)
+        unique_plants = sorted({d.get('plant', '') for d in data if d.get('plant')})
+        print(f"  {file_key} [漂移版 → {FORMAT_LABELS.get(matched_fmt, matched_fmt)}]: "
+              f"{len(data)} 個料號, PLANT={unique_plants}")
+
     if not all_source:
         return {
             'success': False, 'part_count': 0,
@@ -1736,6 +1884,8 @@ def consolidate(forecast_files, reference_template, output_path,
 
     print(f"  合併完成: {part_count} 個料號 → {os.path.basename(output_path)}")
 
+    total_files = len(detected) + len(drift_files)
+    drift_msg = f", 含 {len(drift_files)} 個漂移版" if drift_files else ""
     result = {
         'success': True,
         'part_count': part_count,
@@ -1746,8 +1896,10 @@ def consolidate(forecast_files, reference_template, output_path,
             name: sum(cnt for fk, cnt in format_stats.items() if name.lower() in fk.lower())
             for name in ('Ketwadee', 'Kanyanat', 'Weeraya')
         },
-        'message': f'成功合併 {part_count} 個料號 ({len(detected)} 個檔案)'
+        'message': f'成功合併 {part_count} 個料號 ({total_files} 個檔案{drift_msg})'
     }
     if date_warnings:
         result['date_warnings'] = date_warnings
+    if drift_stats:
+        result['drift_stats'] = drift_stats
     return result

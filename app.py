@@ -1404,8 +1404,8 @@ def upload_forecast():
         # 使用資料夾管理結構（IT 測試模式下也使用 IT 人員的 user_id）
         upload_folder, session_timestamp = get_or_create_session_folder(user['id'], 'uploads', upload_session_id)
 
-        # Delta 台達: 支援 8 種格式，1+ 檔案任何組合。統一走多檔合併路徑，
-        # 不論實際上傳幾個檔案。
+        # Delta 台達: 支援 15 種格式 (含漂移版 fallback)，1+ 檔案任何組合。
+        # 統一走多檔合併路徑，不論實際上傳幾個檔案。
         is_delta_upload_early = (template_username == 'delta')
 
         # ========== 處理多檔案上傳 ==========
@@ -1496,7 +1496,7 @@ def upload_forecast():
                 temp_files.append((file.filename, temp_filepath, original_ext))
                 print(f"  暫存文件 {idx + 1}: {file.filename} -> {temp_filepath}")
 
-            # ========== Delta 台達：8 種格式自動偵測 (1+ 檔案任何組合) ==========
+            # ========== Delta 台達：15 種格式自動偵測 (1+ 檔案任何組合, 含漂移版 fallback) ==========
             is_delta_upload = (template_username == 'delta')
 
             if is_delta_upload:
@@ -1575,31 +1575,45 @@ def upload_forecast():
                             response_data['transit_check'] = transit_check
                         return jsonify(response_data)
 
-                # 偵測每個檔案的格式 (9 種之一)
-                detected_formats = []  # list of (original_name, temp_path, fmt)
+                # 偵測每個檔案的格式 (15 種之一);
+                # 若 detect_format=None, 用指紋比對找已知 15 格式的漂移版,
+                # 真正未知 (第 16 格式) 才拒絕。
+                from delta_format_fingerprint import match_known_format_fingerprint
+                detected_formats = []  # list of (original_name, temp_path, fmt) - fmt 可能為 None (漂移版)
                 for original_name, temp_path, _ in temp_files:
                     fmt = detect_format(temp_path)
+                    drift_label = None
                     if fmt is None:
-                        validation_errors.append({
-                            'filename': original_name,
-                            'message': '無法辨識 Delta Forecast 格式',
-                            'details': [
-                                '支援格式 (共 8 種): Ketwadee (PSB5) / Kanyanat (PSB7) / '
-                                'Weeraya (PSB7) / India IAI1+UPI2 / PSW1+CEW1 / '
-                                'MWC1+IPC1 / NBQ1 / SVC1+PWC1 (Diode&MOS)'
-                            ]
-                        })
-                    else:
-                        detected_formats.append((original_name, temp_path, fmt))
-                        file_size = os.path.getsize(temp_path)
-                        total_size += file_size
-                        files_info.append({
-                            'name': original_name,
-                            'rows': 0,
-                            'columns': 0,
-                            'size': file_size,
-                            'format': FORMAT_LABELS.get(fmt, fmt),
-                        })
+                        matched_fmt, score = match_known_format_fingerprint(temp_path)
+                        if matched_fmt:
+                            # 漂移版: 接受並讓 consolidate() 走指紋 fallback 路徑
+                            drift_label = (
+                                f"{FORMAT_LABELS.get(matched_fmt, matched_fmt)} "
+                                f"(漂移版, 相似度 {score})"
+                            )
+                            print(f"  🔄 {original_name}: {drift_label}")
+                        else:
+                            validation_errors.append({
+                                'filename': original_name,
+                                'message': '無法辨識 Delta Forecast 格式',
+                                'details': [
+                                    '支援 15 種標準格式 (含 ICTBG/SVC1PWC1/IABG/EIBG/EISBG/'
+                                    'NBQ1/India_IAI1/PSW1+CEW1/MWC1+IPC1/Ketwadee/Weeraya/'
+                                    'Kanyanat/PSBG/FMBG 等), 此檔案結構不符。'
+                                ]
+                            })
+                            continue
+                    detected_formats.append((original_name, temp_path, fmt))
+                    file_size = os.path.getsize(temp_path)
+                    total_size += file_size
+                    files_info.append({
+                        'name': original_name,
+                        'rows': 0,
+                        'columns': 0,
+                        'size': file_size,
+                        'format': drift_label or FORMAT_LABELS.get(fmt, fmt),
+                    })
+                    if not drift_label:
                         print(f"  ✅ {original_name}: {FORMAT_LABELS.get(fmt, fmt)}")
 
                 # 至少要有 1 個有效格式
@@ -1672,7 +1686,7 @@ def upload_forecast():
             if not is_delta_upload and not all_dataframes:
                 return jsonify({'success': False, 'message': '沒有有效的 Forecast 文件'})
 
-            # ========== Delta 台達：8 格式自動合併 ==========
+            # ========== Delta 台達：15 格式自動合併 (含漂移版 fallback) ==========
             if is_delta_upload:
                 import time
                 print(f"=== Delta 自動合併模式：合併 {len(temp_files)} 個 Forecast 檔案 ===")
