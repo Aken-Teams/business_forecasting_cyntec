@@ -2,6 +2,13 @@
 """
 資料庫連線和操作模組
 """
+import sys
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 import pymysql
 from pymysql.cursors import DictCursor
