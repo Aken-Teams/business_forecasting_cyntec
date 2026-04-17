@@ -359,8 +359,15 @@
             <section class="download-section" id="download-section" style="display: none;">
                 <div class="card">
                     <div class="card-header">
-                        <h2><i class="fas fa-download"></i> 結果下載</h2>
-                        <p>下載FORECAST處理完成的文件</p>
+                        <div>
+                            <h2><i class="fas fa-download"></i> 結果下載</h2>
+                            <p>下載FORECAST處理完成的文件</p>
+                        </div>
+                        <button class="btn btn-outline-secondary btn-sm" id="backfill-zip-btn"
+                                style="display: none; white-space: nowrap;"
+                                onclick="downloadBackfilledZip(this)">
+                            <i class="fas fa-file-archive"></i> 回填原檔 ZIP
+                        </button>
                     </div>
                     <div class="card-body">
                         <!-- 完成資訊 -->
@@ -390,16 +397,6 @@
                                 </div>
                                 <button class="btn btn-primary" onclick="downloadFile('forecast_result.xlsx')">
                                     <i class="fas fa-download"></i> 下載
-                                </button>
-                            </div>
-                            <div class="download-item" id="backfilled-download-item" style="display: none;">
-                                <i class="fas fa-file-archive"></i>
-                                <div class="download-info">
-                                    <div class="download-title">回填至原格式 (ZIP)</div>
-                                    <div class="download-desc">Supply 回填至客戶原 Excel 檔, 保留樣式</div>
-                                </div>
-                                <button class="btn btn-secondary" onclick="downloadBackfilledZip(this)">
-                                    <i class="fas fa-download"></i> 下載 ZIP
                                 </button>
                             </div>
                         </div>

@@ -2026,22 +2026,6 @@ function updateDownloadSectionSingleFile(filename) {
         // 移除多檔案模式的 class
         downloadContainer.classList.remove('multi-file-mode');
 
-        let extraItem = '';
-        if (isDeltaCustomer()) {
-            extraItem = `
-            <div class="download-item" id="backfilled-download-item">
-                <i class="fas fa-file-archive"></i>
-                <div class="download-info">
-                    <div class="download-title">回填至原格式 (ZIP)</div>
-                    <div class="download-desc">Supply 回填至客戶原 Excel 檔, 保留樣式</div>
-                </div>
-                <button class="btn btn-secondary" onclick="downloadBackfilledZip(this)">
-                    <i class="fas fa-download"></i> 下載 ZIP
-                </button>
-            </div>
-            `;
-        }
-
         downloadContainer.innerHTML = `
             <div class="download-item">
                 <i class="fas fa-file-excel"></i>
@@ -2053,8 +2037,13 @@ function updateDownloadSectionSingleFile(filename) {
                     <i class="fas fa-download"></i> 下載
                 </button>
             </div>
-            ${extraItem}
         `;
+
+        // Delta 用戶顯示右上角回填 ZIP 按鈕
+        const backfillBtn = document.getElementById('backfill-zip-btn');
+        if (backfillBtn) {
+            backfillBtn.style.display = isDeltaCustomer() ? '' : 'none';
+        }
     }
 }
 

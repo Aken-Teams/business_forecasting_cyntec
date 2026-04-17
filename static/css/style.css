@@ -1213,12 +1213,24 @@ body {
     font-size: 0.95rem;
 }
 
+#backfill-zip-btn {
+    border: 2px solid #bc773e;
+    color: #bc773e;
+    background: transparent;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    transition: all 0.2s ease;
+}
+#backfill-zip-btn:hover {
+    background: #bc773e;
+    color: #fff;
+}
+
 .download-single {
     display: flex;
     justify-content: center;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 24px;
     min-height: 200px;
 }
 

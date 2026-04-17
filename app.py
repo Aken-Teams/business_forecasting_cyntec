@@ -616,28 +616,78 @@ def extract_plant_mrp_from_forecast(forecast_file):
 def _is_delta_consolidated_format(filepath):
     """
     判斷檔案是否為 Delta 匯總格式 (已合併的 26 欄格式)。
-    檢查: header A=Buyer, B=PLANT, E=PARTNO, I=Date。
-    row 2 的 I 欄若有值須為 Demand/Supply/Balance (但也允許空值,如半空匯總檔)。
+    掃描前 5 列找 header: A=Buyer, B=PLANT, E=PARTNO, I=Date。
+    容忍 header 不在第 1 列 (承辦人可能上方插空列)。
+    回傳 header 所在列號 (1-based, truthy), 或 0 (falsy)。
     """
     try:
         import openpyxl
         wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
         ws = wb.active
-        h1 = ws.cell(1, 1).value   # A = Buyer
-        h2 = ws.cell(1, 2).value   # B = PLANT
-        h5 = ws.cell(1, 5).value   # E = PARTNO
-        h9 = ws.cell(1, 9).value   # I = Date
+        for r in range(1, 6):  # 掃描前 5 列
+            h1 = str(ws.cell(r, 1).value or '').strip()
+            h2 = str(ws.cell(r, 2).value or '').strip()
+            h5 = str(ws.cell(r, 5).value or '').strip()
+            h9 = str(ws.cell(r, 9).value or '').strip()
+            if h1 == 'Buyer' and h2 == 'PLANT' and h5 == 'PARTNO' and h9 == 'Date':
+                wb.close()
+                return r  # header 列號 (truthy)
         wb.close()
-        if not (str(h1 or '').strip() == 'Buyer' and
-                str(h2 or '').strip() == 'PLANT' and
-                str(h5 or '').strip() == 'PARTNO' and
-                str(h9 or '').strip() == 'Date'):
-            return False
-        # Header 4 欄都符合 → 匯總格式
-        return True
     except Exception:
         pass
-    return False
+    return 0  # falsy
+
+
+def _inject_balance_formulas(filepath):
+    """
+    對 Delta 匯總格式 xlsx 注入 Balance 行公式。
+    每 3 行為一組 (Demand/Supply/Balance)，Balance 改為 Excel 公式：
+      PASSDUE: =G{d}+H{d}-{col}{d}   (STOCK + ON-WAY - Demand)
+      第 2 欄:  ={prev}{s}+{prev}{b}-{col}{d}  (Supply_prev + Balance_prev - Demand)
+      後續欄:   ={prev}{b}+{prev}{s}-{col}{d}  (Balance_prev + Supply_prev - Demand)
+    """
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(filepath)
+        ws = wb.active
+        max_col = ws.max_column
+        formulas_written = 0
+
+        r = 2  # skip header
+        while r <= ws.max_row - 2:
+            marker_d = str(ws.cell(r, 9).value or '').strip()
+            marker_s = str(ws.cell(r + 1, 9).value or '').strip()
+            marker_b = str(ws.cell(r + 2, 9).value or '').strip()
+            if marker_d == 'Demand' and marker_s == 'Supply' and marker_b == 'Balance':
+                demand_row = r
+                supply_row = r + 1
+                balance_row = r + 2
+                for col_offset in range(max_col - 10 + 1):
+                    col_num = 10 + col_offset
+                    col_letter = openpyxl.utils.get_column_letter(col_num)
+                    if col_offset == 0:
+                        formula = f'=G{demand_row}+H{demand_row}-{col_letter}{demand_row}'
+                    else:
+                        prev_col = openpyxl.utils.get_column_letter(col_num - 1)
+                        if col_offset == 1:
+                            formula = (f'={prev_col}{supply_row}+{prev_col}{balance_row}'
+                                       f'-{col_letter}{demand_row}')
+                        else:
+                            formula = (f'={prev_col}{balance_row}+{prev_col}{supply_row}'
+                                       f'-{col_letter}{demand_row}')
+                    ws.cell(row=balance_row, column=col_num, value=formula)
+                    formulas_written += 1
+                r += 3
+            else:
+                r += 1
+
+        wb.save(filepath)
+        wb.close()
+        print(f"✅ Balance 公式注入完成: {formulas_written} 個儲存格")
+        return formulas_written
+    except Exception as e:
+        print(f"⚠️ Balance 公式注入失敗: {e}")
+        return 0
 
 
 def is_xls_format(file_path):
@@ -1533,10 +1583,11 @@ def upload_forecast():
                 # === 自動偵測：是否為已匯總格式 (直接上傳，跳過合併) ===
                 # 支援單檔或多檔全部為匯總格式 → 合併後直接上傳
                 mapping_user_id = int(customer_id) if test_mode and customer_id else user['id']
-                consolidated_files = []
+                consolidated_files = []  # list of (name, path, header_row)
                 for _orig_name, _check_path, _ in temp_files:
-                    if _is_delta_consolidated_format(_check_path):
-                        consolidated_files.append((_orig_name, _check_path))
+                    _hdr_row = _is_delta_consolidated_format(_check_path)
+                    if _hdr_row:
+                        consolidated_files.append((_orig_name, _check_path, _hdr_row))
 
                 if consolidated_files and len(consolidated_files) == len(temp_files):
                     # 全部都是匯總格式
@@ -1545,24 +1596,45 @@ def upload_forecast():
 
                     if len(consolidated_files) == 1:
                         # 單檔: 直接使用
-                        _orig_name, _check_path = consolidated_files[0]
-                        print(f"✅ Delta 匯總格式直接上傳: {_orig_name}")
+                        _orig_name, _check_path, _hdr = consolidated_files[0]
+                        print(f"✅ Delta 匯總格式直接上傳: {_orig_name} (header row={_hdr})")
                         final_filename = 'forecast_data.xlsx'
                         final_filepath = os.path.join(upload_folder, final_filename)
-                        if _check_path != final_filepath:
-                            shutil.copy2(_check_path, final_filepath)
-                            os.remove(_check_path)
+                        if _hdr > 1:
+                            # header 不在第 1 列 → 複製 header+data 到新檔 (去掉前面空列)
+                            _wb_src = _opx.load_workbook(_check_path, data_only=True)
+                            _ws_src = _wb_src.active
+                            _wb_new = _opx.Workbook()
+                            _ws_new = _wb_new.active
+                            for _r in range(_hdr, _ws_src.max_row + 1):
+                                row_vals = [_ws_src.cell(_r, c).value
+                                            for c in range(1, _ws_src.max_column + 1)]
+                                _ws_new.append(row_vals)
+                            _wb_src.close()
+                            _wb_new.save(final_filepath)
+                            _wb_new.close()
+                            if _check_path != final_filepath and os.path.exists(_check_path):
+                                os.remove(_check_path)
+                        else:
+                            if _check_path != final_filepath:
+                                shutil.copy2(_check_path, final_filepath)
+                                os.remove(_check_path)
                         _display_names = [_orig_name]
                     else:
                         # 多檔: 合併所有 rows (header 取第一個檔案,其餘 append data rows)
                         print(f"✅ Delta 匯總格式多檔合併上傳: {len(consolidated_files)} 個檔案")
-                        _first_name, _first_path = consolidated_files[0]
+                        _first_name, _first_path, _first_hdr = consolidated_files[0]
                         _wb_merge = _opx.load_workbook(_first_path)
                         _ws_merge = _wb_merge.active
-                        for _cname, _cpath in consolidated_files[1:]:
+                        # 若第一個檔案 header 不在第 1 列,先刪除前面的空列
+                        if _first_hdr > 1:
+                            for _ in range(1, _first_hdr):
+                                _ws_merge.delete_rows(1)
+                        for _cname, _cpath, _c_hdr in consolidated_files[1:]:
                             _wb_extra = _opx.load_workbook(_cpath, data_only=True)
                             _ws_extra = _wb_extra.active
-                            for _r in range(2, _ws_extra.max_row + 1):
+                            # 從 header+1 列開始取 data rows
+                            for _r in range(_c_hdr + 1, _ws_extra.max_row + 1):
                                 row_vals = [_ws_extra.cell(_r, c).value
                                             for c in range(1, _ws_extra.max_column + 1)]
                                 # 跳過完全空白列
@@ -1575,10 +1647,10 @@ def upload_forecast():
                         _wb_merge.save(final_filepath)
                         _wb_merge.close()
                         # 清理暫存
-                        for _, _cpath in consolidated_files:
+                        for _, _cpath, _ in consolidated_files:
                             if _cpath != final_filepath and os.path.exists(_cpath):
                                 os.remove(_cpath)
-                        _display_names = [n for n, _ in consolidated_files]
+                        _display_names = [n for n, _, _ in consolidated_files]
 
                     # 保留原始檔案
                     originals_folder = os.path.join(upload_folder, 'originals')
@@ -1596,6 +1668,9 @@ def upload_forecast():
                     _total_rows = _ws.max_row
                     _part_count = max(0, (_total_rows - 1) // 3)
                     _wb.close()
+
+                    # 注入 Balance 行公式 (匯總格式上傳通常只有靜態值)
+                    _inject_balance_formulas(final_filepath)
 
                     merged_size = os.path.getsize(final_filepath)
                     set_user_file_path('forecast', final_filepath)
