@@ -615,25 +615,40 @@ def match_plants_in_filename(filepath, plant_codes):
 
 
 def _read_ketwadee(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
-    """讀取 PSB5 Ketwadee: MRP sheet, 3 rows/part"""
-    wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+    """讀取 PSB5 Ketwadee: MRP sheet, 3 rows/part.
+    自動偵測有無 'NO' 欄 (舊版有, 新版無), 動態調整欄位位置。
+    """
+    # 某些檔案 read_only 模式 max_row=None, 改用一般模式
+    wb = openpyxl.load_workbook(filepath, data_only=True)
     ws = wb['MRP']
 
-    date_col_map = _build_date_col_map(ws, 16, date_cols, conversions)
+    # 偵測有無 NO 欄: 舊版 A1='NO', 新版 A1='BUYER'
+    h1 = str(ws.cell(1, 1).value or '').strip().upper()
+    offset = 1 if h1 == 'NO' else 0  # 有 NO 欄時 offset=1
+    # 欄位位置 (0-based index): 有 NO → Part No=2, Filter=14, Date=16
+    #                            無 NO → Part No=1, Filter=13, Date=15
+    partno_idx = 1 + offset       # Part No
+    vendor_idx = 2 + offset       # Vendor Part
+    stock_idx = 6 + offset        # STOCK
+    filter_idx = 13 + offset      # Filter (Demand/Supply/Net)
+    date_start_col = 15 + offset  # 日期起始欄 (1-based)
+
+    date_col_map = _build_date_col_map(ws, date_start_col, date_cols, conversions)
 
     results = []
-    max_col = ws.max_column
-    rows = list(ws.iter_rows(min_row=2, max_row=ws.max_row,
+    max_col = ws.max_column or 46
+    max_row = ws.max_row or 500
+    rows = list(ws.iter_rows(min_row=2, max_row=max_row,
                              min_col=1, max_col=max_col, values_only=False))
     i = 0
     while i < len(rows):
         row = rows[i]
-        filter_val = row[14].value if len(row) > 14 else None
+        filter_val = row[filter_idx].value if len(row) > filter_idx else None
 
         if filter_val == 'Demand':
-            part_no = row[2].value
-            vendor_part = row[3].value
-            stock = row[7].value or 0
+            part_no = row[partno_idx].value
+            vendor_part = row[vendor_idx].value
+            stock = row[stock_idx].value or 0
 
             demand = _read_row_dates(row, date_col_map)
             supply = _read_row_dates(rows[i + 1], date_col_map) if i + 1 < len(rows) else {}

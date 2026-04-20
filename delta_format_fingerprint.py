@@ -65,6 +65,14 @@ def extract_fingerprint(filepath):
         sheet_signature = canonicalize_sheets(wb.sheetnames)
         sheets = find_valid_sheets(wb)
         if not sheets:
+            # 某些檔案 read_only 模式 max_row=None → 改用一般模式重試
+            wb.close()
+            try:
+                wb = openpyxl.load_workbook(filepath, data_only=True)
+                sheets = find_valid_sheets(wb)
+            except Exception:
+                return None
+        if not sheets:
             return None
 
         sheet_name, header_row = sheets[0]
