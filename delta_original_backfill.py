@@ -11,7 +11,7 @@ Delta Forecast 回填至原格式檔案
     1. **完全重用** delta_unified_reader 的欄位定位邏輯 (scan_headers, find_marker_col, ...)
        因 reader 邏輯已能處理 15 格式 + 漂移版, writer 用同邏輯自然一致。
     2. openpyxl load-modify-save 流程, 樣式完整保留。
-    3. Flat 格式 (EIBG/IABG/NBQ1/SVC1PWC1) 無 Supply 列 → 跳過並標註。
+    3. Flat 格式 (EIBG/IABG/NBQ1/SVC1PWC1) 無 Supply 列 → 自動插入 Supply + Balance 兩列。
     4. 同 (plant, partno) 在 forecast_result 可能多列 (不同 customer/location) → 加總。
 
 使用:
@@ -26,7 +26,10 @@ import traceback
 from collections import defaultdict
 from datetime import datetime
 
+from copy import copy
+
 import openpyxl
+from openpyxl.utils import get_column_letter
 
 from delta_unified_reader import (
     find_valid_sheets, scan_headers, find_first_date_col, collect_date_cols,
@@ -191,6 +194,122 @@ def _build_merged_cells_lookup(ws):
     return locked
 
 
+# ============ Flat 格式回填 (插入 Supply + Balance 列) ============
+
+def _backfill_flat_sheet(ws, header_row, found, date_col_map, col_to_canonical,
+                         lookup, filename_plant, result):
+    """Flat 格式回填: 每筆 PARTNO 只有 Demand 一列。
+    為每筆插入 Supply + Balance 兩列 (Balance 含公式)。
+
+    注意: 必須從上往下處理 + offset 追蹤, 因為 openpyxl insert_rows 不會自動
+    更新已寫入儲存格的公式參照 (formula references)。由上往下插入時, 新行在已寫
+    公式的下方, 不會影響已完成的公式; 同時用 offset 追蹤累計位移量。
+    """
+    partno_col = found['partno']
+    plant_col = found.get('plant')
+    stock_col = found.get('stock')
+    on_way_col = found.get('on_way')
+    date_start = min(date_col_map.keys()) if date_col_map else None
+    if date_start is None:
+        return
+
+    # label 放置欄: date_start - 1 (通常是 stock 欄或最後一個 info 欄)
+    label_col = (date_start - 1) if date_start > 1 else 1
+
+    # 收集所有有效 PARTNO 的資料列 (top → bottom, 保持原序)
+    max_row = ws.max_row or (header_row + 1)
+    data_rows = []  # [(original_row_idx, partno, plant)]
+    for r in range(header_row + 1, max_row + 1):
+        pv = ws.cell(r, partno_col).value
+        if pv is None or not str(pv).strip():
+            continue
+        partno = str(pv).strip()
+        plant = filename_plant
+        if plant_col:
+            plv = ws.cell(r, plant_col).value
+            if plv is not None and str(plv).strip():
+                plant = str(plv).strip()
+        data_rows.append((r, partno, plant))
+
+    if not data_rows:
+        return
+
+    sorted_date_cols = sorted(col_to_canonical.keys())
+    max_col = ws.max_column or (max(date_col_map.keys()) if date_col_map else 20)
+
+    offset = 0  # 累計已插入的行數
+
+    for orig_row, partno, plant in data_rows:
+        demand_row = orig_row + offset
+        # 插入 2 列在 demand_row 下方
+        ws.insert_rows(demand_row + 1, 2)
+        supply_row = demand_row + 1
+        balance_row = demand_row + 2
+        offset += 2
+
+        # 複製格式 (從 demand row 到 supply / balance rows)
+        for c in range(1, max_col + 1):
+            src_cell = ws.cell(demand_row, c)
+            for target_r in (supply_row, balance_row):
+                dst_cell = ws.cell(target_r, c)
+                if src_cell.has_style:
+                    dst_cell.font = copy(src_cell.font)
+                    dst_cell.fill = copy(src_cell.fill)
+                    dst_cell.border = copy(src_cell.border)
+                    dst_cell.alignment = copy(src_cell.alignment)
+                    dst_cell.number_format = src_cell.number_format
+
+        # 寫 label (Supply / Balance)
+        ws.cell(supply_row, label_col).value = 'Supply'
+        ws.cell(balance_row, label_col).value = 'Balance'
+
+        # 寫 PARTNO (方便辨識)
+        ws.cell(supply_row, partno_col).value = partno
+        ws.cell(balance_row, partno_col).value = partno
+
+        # Lookup Supply
+        plant_key = (plant or '').strip().upper()
+        lookup_key = (plant_key, partno)
+        supply_dict = lookup.get(lookup_key, {})
+
+        if supply_dict:
+            result['n_partno_matched'] += 1
+
+        # 寫 Supply 值 + Balance 公式
+        for i, col in enumerate(sorted_date_cols):
+            canonical = col_to_canonical[col]
+            col_letter = get_column_letter(col)
+
+            # Supply value
+            supply_val = supply_dict.get(canonical)
+            if supply_val is not None:
+                if isinstance(supply_val, float) and supply_val.is_integer():
+                    ws.cell(supply_row, col).value = int(supply_val)
+                else:
+                    ws.cell(supply_row, col).value = supply_val
+                result['n_cells_written'] += 1
+
+            # Balance formula
+            if i == 0:
+                # 首欄: Balance = Stock [+ OnWay] + Supply - Demand
+                parts = []
+                if stock_col:
+                    parts.append(f'{get_column_letter(stock_col)}{demand_row}')
+                if on_way_col:
+                    parts.append(f'{get_column_letter(on_way_col)}{demand_row}')
+                parts.append(f'{col_letter}{supply_row}')
+                formula = '=' + '+'.join(parts) + f'-{col_letter}{demand_row}'
+            else:
+                # 後續: Balance = prev_Balance + Supply - Demand
+                prev_col_letter = get_column_letter(sorted_date_cols[i - 1])
+                formula = (f'={prev_col_letter}{balance_row}'
+                           f'+{col_letter}{supply_row}'
+                           f'-{col_letter}{demand_row}')
+
+            ws.cell(balance_row, col).value = formula
+            result['n_cells_written'] += 1
+
+
 # ============ 單檔回填 ============
 
 def backfill_one_file(original_path, forecast_result_path, output_path,
@@ -285,16 +404,19 @@ def backfill_one_file(original_path, forecast_result_path, output_path,
                     break
             marker_col = find_marker_col(rows_sample)
 
-            if marker_col is None:
-                # Flat 格式, 無 Supply 列, 跳過此 sheet
-                continue
-
-            any_supply_row_found = True
-
-            # 建 col → canonical key mapping
+            # 建 col → canonical key mapping (flat 與 multirow 都需要)
             col_to_canonical = _build_canonical_map(date_col_map, fr_date_keys)
             if not col_to_canonical:
                 continue
+
+            if marker_col is None:
+                # Flat 格式: 插入 Supply + Balance 列
+                _backfill_flat_sheet(ws, header_row, found, date_col_map,
+                                    col_to_canonical, lookup, filename_plant, result)
+                any_supply_row_found = True
+                continue
+
+            any_supply_row_found = True
 
             # 合併儲存格 lookup
             merged_locked = _build_merged_cells_lookup(ws)
@@ -516,6 +638,6 @@ def _build_readme(manifest, forecast_result_path):
     lines.append('說明:')
     lines.append('  - Supply 值已回填至原檔對應儲存格 (其他欄位保留原值)')
     lines.append('  - Balance 公式若存在會自動重算 (開啟檔案時)')
-    lines.append('  - Flat 格式 (EIBG/IABG/NBQ1/SVC1PWC1 等) 原檔無 Supply 欄 → 未回填, 原檔以原名放入 ZIP')
+    lines.append('  - Flat 格式 (EIBG/IABG/NBQ1/SVC1PWC1 等) 原檔無 Supply 欄 → 自動插入 Supply + Balance 列 (Balance 含公式)')
     lines.append('  - 合併儲存格與公式儲存格會被跳過 (避免破壞原檔結構)')
     return '\n'.join(lines)

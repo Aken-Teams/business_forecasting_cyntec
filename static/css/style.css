@@ -1215,16 +1215,20 @@ body {
 
 #backfill-zip-btn {
     border: 2px solid #bc773e;
-    color: #bc773e;
-    background: transparent;
-    padding: 8px 16px;
+    color: #fff;
+    background: #bc773e;
+    padding: 8px 18px;
     border-radius: 8px;
     font-size: 0.85rem;
+    font-weight: 600;
     transition: all 0.2s ease;
+    box-shadow: 0 2px 6px rgba(188, 119, 62, 0.3);
 }
 #backfill-zip-btn:hover {
-    background: #bc773e;
+    background: #a5642f;
+    border-color: #a5642f;
     color: #fff;
+    box-shadow: 0 3px 10px rgba(188, 119, 62, 0.45);
 }
 
 .download-single {
