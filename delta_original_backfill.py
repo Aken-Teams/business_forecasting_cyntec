@@ -201,9 +201,9 @@ def _backfill_flat_sheet(ws, header_row, found, date_col_map, col_to_canonical,
     """Flat 格式回填: 每筆 PARTNO 只有 Demand 一列。
     為每筆插入 Supply + Balance 兩列 (Balance 含公式)。
 
-    注意: 必須從上往下處理 + offset 追蹤, 因為 openpyxl insert_rows 不會自動
-    更新已寫入儲存格的公式參照 (formula references)。由上往下插入時, 新行在已寫
-    公式的下方, 不會影響已完成的公式; 同時用 offset 追蹤累計位移量。
+    策略:
+      1. 在日期欄前插入一個專用標記欄 → 寫 Demand/Supply/Balance, 不混用原有欄位
+      2. 從上往下處理 + offset 追蹤, 因 openpyxl insert_rows 不自動更新公式參照
     """
     partno_col = found['partno']
     plant_col = found.get('plant')
@@ -213,10 +213,24 @@ def _backfill_flat_sheet(ws, header_row, found, date_col_map, col_to_canonical,
     if date_start is None:
         return
 
-    # label 放置欄: date_start - 1 (通常是 stock 欄或最後一個 info 欄)
-    label_col = (date_start - 1) if date_start > 1 else 1
+    # ---- 插入專用標記欄 (在 stock_col 前, 讓 Demand/Supply/Balance 緊鄰數值區) ----
+    if stock_col:
+        label_col = stock_col
+    else:
+        label_col = date_start
+    ws.insert_cols(label_col, 1)
+    ws.cell(header_row, label_col).value = '類別'
 
-    # 收集所有有效 PARTNO 的資料列 (top → bottom, 保持原序)
+    # 插入欄後, >= label_col 的欄位 index 全部 +1
+    col_to_canonical = {c + 1: v for c, v in col_to_canonical.items()}
+    sorted_date_cols = sorted(col_to_canonical.keys())
+    max_col = ws.max_column or (max(sorted_date_cols) if sorted_date_cols else 20)
+    if stock_col and stock_col >= label_col:
+        stock_col += 1
+    if on_way_col and on_way_col >= label_col:
+        on_way_col += 1
+
+    # ---- 收集所有有效 PARTNO 的資料列 (top → bottom) ----
     max_row = ws.max_row or (header_row + 1)
     data_rows = []  # [(original_row_idx, partno, plant)]
     for r in range(header_row + 1, max_row + 1):
@@ -233,9 +247,6 @@ def _backfill_flat_sheet(ws, header_row, found, date_col_map, col_to_canonical,
 
     if not data_rows:
         return
-
-    sorted_date_cols = sorted(col_to_canonical.keys())
-    max_col = ws.max_column or (max(date_col_map.keys()) if date_col_map else 20)
 
     offset = 0  # 累計已插入的行數
 
@@ -259,7 +270,8 @@ def _backfill_flat_sheet(ws, header_row, found, date_col_map, col_to_canonical,
                     dst_cell.alignment = copy(src_cell.alignment)
                     dst_cell.number_format = src_cell.number_format
 
-        # 寫 label (Supply / Balance)
+        # 寫標記欄 (Demand / Supply / Balance)
+        ws.cell(demand_row, label_col).value = 'Demand'
         ws.cell(supply_row, label_col).value = 'Supply'
         ws.cell(balance_row, label_col).value = 'Balance'
 
