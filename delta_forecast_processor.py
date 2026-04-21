@@ -25,7 +25,7 @@ from openpyxl.styles.colors import Color
 
 FORMAT_KETWADEE = 'ketwadee'              # MRP sheet, 3 rows/part
 FORMAT_KANYANAT = 'kanyanat'              # Sheet1, 4 rows/part (col 24=TYPE)
-FORMAT_WEERAYA = 'weeraya'                # Sheet1, 5 rows/part (col 12=TYPE)
+FORMAT_WEERAYA = 'weeraya'                # Sheet1, 4 rows/part (col 12=TYPE)
 FORMAT_INDIA_IAI1 = 'india_iai1'          # PAN JIT, 3 rows/part, 多PLANT
 FORMAT_PSW1_CEW1 = 'psw1_cew1'            # Sheet1, 5 rows/part (col 12=Status), 多PLANT
 FORMAT_MWC1IPC1 = 'mwc1ipc1'              # Sheet1, 4 rows/part (col 6=REQUEST ITEM), 多PLANT
@@ -38,6 +38,7 @@ FORMAT_IABG = 'iabg'                              # Sheet1, col9=SHIP, flat (Dem
 FORMAT_ICTBG_NTL7 = 'ictbg_ntl7'                  # Sheet1, col10=REQUEST ITEM, 4 rows/part (GROSS REQTS/...), 多PLANT
 FORMAT_ICTBG_PSB9_MRP = 'ictbg_psb9_mrp'          # PSB9_MRP* sheet, col14=Type, 4 rows/part (DEMAND/SUPPLY/NET/Remark), 多PLANT
 FORMAT_ICTBG_PSB9_SIRIRAHT = 'ictbg_psb9_siriraht'  # Sheet1, col15=REQUEST ITEM (1Demand/2Supply/3Balance), 3 rows/part, 多PLANT
+FORMAT_PRAPAPORN = 'prapaporn'                        # Sheet1, 4 rows/part (A-Demand/B-ForecastConf/D-Net/F-Remark), col12=TYPE, dates@17
 
 FORMAT_LABELS = {
     FORMAT_KETWADEE: 'Ketwadee (PSB5)',
@@ -55,12 +56,13 @@ FORMAT_LABELS = {
     FORMAT_ICTBG_NTL7: 'ICTBG (NTL7)',
     FORMAT_ICTBG_PSB9_MRP:      'ICTBG PSB9 Kaewarin',
     FORMAT_ICTBG_PSB9_SIRIRAHT: 'ICTBG PSB9 Siriraht',
+    FORMAT_PRAPAPORN:           'Prapaporn (PSB7)',
 }
 
 # 單 PLANT 檔案 (PLANT 從檔名比對)
 SINGLE_PLANT_FORMATS = {
     FORMAT_KETWADEE, FORMAT_KANYANAT, FORMAT_WEERAYA, FORMAT_NBQ1, FORMAT_PSBG,
-    FORMAT_EIBG_EISBG,
+    FORMAT_EIBG_EISBG, FORMAT_PRAPAPORN,
 }
 # 多 PLANT 檔案 (PLANT 從檔案每列讀)
 MULTI_PLANT_FORMATS = {
@@ -161,8 +163,13 @@ def detect_format(filepath):
                 wb.close()
                 return FORMAT_PSW1_CEW1
 
-            # Weeraya: col 1 = Plant, col 12 = TYPE
+            # Weeraya / Prapaporn: col 1 = Plant, col 12 = TYPE
+            # 區分方式: Prapaporn marker 帶字母前綴 (A-Demand), Weeraya 無 (Demand)
             if h1.lower() == 'plant' and h12.upper() == 'TYPE':
+                first_marker = _cell_str(ws, 2, 12)
+                if first_marker and first_marker[0].isalpha() and '-' in first_marker[:3]:
+                    wb.close()
+                    return FORMAT_PRAPAPORN
                 wb.close()
                 return FORMAT_WEERAYA
 
@@ -218,7 +225,7 @@ MONTH_NAMES = ('JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
 _FORMAT_SHEETS = {
     FORMAT_KETWADEE:           [('MRP', 16)],
     FORMAT_KANYANAT:           [('Sheet1', 25)],
-    FORMAT_WEERAYA:            [('Sheet1', 14)],
+    FORMAT_WEERAYA:            [('Sheet1', 13)],
     FORMAT_INDIA_IAI1:         [('PAN JIT', 14)],
     FORMAT_PSW1_CEW1:          [('Sheet1', 14)],
     FORMAT_MWC1IPC1:           [('Sheet1', 9)],
@@ -232,6 +239,7 @@ _FORMAT_SHEETS = {
     # FORMAT_ICTBG_PSB9_MRP: sheet 名稱動態 (PSB9_MRP*)，extract_dates 時特殊處理
     FORMAT_ICTBG_PSB9_MRP:     [],
     FORMAT_ICTBG_PSB9_SIRIRAHT:[('Sheet1', 16)],
+    FORMAT_PRAPAPORN:          [('Sheet1', 16)],
 }
 
 
@@ -707,11 +715,33 @@ def _read_kanyanat(filepath, date_cols, buyer_label=None, plant_code=None, conve
 
 
 def _read_weeraya(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
-    """讀取 PSB7 Weeraya: Sheet1, 5 rows/part"""
+    """讀取 PSB7 Weeraya: Sheet1, 4~5 rows/part, col 12 = TYPE (Demand marker).
+    動態偵測欄位位置 (新版 col2=PN, 舊版 col4=PN):
+      Raw Material(P/N) → partno, Vendor Part → vendor, Total stock → stock.
+    """
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     ws = wb['Sheet1']
 
-    date_col_map = _build_date_col_map(ws, 14, date_cols, conversions)
+    # --- 動態偵測 header 欄位 (0-indexed) ---
+    partno_idx = vendor_idx = stock_idx = type_idx = None
+    for c, cell in enumerate(ws[1]):
+        h = str(cell.value or '').strip().upper()
+        if 'RAW MATERIAL' in h or h == 'PART NO':
+            partno_idx = c
+        elif h == 'VENDOR PART':
+            vendor_idx = c
+        elif 'TOTAL STOCK' in h:
+            stock_idx = c
+        elif h == 'TYPE':
+            type_idx = c
+    if partno_idx is None: partno_idx = 3
+    if vendor_idx is None: vendor_idx = 4
+    if stock_idx is None: stock_idx = 12
+    if type_idx is None: type_idx = 11
+
+    # 日期從 TYPE 欄之後掃描 (跳過 Total stock / PASSDUE 等非日期欄)
+    date_scan_start = type_idx + 2   # 1-based col
+    date_col_map = _build_date_col_map(ws, date_scan_start, date_cols, conversions)
 
     results = []
     max_col = ws.max_column
@@ -720,16 +750,28 @@ def _read_weeraya(filepath, date_cols, buyer_label=None, plant_code=None, conver
     i = 0
     while i < len(rows):
         row = rows[i]
-        type_val = row[11].value if len(row) > 11 else None
+        type_val = row[type_idx].value if len(row) > type_idx else None
 
         if type_val == 'Demand':
-            part_no = row[3].value
-            vendor_part = row[4].value
-            stock = row[12].value or 0
+            part_no = row[partno_idx].value
+            vendor_part = row[vendor_idx].value
+            stock = row[stock_idx].value or 0
 
             demand = _read_row_dates(row, date_col_map)
-            supply = _read_row_dates(rows[i + 2], date_col_map) if i + 2 < len(rows) else {}
-            balance_data = _read_row_dates(rows[i + 3], date_col_map) if i + 3 < len(rows) else {}
+
+            # 向前掃描找 Forecast Conf / Net Demand (相容 4-row 與 5-row 版本)
+            supply = {}
+            balance_data = {}
+            advance = 1
+            for j in range(i + 1, min(i + 6, len(rows))):
+                mj = rows[j][type_idx].value if len(rows[j]) > type_idx else None
+                if mj == 'Forecast Conf':
+                    supply = _read_row_dates(rows[j], date_col_map)
+                elif mj == 'Net Demand':
+                    balance_data = _read_row_dates(rows[j], date_col_map)
+                elif mj == 'Demand':
+                    break
+                advance += 1
 
             results.append({
                 'buyer': buyer_label or 'Weeraya', 'plant': plant_code or 'PSB7',
@@ -739,7 +781,85 @@ def _read_weeraya(filepath, date_cols, buyer_label=None, plant_code=None, conver
                 'demand': demand, 'supply': supply,
                 'balance_override': balance_data,
             })
-            i += 5
+            i += advance
+        else:
+            i += 1
+
+    wb.close()
+    return results
+
+
+def _read_prapaporn(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
+    """讀取 PSB7 Prapaporn: Sheet1, 4 rows/part (A-Demand/B-Forecast Conf/D-Net Demand/F-Remark)
+    動態偵測欄位: Raw Material(P/N) → partno, Vendor Part → vendor,
+    Total stock → stock, ON THE WAY → on_way, TYPE = marker.
+    """
+    wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+    ws = wb['Sheet1']
+
+    # --- 動態偵測 header 欄位 (0-indexed) ---
+    partno_idx = vendor_idx = stock_idx = type_idx = onway_idx = None
+    for c, cell in enumerate(ws[1]):
+        h = str(cell.value or '').strip().upper()
+        if 'RAW MATERIAL' in h or h == 'PART NO':
+            partno_idx = c
+        elif h == 'VENDOR PART':
+            vendor_idx = c
+        elif 'TOTAL STOCK' in h:
+            stock_idx = c
+        elif h == 'TYPE':
+            type_idx = c
+        elif 'ON THE WAY' in h or 'ON-WAY' in h or h == 'OTW':
+            onway_idx = c
+    if partno_idx is None: partno_idx = 3
+    if vendor_idx is None: vendor_idx = 4
+    if stock_idx is None: stock_idx = 12
+    if type_idx is None: type_idx = 11
+
+    date_scan_start = type_idx + 2
+    date_col_map = _build_date_col_map(ws, date_scan_start, date_cols, conversions)
+
+    results = []
+    max_col = ws.max_column
+    rows = list(ws.iter_rows(min_row=2, max_row=ws.max_row,
+                             min_col=1, max_col=max_col, values_only=False))
+    i = 0
+    while i < len(rows):
+        row = rows[i]
+        type_val = row[type_idx].value if len(row) > type_idx else None
+
+        if type_val == 'A-Demand':
+            part_no = row[partno_idx].value
+            vendor_part = row[vendor_idx].value
+            stock = row[stock_idx].value or 0
+            on_way = row[onway_idx].value if onway_idx and len(row) > onway_idx else None
+
+            demand = _read_row_dates(row, date_col_map)
+
+            # 向前掃描找 B-Forecast Conf / D-Net Demand
+            supply = {}
+            balance = {}
+            advance = 1
+            for j in range(i + 1, min(i + 6, len(rows))):
+                mj = rows[j][type_idx].value if len(rows[j]) > type_idx else None
+                if mj == 'B-Forecast Conf':
+                    supply = _read_row_dates(rows[j], date_col_map)
+                elif mj == 'D-Net Demand':
+                    balance = _read_row_dates(rows[j], date_col_map)
+                elif mj == 'A-Demand':
+                    break
+                advance += 1
+
+            results.append({
+                'buyer': buyer_label or 'Prapaporn',
+                'plant': plant_code or 'PSB7',
+                'part_no': _to_partno(part_no),
+                'vendor_part': str(vendor_part) if vendor_part else '',
+                'stock': stock, 'on_way': on_way or 0,
+                'demand': demand, 'supply': supply,
+                'balance_override': balance,
+            })
+            i += advance
         else:
             i += 1
 
@@ -1579,6 +1699,7 @@ FORMAT_READERS = {
     FORMAT_ICTBG_NTL7:         _read_ictbg_ntl7,
     FORMAT_ICTBG_PSB9_MRP:     _read_ictbg_psb9_mrp,
     FORMAT_ICTBG_PSB9_SIRIRAHT:_read_ictbg_psb9_siriraht,
+    FORMAT_PRAPAPORN:          _read_prapaporn,
 }
 
 # 向後相容: 舊 API
