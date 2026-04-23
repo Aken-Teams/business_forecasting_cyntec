@@ -99,8 +99,17 @@ def detect_format(filepath):
             wb.close()
             return FORMAT_SVC1PWC1_DIODE_MOS
 
-        # === 唯一 sheet 名稱: MRP → Ketwadee ===
+        # === MRP sheet: 區分 Ketwadee vs MWC1IPC1 variant ===
         if 'MRP' in sheets:
+            ws_mrp = wb['MRP']
+            h1_mrp = _cell_str(ws_mrp, 1, 1).upper()
+            if h1_mrp == 'PLANT':
+                # MRP sheet 第一欄=PLANT → 可能是 MWC1IPC1 variant
+                for c in range(1, 30):
+                    if _cell_str(ws_mrp, 1, c).upper() == 'REQUEST ITEM':
+                        wb.close()
+                        return FORMAT_MWC1IPC1
+            # Default: Ketwadee (h1=NO 或 BUYER)
             wb.close()
             return FORMAT_KETWADEE
 
@@ -193,6 +202,15 @@ def detect_format(filepath):
                 wb.close()
                 return FORMAT_KANYANAT
 
+        # === 工作表1: 可能是 MWC1IPC1 variant (header 可能在 row 2) ===
+        if '工作表1' in sheets:
+            ws_tw = wb['工作表1']
+            for hr in (1, 2):
+                for c in range(1, 25):
+                    if _cell_str(ws_tw, hr, c).upper() == 'REQUEST ITEM':
+                        wb.close()
+                        return FORMAT_MWC1IPC1
+
         wb.close()
         return None
     except Exception:
@@ -228,7 +246,8 @@ _FORMAT_SHEETS = {
     FORMAT_WEERAYA:            [('Sheet1', 13)],
     FORMAT_INDIA_IAI1:         [('PAN JIT', 14)],
     FORMAT_PSW1_CEW1:          [('Sheet1', 14)],
-    FORMAT_MWC1IPC1:           [('Sheet1', 9)],
+    # FORMAT_MWC1IPC1: sheet/header 動態 (Sheet1/MRP/工作表1, header row 1 or 2)
+    FORMAT_MWC1IPC1:           [],
     FORMAT_NBQ1:               [('PAN JIT', 16)],
     FORMAT_SVC1PWC1_DIODE_MOS: [('Diode', 9), ('MOS', 9)],
     FORMAT_PSBG:               [('Sheet1', 16)],
@@ -453,6 +472,27 @@ def extract_dates_from_files(detected_files):
         if fmt == FORMAT_ICTBG_PSB9_MRP:
             sheet_name = _get_ictbg_psb9_mrp_sheet(wb)
             sheet_specs = [(sheet_name, 15)] if sheet_name else []
+
+        # MWC1IPC1: sheet/header 動態 (Sheet1/MRP/工作表1, header row 可能不在 row 1)
+        if fmt == FORMAT_MWC1IPC1:
+            ws_m, hr_m, cols_m = _find_mwc1ipc1_layout(wb)
+            if ws_m and cols_m:
+                marker_col = cols_m['marker']
+                scan_start = marker_col + 2  # 1-based
+                for col_idx, cell in enumerate(ws_m[hr_m], start=1):
+                    if col_idx < scan_start:
+                        continue
+                    v = getattr(cell, 'value', None)
+                    if v is None:
+                        continue
+                    norm = _normalize_date_header(v)
+                    if norm is not None:
+                        file_dates.add(norm)
+                wb.close()
+                per_file_dates[file_key] = file_dates
+                print(f"  {FORMAT_LABELS.get(fmt, fmt)} [{file_key}]: "
+                      f"偵測到 {len(file_dates)} 個日期欄位")
+                continue
 
         for sheet_name, start_col in sheet_specs:
             if sheet_name not in wb.sheetnames:
@@ -965,39 +1005,91 @@ def _read_psw1_cew1(filepath, date_cols, buyer_label=None, plant_code=None, conv
     return results
 
 
+def _find_mwc1ipc1_layout(wb):
+    """找到 MWC1IPC1 的 sheet / header row / 欄位位置 (支援多 variant)。
+
+    Returns:
+        tuple(ws, header_row, cols_dict) or (None, None, None)
+        cols_dict keys: plant, partno, vendor, marker, stock (all 0-indexed)
+    """
+    for sn in ('Sheet1', 'MRP', '工作表1'):
+        if sn not in wb.sheetnames:
+            continue
+        ws = wb[sn]
+        for hr in (1, 2):
+            cols = {}
+            for c, cell in enumerate(ws[hr]):
+                h = str(cell.value or '').strip().upper()
+                if h == 'PLANT':
+                    cols['plant'] = c
+                elif h == 'PARTNO':
+                    cols['partno'] = c
+                elif h in ('VENDOR PARTNO', 'VENDOR PART'):
+                    cols['vendor'] = c
+                elif h == 'REQUEST ITEM':
+                    cols['marker'] = c
+                elif h == 'PLANT STOCK':
+                    cols['stock'] = c
+            if 'marker' in cols:
+                return ws, hr, cols
+    return None, None, None
+
+
 def _read_mwc1ipc1(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
     """
-    讀取 MWC1+IPC1: Sheet1, 4 rows/part
+    讀取 MWC1+IPC1 (含 variant): 4 rows/part
     (GROSS REQTS/FIRM ORDERS/VENDOR CFM/NET AVAIL)
-    col 1 = PLANT, col 2 = PARTNO, col 3 = VENDOR PARTNO,
-    col 6 = REQUEST ITEM (marker), col 7 = PLANT STOCK, col 9+ = dates.
-    取 GROSS REQTS→Demand, VENDOR CFM→Supply, NET AVAIL→Balance, FIRM ORDERS 跳過。
-    多 PLANT 檔案 — 每列從 col 1 讀 PLANT。
+    動態偵測 sheet / header row / 欄位位置:
+      支援 Sheet1, MRP, 工作表1; header 可在 row 1 或 row 2。
+    取 GROSS REQTS→Demand, VENDOR CFM→Supply, NET AVAIL→Balance。
+    多 PLANT 檔案 — 每列從 PLANT 欄讀 PLANT。
     """
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
-    ws = wb['Sheet1']
+    ws, header_row, cols = _find_mwc1ipc1_layout(wb)
+    if ws is None:
+        wb.close()
+        return []
 
-    date_col_map = _build_date_col_map(ws, 9, date_cols, conversions)
+    plant_idx = cols.get('plant', 0)
+    partno_idx = cols.get('partno', 1)
+    vendor_idx = cols.get('vendor', 2)
+    marker_idx = cols['marker']
+    stock_idx = cols.get('stock', marker_idx + 1)
+
+    # 日期從 marker 欄之後掃描
+    date_scan_start = marker_idx + 2   # 1-based col
+    date_col_map = _build_date_col_map(ws, date_scan_start, date_cols, conversions)
 
     results = []
     max_col = ws.max_column
-    rows = list(ws.iter_rows(min_row=2, max_row=ws.max_row,
+    rows = list(ws.iter_rows(min_row=header_row + 1, max_row=ws.max_row,
                              min_col=1, max_col=max_col, values_only=False))
     i = 0
     while i < len(rows):
         row = rows[i]
-        marker = row[5].value if len(row) > 5 else None  # col 6
+        marker = row[marker_idx].value if len(row) > marker_idx else None
 
         if marker == 'GROSS REQTS':
-            row_plant = row[0].value if len(row) > 0 else None    # col 1
-            part_no = row[1].value if len(row) > 1 else None       # col 2
-            vendor_part = row[2].value if len(row) > 2 else None   # col 3
-            stock = row[6].value if len(row) > 6 else 0            # col 7
+            row_plant = row[plant_idx].value if len(row) > plant_idx else None
+            part_no = row[partno_idx].value if len(row) > partno_idx else None
+            vendor_part = row[vendor_idx].value if len(row) > vendor_idx else None
+            stock = row[stock_idx].value if len(row) > stock_idx else 0
 
-            demand = _read_row_dates(row, date_col_map)  # GROSS REQTS
-            # rows[i+1] = FIRM ORDERS → 跳過
-            supply = _read_row_dates(rows[i + 2], date_col_map) if i + 2 < len(rows) else {}   # VENDOR CFM
-            balance = _read_row_dates(rows[i + 3], date_col_map) if i + 3 < len(rows) else {}  # NET AVAIL
+            demand = _read_row_dates(row, date_col_map)
+
+            # 向前掃描找 VENDOR CFM / NET AVAIL (相容不同 variant)
+            supply = {}
+            balance = {}
+            advance = 1
+            for j in range(i + 1, min(i + 6, len(rows))):
+                mj = rows[j][marker_idx].value if len(rows[j]) > marker_idx else None
+                if mj and 'VENDOR' in str(mj).upper() and 'CFM' in str(mj).upper():
+                    supply = _read_row_dates(rows[j], date_col_map)
+                elif mj and 'NET' in str(mj).upper() and 'AVAIL' in str(mj).upper():
+                    balance = _read_row_dates(rows[j], date_col_map)
+                elif mj == 'GROSS REQTS':
+                    break
+                advance += 1
 
             results.append({
                 'buyer': buyer_label or 'MWC1+IPC1',
@@ -1008,7 +1100,7 @@ def _read_mwc1ipc1(filepath, date_cols, buyer_label=None, plant_code=None, conve
                 'demand': demand, 'supply': supply,
                 'balance_override': balance,
             })
-            i += 4
+            i += advance
         else:
             i += 1
 
