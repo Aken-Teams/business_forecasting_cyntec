@@ -322,6 +322,12 @@ def _normalize_date_header(val):
         return None
     if isinstance(val, datetime):
         return val.strftime('%Y%m%d')
+    # float/int YYYYMMDD (e.g. 20260420.0 → '20260420')
+    if isinstance(val, (int, float)):
+        ival = int(val)
+        s_int = str(ival)
+        if s_int.isdigit() and len(s_int) == 8:
+            return s_int
     s = str(val).strip()
     if not s:
         return None
@@ -2335,9 +2341,11 @@ def consolidate(forecast_files, reference_template, output_path,
             buyer_label = os.path.splitext(os.path.basename(fp))[0]
         file_key = os.path.basename(fp)
 
-        # 單 PLANT 檔案才需從檔名比對 PLANT 代碼 (用原始檔名，不用 temp 檔名)
+        # 從檔名比對 PLANT 代碼 (用原始檔名，不用 temp 檔名)
+        # 不限 SINGLE_PLANT_FORMATS — 多 PLANT 格式的 reader 也會把 plant_code 當
+        # fallback (當檔案沒有 PLANT 欄時使用，如 DNI-NTL7 的 MWC1IPC1 格式)
         plant_code = None
-        if fmt in SINGLE_PLANT_FORMATS and plant_codes:
+        if plant_codes:
             match_target = label_for_match if label_for_match else fp
             matched = match_plants_in_filename(match_target, plant_codes)
             if matched:

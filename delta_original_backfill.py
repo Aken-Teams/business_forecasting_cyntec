@@ -447,9 +447,23 @@ def backfill_one_file(original_path, forecast_result_path, output_path,
             # 合併儲存格 lookup
             merged_locked = _build_merged_cells_lookup(ws)
 
+            # DEBUG: 顯示 sheet 回填狀態
+            print(f"  [backfill] sheet='{sheet_name}' marker_col={marker_col} "
+                  f"sheet_plant={sheet_plant} partno_col={partno_col} "
+                  f"plant_col={plant_col} canonical_cols={len(col_to_canonical)}")
+            # DEBUG: 顯示 forecast_result 裡有哪些 plant 含這些 partno
+            _sample_pn = ws.cell(header_row + 1, partno_col).value
+            if _sample_pn:
+                _sample_pn_str = str(_sample_pn).strip()
+                _fr_matches = [k for k in lookup.keys() if k[1] == _sample_pn_str]
+                print(f"  [backfill] FR lookup for partno '{_sample_pn_str}': {_fr_matches}"
+                      f" (total FR keys: {len(lookup)})")
+
             # 遍歷 data rows
             last_partno = None
             last_plant = sheet_plant
+            _debug_supply_count = 0
+            _debug_no_match_count = 0
             for r in range(header_row + 1, ws.max_row + 1):
                 # 更新 partno
                 pv = ws.cell(r, partno_col).value
@@ -472,11 +486,16 @@ def backfill_one_file(original_path, forecast_result_path, output_path,
                 if cat != 'supply':
                     continue
 
+                _debug_supply_count += 1
+
                 # 找 lookup
                 plant_key = (last_plant or '').strip().upper()
                 lookup_key = (plant_key, last_partno)
                 supply_dict = lookup.get(lookup_key)
                 if not supply_dict:
+                    _debug_no_match_count += 1
+                    if _debug_no_match_count <= 3:
+                        print(f"    [backfill] NO MATCH: key={lookup_key}")
                     continue
 
                 result['n_partno_matched'] += 1
@@ -501,6 +520,10 @@ def backfill_one_file(original_path, forecast_result_path, output_path,
                     else:
                         cell.value = val
                     result['n_cells_written'] += 1
+
+            print(f"  [backfill] sheet='{sheet_name}' done: "
+                  f"supply_rows={_debug_supply_count} no_match={_debug_no_match_count} "
+                  f"matched={result['n_partno_matched']}")
 
         if not any_supply_row_found:
             result['skip_reason'] = 'flat_no_supply'

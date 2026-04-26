@@ -55,7 +55,7 @@ MARKER_PATTERNS = {
     ],
     'supply': [
         r'\bsupply\b', r'b-cfm', r'b-supply', r'2\s*supply', r'2\.\s*supply',
-        r'vendor\s*cfm', r'confirm\s*ship', r'forecast\s*conf', r'^cfm$',
+        r'vendor\s*cfm', r'vn\s*cfm', r'confirm\s*ship', r'forecast\s*conf', r'^cfm$',
     ],
     'demand': [
         r'\bdemand\b', r'a-demand', r'1\s*demand', r'1\.\s*demand',
