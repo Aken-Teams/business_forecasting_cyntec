@@ -99,19 +99,28 @@ def detect_format(filepath):
             wb.close()
             return FORMAT_SVC1PWC1_DIODE_MOS
 
+        # === PSW1/CEW1 sheet → PSW1+CEW1 variant ===
+        if 'PSW1' in sheets or 'CEW1' in sheets:
+            wb.close()
+            return FORMAT_PSW1_CEW1
+
         # === MRP sheet: 區分 Ketwadee vs MWC1IPC1 variant ===
         if 'MRP' in sheets:
             ws_mrp = wb['MRP']
             h1_mrp = _cell_str(ws_mrp, 1, 1).upper()
-            if h1_mrp == 'PLANT':
-                # MRP sheet 第一欄=PLANT → 可能是 MWC1IPC1 variant
+            # MRP sheet 有 REQUEST ITEM → MWC1IPC1 variant (不管 h1 是 PLANT 或 PARTNO)
+            if h1_mrp in ('PLANT', 'PARTNO'):
                 for c in range(1, 30):
                     if _cell_str(ws_mrp, 1, c).upper() == 'REQUEST ITEM':
                         wb.close()
                         return FORMAT_MWC1IPC1
-            # Default: Ketwadee (h1=NO 或 BUYER)
-            wb.close()
-            return FORMAT_KETWADEE
+            # h1=PARTNO 但沒有 REQUEST ITEM → 不是 Ketwadee, 跳過
+            if h1_mrp == 'PARTNO':
+                pass  # fall through to other checks
+            else:
+                # Default: Ketwadee (h1=NO 或 BUYER)
+                wb.close()
+                return FORMAT_KETWADEE
 
         # === PSB9_MRP* sheet → ICTBG PSB9 Kaewarin ===
         for s in sheets:
@@ -202,6 +211,13 @@ def detect_format(filepath):
                 wb.close()
                 return FORMAT_KANYANAT
 
+            # EIBG variant: c1=PLANT, c4=PARTNO, c5=VENDOR PARTNO (multi-row w/ marker)
+            h4 = _cell_str(ws, 1, 4).upper()
+            h5 = _cell_str(ws, 1, 5).upper()
+            if h1.upper() == 'PLANT' and h4 == 'PARTNO' and h5 == 'VENDOR PARTNO':
+                wb.close()
+                return FORMAT_EIBG_EISBG
+
         # === 工作表1: 可能是 MWC1IPC1 variant (header 可能在 row 2) ===
         if '工作表1' in sheets:
             ws_tw = wb['工作表1']
@@ -210,6 +226,20 @@ def detect_format(filepath):
                     if _cell_str(ws_tw, hr, c).upper() == 'REQUEST ITEM':
                         wb.close()
                         return FORMAT_MWC1IPC1
+
+        # === Fallback: 掃描所有 sheet 找 Kanyanat-like header (TYPE col + A-Demand) ===
+        for sn in sheets:
+            ws_fb = wb[sn]
+            for hr in range(1, 10):
+                for c in range(1, 30):
+                    hv = _cell_str(ws_fb, hr, c).upper()
+                    if hv == 'TYPE':
+                        # 確認下一列有 A-Demand marker
+                        marker_val = _cell_str(ws_fb, hr + 1, c)
+                        if marker_val == 'A-Demand':
+                            wb.close()
+                            return FORMAT_KANYANAT
+                        break
 
         wb.close()
         return None
@@ -242,10 +272,11 @@ MONTH_NAMES = ('JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
 # 非日期欄會被 _normalize_date_header 自動過濾掉
 _FORMAT_SHEETS = {
     FORMAT_KETWADEE:           [('MRP', 16)],
-    FORMAT_KANYANAT:           [('Sheet1', 25)],
+    # Kanyanat: sheet/header row 動態 (Sheet1 或其他 sheet, header 可能不在 row 1)
+    FORMAT_KANYANAT:           [],
     FORMAT_WEERAYA:            [('Sheet1', 13)],
     FORMAT_INDIA_IAI1:         [('PAN JIT', 14)],
-    FORMAT_PSW1_CEW1:          [('Sheet1', 14)],
+    FORMAT_PSW1_CEW1:          [('Sheet1', 14), ('PSW1', 10), ('CEW1', 10)],
     # FORMAT_MWC1IPC1: sheet/header 動態 (Sheet1/MRP/工作表1, header row 1 or 2)
     FORMAT_MWC1IPC1:           [],
     FORMAT_NBQ1:               [('PAN JIT', 16)],
@@ -473,6 +504,28 @@ def extract_dates_from_files(detected_files):
             sheet_name = _get_ictbg_psb9_mrp_sheet(wb)
             sheet_specs = [(sheet_name, 15)] if sheet_name else []
 
+        # Kanyanat: sheet/header row 動態
+        if fmt == FORMAT_KANYANAT:
+            ws_k, hr_k = _find_kanyanat_layout(wb)
+            if ws_k:
+                cols_k = _scan_header_columns(ws_k, hr_k)
+                type_col = cols_k.get('marker', 23)
+                scan_start = type_col + 2
+                for col_idx, cell in enumerate(ws_k[hr_k], start=1):
+                    if col_idx < scan_start:
+                        continue
+                    v = getattr(cell, 'value', None)
+                    if v is None:
+                        continue
+                    norm = _normalize_date_header(v)
+                    if norm is not None:
+                        file_dates.add(norm)
+                wb.close()
+                per_file_dates[file_key] = file_dates
+                print(f"  {FORMAT_LABELS.get(fmt, fmt)} [{file_key}]: "
+                      f"偵測到 {len(file_dates)} 個日期欄位")
+                continue
+
         # MWC1IPC1: sheet/header 動態 (Sheet1/MRP/工作表1, header row 可能不在 row 1)
         if fmt == FORMAT_MWC1IPC1:
             ws_m, hr_m, cols_m = _find_mwc1ipc1_layout(wb)
@@ -689,8 +742,8 @@ def _scan_header_columns(ws, header_row=1):
         # OTW — OTW / SHIP IN TRANSIT / ON THE WAY / ON-WAY
         elif (h in ('OTW',) or 'SHIP IN TRANSIT' in h or 'ON THE WAY' in h or 'ON-WAY' in h) and 'otw' not in cols:
             cols['otw'] = c
-        # MARKER — TYPE / FILTER / REQUEST / REQUEST ITEM / STATUS
-        elif h in ('TYPE', 'FILTER', 'REQUEST', 'REQUEST ITEM', 'STATUS') and 'marker' not in cols:
+        # MARKER — TYPE / FILTER / REQUEST / REQUEST ITEM / STATUS / 類別 / Date(PSW1)
+        elif h in ('TYPE', 'FILTER', 'REQUEST', 'REQUEST ITEM', 'STATUS', '\u985e\u5225', 'DATE') and 'marker' not in cols:
             cols['marker'] = c
         # BUYER
         elif h == 'BUYER' and 'buyer_col' not in cols:
@@ -761,15 +814,41 @@ def _read_ketwadee(filepath, date_cols, buyer_label=None, plant_code=None, conve
     return results
 
 
+def _find_kanyanat_layout(wb):
+    """找到 Kanyanat 的 sheet / header row (支援 Sheet1 或其他 sheet、header 不在 row 1)。
+
+    Returns:
+        tuple(ws, header_row) or (None, None)
+    """
+    for sn in wb.sheetnames:
+        ws = wb[sn]
+        for hr in range(1, 10):
+            cols = _scan_header_columns(ws, hr)
+            if 'marker' in cols:
+                # 確認下一列有 A-Demand marker
+                m_idx = cols['marker']
+                try:
+                    next_val = ws.cell(hr + 1, m_idx + 1).value
+                except Exception:
+                    next_val = None
+                if next_val == 'A-Demand':
+                    return ws, hr
+    return None, None
+
+
 def _read_kanyanat(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
-    """讀取 PSB7 Kanyanat: Sheet1, 4 rows/part (A-Demand marker).
-    動態偵測欄位位置。
+    """讀取 PSB7 Kanyanat: 4 rows/part (A-Demand marker).
+    動態偵測 sheet、header row、欄位位置。
     """
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
-    ws = wb['Sheet1']
+    ws, header_row = _find_kanyanat_layout(wb)
+    if ws is None:
+        # fallback: Sheet1, row 1
+        ws = wb['Sheet1'] if 'Sheet1' in wb.sheetnames else wb[wb.sheetnames[0]]
+        header_row = 1
 
     # --- 動態偵測 header 欄位 ---
-    cols = _scan_header_columns(ws, 1)
+    cols = _scan_header_columns(ws, header_row)
     partno_idx = cols.get('partno', 4)
     vendor_idx = cols.get('vendor', 5)
     stock_idx = cols.get('stock')
@@ -779,7 +858,7 @@ def _read_kanyanat(filepath, date_cols, buyer_label=None, plant_code=None, conve
 
     results = []
     max_col = ws.max_column
-    rows = list(ws.iter_rows(min_row=2, max_row=ws.max_row,
+    rows = list(ws.iter_rows(min_row=header_row + 1, max_row=ws.max_row,
                              min_col=1, max_col=max_col, values_only=False))
     i = 0
     while i < len(rows):
@@ -1038,68 +1117,91 @@ def _read_india_iai1(filepath, date_cols, buyer_label=None, plant_code=None, con
 
 def _read_psw1_cew1(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
     """
-    讀取 PSW1+CEW1: Sheet1, 5 rows/part (A-Demand/B-Supply/C-Net/D-ETD/E-Remark).
+    讀取 PSW1+CEW1: 支援 Sheet1 或 PSW1/CEW1 分 sheet。
     動態偵測欄位位置。多 PLANT 檔案 — 每列讀 PLANT。
+    支援 A-Demand 和 1.Demand 兩種 marker 風格。
     """
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
-    ws = wb['Sheet1']
 
-    # --- 動態偵測 header 欄位 ---
-    cols = _scan_header_columns(ws, 1)
-    plant_idx = cols.get('plant', 2)
-    partno_idx = cols.get('partno', 5)
-    vendor_idx = cols.get('vendor', 7)
-    marker_idx = cols.get('marker', 11)  # Status
-    stock_idx = cols.get('stock', marker_idx + 1)
-    date_scan_start = marker_idx + 2  # skip marker + stock
-    # stock 在 marker 之後的話, 日期從 stock 之後開始
-    if stock_idx and stock_idx > marker_idx:
-        date_scan_start = stock_idx + 2
-    date_col_map = _build_date_col_map(ws, date_scan_start, date_cols, conversions)
+    # 決定要處理哪些 sheet
+    target_sheets = []
+    if 'Sheet1' in wb.sheetnames:
+        target_sheets.append('Sheet1')
+    for sn in ('PSW1', 'CEW1'):
+        if sn in wb.sheetnames:
+            target_sheets.append(sn)
+    if not target_sheets:
+        target_sheets = [wb.sheetnames[0]]
 
     results = []
-    max_col = ws.max_column
-    rows = list(ws.iter_rows(min_row=2, max_row=ws.max_row,
-                             min_col=1, max_col=max_col, values_only=False))
-    i = 0
-    while i < len(rows):
-        row = rows[i]
-        marker = row[marker_idx].value if len(row) > marker_idx else None
+    for sheet_name in target_sheets:
+        ws = wb[sheet_name]
 
-        if marker == 'A-Demand':
-            row_plant = row[plant_idx].value if len(row) > plant_idx else None
-            part_no = row[partno_idx].value if len(row) > partno_idx else None
-            vendor_part = row[vendor_idx].value if len(row) > vendor_idx else None
-            stock = row[stock_idx].value if len(row) > stock_idx else 0
+        # --- 動態偵測 header 欄位 ---
+        cols = _scan_header_columns(ws, 1)
+        has_plant_col = 'plant' in cols
+        plant_idx = cols.get('plant')  # None if no PLANT column
+        partno_idx = cols.get('partno', 5)
+        vendor_idx = cols.get('vendor', 7)
+        marker_idx = cols.get('marker', 11)  # Status or Date
+        stock_idx = cols.get('stock', marker_idx + 1)
+        date_scan_start = marker_idx + 2
+        if stock_idx and stock_idx > marker_idx:
+            date_scan_start = stock_idx + 2
+        date_col_map = _build_date_col_map(ws, date_scan_start, date_cols, conversions)
 
-            demand = _read_row_dates(row, date_col_map)
-            # 向前掃描找 B-Supply / C-Net
-            supply = {}
-            balance = {}
-            advance = 1
-            for j in range(i + 1, min(i + 7, len(rows))):
-                mj = rows[j][marker_idx].value if len(rows[j]) > marker_idx else None
-                mj_str = str(mj).strip() if mj else ''
-                if mj_str == 'B-Supply':
-                    supply = _read_row_dates(rows[j], date_col_map)
-                elif mj_str == 'C-Net':
-                    balance = _read_row_dates(rows[j], date_col_map)
-                elif mj_str == 'A-Demand':
-                    break
-                advance += 1
+        max_col = ws.max_column
+        rows = list(ws.iter_rows(min_row=2, max_row=ws.max_row,
+                                 min_col=1, max_col=max_col, values_only=False))
+        i = 0
+        while i < len(rows):
+            row = rows[i]
+            marker = row[marker_idx].value if len(row) > marker_idx else None
+            m_str = str(marker).strip() if marker else ''
 
-            results.append({
-                'buyer': buyer_label or 'PSW1+CEW1',
-                'plant': str(row_plant).strip() if row_plant else (plant_code or ''),
-                'part_no': _to_partno(part_no),
-                'vendor_part': str(vendor_part) if vendor_part else '',
-                'stock': stock or 0, 'on_way': None,
-                'demand': demand, 'supply': supply,
-                'balance_override': balance,
-            })
-            i += advance
-        else:
-            i += 1
+            # 相容 A-Demand 和 1.Demand 兩種風格
+            is_demand = m_str in ('A-Demand', '1.Demand')
+            if is_demand:
+                # 有 PLANT 欄才從 row 讀, 否則用 sheet name
+                if has_plant_col and plant_idx is not None:
+                    row_plant = row[plant_idx].value if len(row) > plant_idx else None
+                else:
+                    row_plant = None
+                # 沒讀到 PLANT → 用 sheet name 或 plant_code
+                if not row_plant and sheet_name in ('PSW1', 'CEW1'):
+                    row_plant = sheet_name
+                part_no = row[partno_idx].value if len(row) > partno_idx else None
+                vendor_part = row[vendor_idx].value if len(row) > vendor_idx else None
+                stock = row[stock_idx].value if len(row) > stock_idx else 0
+
+                demand = _read_row_dates(row, date_col_map)
+                # 向前掃描找 Supply / Net / Balance
+                supply = {}
+                balance = {}
+                advance = 1
+                for j in range(i + 1, min(i + 7, len(rows))):
+                    mj = rows[j][marker_idx].value if len(rows[j]) > marker_idx else None
+                    mj_str = str(mj).strip() if mj else ''
+                    if mj_str in ('B-Supply', '2.Supply'):
+                        supply = _read_row_dates(rows[j], date_col_map)
+                    elif mj_str in ('C-Net', '3.Net', '3.Balance'):
+                        balance = _read_row_dates(rows[j], date_col_map)
+                    elif mj_str in ('A-Demand', '1.Demand'):
+                        break
+                    advance += 1
+
+                results.append({
+                    'buyer': buyer_label or 'PSW1+CEW1',
+                    'plant': str(row_plant).strip() if row_plant else (plant_code or ''),
+                    'part_no': _to_partno(part_no),
+                    'vendor_part': str(vendor_part) if vendor_part else '',
+                    'stock': stock or 0, 'on_way': None,
+                    'demand': demand, 'supply': supply,
+                    'balance_override': balance,
+                })
+                i += advance
+            else:
+                i += 1
 
     wb.close()
     return results
@@ -1150,7 +1252,7 @@ def _read_mwc1ipc1(filepath, date_cols, buyer_label=None, plant_code=None, conve
         wb.close()
         return []
 
-    plant_idx = cols.get('plant', 0)
+    plant_idx = cols.get('plant')  # None = no PLANT column (single-plant)
     partno_idx = cols.get('partno', 1)
     vendor_idx = cols.get('vendor', 2)
     marker_idx = cols['marker']
@@ -1170,24 +1272,25 @@ def _read_mwc1ipc1(filepath, date_cols, buyer_label=None, plant_code=None, conve
         marker = row[marker_idx].value if len(row) > marker_idx else None
 
         if marker == 'GROSS REQTS':
-            row_plant = row[plant_idx].value if len(row) > plant_idx else None
+            row_plant = row[plant_idx].value if plant_idx is not None and len(row) > plant_idx else None
             part_no = row[partno_idx].value if len(row) > partno_idx else None
             vendor_part = row[vendor_idx].value if len(row) > vendor_idx else None
             stock = row[stock_idx].value if len(row) > stock_idx else 0
 
             demand = _read_row_dates(row, date_col_map)
 
-            # 向前掃描找 VENDOR CFM / NET AVAIL (相容不同 variant)
+            # 向前掃描找 VENDOR CFM / VN CFM / NET AVAIL (相容不同 variant)
             supply = {}
             balance = {}
             advance = 1
             for j in range(i + 1, min(i + 6, len(rows))):
                 mj = rows[j][marker_idx].value if len(rows[j]) > marker_idx else None
-                if mj and 'VENDOR' in str(mj).upper() and 'CFM' in str(mj).upper():
+                mj_up = str(mj).strip().upper() if mj else ''
+                if ('VENDOR' in mj_up or 'VN' in mj_up) and 'CFM' in mj_up:
                     supply = _read_row_dates(rows[j], date_col_map)
-                elif mj and 'NET' in str(mj).upper() and 'AVAIL' in str(mj).upper():
+                elif 'NET' in mj_up and 'AVAIL' in mj_up:
                     balance = _read_row_dates(rows[j], date_col_map)
-                elif mj == 'GROSS REQTS':
+                elif mj_up == 'GROSS REQTS':
                     break
                 advance += 1
 
@@ -1357,44 +1460,98 @@ def _read_psbg(filepath, date_cols, buyer_label=None, plant_code=None, conversio
 
 def _read_eibg_eisbg(filepath, date_cols, buyer_label=None, plant_code=None, conversions=None):
     """
-    讀取 EIBG/EISBG: Sheet1, 1 row/part (flat, Demand only).
-    動態偵測欄位位置。單 PLANT — PLANT 從檔名比對。
+    讀取 EIBG/EISBG: Sheet1, 支援 flat (1 row/part) 和 multi-row (Demand/Supply/Balance)。
+    動態偵測欄位位置。偵測 marker 欄 → 有則 multi-row, 無則 flat。
     """
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     ws = wb['Sheet1']
 
     # --- 動態偵測 header 欄位 ---
     cols = _scan_header_columns(ws, 1)
+    plant_idx = cols.get('plant')
     partno_idx = cols.get('partno', 2)
     vendor_idx = cols.get('vendor', 3)
     stock_idx = cols.get('stock', 9)
-    otw_idx = cols.get('otw', 10)
-    # 日期從 otw 或 stock 之後開始
-    last_meta = max(stock_idx, otw_idx) if otw_idx else stock_idx
+    otw_idx = cols.get('otw')
+    marker_idx = cols.get('marker')  # 類別 / None(flat)
+
+    # 日期起始: marker 或 otw 或 stock 之後
+    last_meta = stock_idx
+    if otw_idx and otw_idx > last_meta:
+        last_meta = otw_idx
+    if marker_idx and marker_idx > last_meta:
+        last_meta = marker_idx
     date_scan_start = last_meta + 2
     date_col_map = _build_date_col_map(ws, date_scan_start, date_cols, conversions)
 
     results = []
     max_col = ws.max_column
-    for row in ws.iter_rows(min_row=2, max_row=ws.max_row,
-                            min_col=1, max_col=max_col, values_only=False):
-        part_no = row[partno_idx].value if len(row) > partno_idx else None
-        if part_no is None or str(part_no).strip() == '':
-            continue
-        vendor_part = row[vendor_idx].value if len(row) > vendor_idx else None
-        stock = row[stock_idx].value if len(row) > stock_idx else 0
-        on_way = row[otw_idx].value if otw_idx and len(row) > otw_idx else None
 
-        demand = _read_row_dates(row, date_col_map)
+    if marker_idx is not None:
+        # === Multi-row mode (Demand/Supply/Balance per part) ===
+        rows = list(ws.iter_rows(min_row=2, max_row=ws.max_row,
+                                 min_col=1, max_col=max_col, values_only=False))
+        i = 0
+        while i < len(rows):
+            row = rows[i]
+            marker = row[marker_idx].value if len(row) > marker_idx else None
+            m_str = str(marker).strip() if marker else ''
 
-        results.append({
-            'buyer': buyer_label or 'EIBG',
-            'plant': plant_code or '',
-            'part_no': _to_partno(part_no),
-            'vendor_part': str(vendor_part) if vendor_part else '',
-            'stock': stock or 0, 'on_way': on_way or 0,
-            'demand': demand, 'supply': {},
-        })
+            if m_str == 'Demand':
+                row_plant = row[plant_idx].value if plant_idx is not None and len(row) > plant_idx else None
+                part_no = row[partno_idx].value if len(row) > partno_idx else None
+                vendor_part = row[vendor_idx].value if len(row) > vendor_idx else None
+                stock = row[stock_idx].value if len(row) > stock_idx else 0
+                on_way = row[otw_idx].value if otw_idx and len(row) > otw_idx else None
+
+                demand = _read_row_dates(row, date_col_map)
+                supply = {}
+                balance = {}
+                advance = 1
+                for j in range(i + 1, min(i + 5, len(rows))):
+                    mj = rows[j][marker_idx].value if len(rows[j]) > marker_idx else None
+                    mj_str = str(mj).strip() if mj else ''
+                    if mj_str == 'Supply':
+                        supply = _read_row_dates(rows[j], date_col_map)
+                    elif mj_str == 'Balance':
+                        balance = _read_row_dates(rows[j], date_col_map)
+                    elif mj_str == 'Demand':
+                        break
+                    advance += 1
+
+                results.append({
+                    'buyer': buyer_label or 'EIBG',
+                    'plant': str(row_plant).strip() if row_plant else (plant_code or ''),
+                    'part_no': _to_partno(part_no),
+                    'vendor_part': str(vendor_part) if vendor_part else '',
+                    'stock': stock or 0, 'on_way': on_way or 0,
+                    'demand': demand, 'supply': supply,
+                    'balance_override': balance,
+                })
+                i += advance
+            else:
+                i += 1
+    else:
+        # === Flat mode (1 row/part, Demand only) ===
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row,
+                                min_col=1, max_col=max_col, values_only=False):
+            part_no = row[partno_idx].value if len(row) > partno_idx else None
+            if part_no is None or str(part_no).strip() == '':
+                continue
+            vendor_part = row[vendor_idx].value if len(row) > vendor_idx else None
+            stock = row[stock_idx].value if len(row) > stock_idx else 0
+            on_way = row[otw_idx].value if otw_idx and len(row) > otw_idx else None
+
+            demand = _read_row_dates(row, date_col_map)
+
+            results.append({
+                'buyer': buyer_label or 'EIBG',
+                'plant': plant_code or '',
+                'part_no': _to_partno(part_no),
+                'vendor_part': str(vendor_part) if vendor_part else '',
+                'stock': stock or 0, 'on_way': on_way or 0,
+                'demand': demand, 'supply': {},
+            })
 
     wb.close()
     return results
