@@ -619,7 +619,7 @@ def extract_dates_from_buyer_files(buyer_files):
 # Buyer 讀取器
 # ---------------------------------------------------------------------------
 
-def _build_date_col_map(ws, start_col, date_cols, conversions=None):
+def _build_date_col_map(ws, start_col, date_cols, conversions=None, header_row=1):
     """
     建立 column → date_key 的映射。
 
@@ -631,7 +631,7 @@ def _build_date_col_map(ws, start_col, date_cols, conversions=None):
     """
     date_col_map = {}
     date_cols_set = set(date_cols)
-    for col_idx, cell in enumerate(ws[1], start=1):
+    for col_idx, cell in enumerate(ws[header_row], start=1):
         if col_idx < start_col:
             continue
         v = getattr(cell, 'value', None)
@@ -1266,7 +1266,8 @@ def _read_mwc1ipc1(filepath, date_cols, buyer_label=None, plant_code=None, conve
 
     # 日期從 marker 欄之後掃描
     date_scan_start = marker_idx + 2   # 1-based col
-    date_col_map = _build_date_col_map(ws, date_scan_start, date_cols, conversions)
+    date_col_map = _build_date_col_map(ws, date_scan_start, date_cols, conversions,
+                                       header_row=header_row)
 
     results = []
     max_col = ws.max_column
