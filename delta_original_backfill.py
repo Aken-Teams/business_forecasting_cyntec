@@ -370,12 +370,15 @@ def backfill_one_file(original_path, forecast_result_path, output_path,
         result['message'] = f'讀取 forecast_result.xlsx 失敗: {e}'
         return result
 
-    # 3. 決定檔名 PLANT (單 PLANT 格式)
+    # 3. 決定檔名 PLANT (無 PLANT 欄時的 fallback)
+    #    不限 SINGLE_PLANT_FORMATS — 任何沒有 PLANT 欄的檔案都需要 fallback
+    filename_plants = []  # 可能有多個 (如 PSW1+CEW1)
     filename_plant = None
-    if fmt in SINGLE_PLANT_FORMATS and plant_codes:
+    if plant_codes:
         match_target = file_label if file_label else original_path
         matched = match_plants_in_filename(match_target, plant_codes)
         if matched:
+            filename_plants = matched
             filename_plant = matched[0]
 
     # 4. load workbook (保留樣式)
@@ -403,6 +406,17 @@ def backfill_one_file(original_path, forecast_result_path, output_path,
             partno_col = found['partno']
             plant_col = found.get('plant')
 
+            # 決定此 sheet 的 fallback plant:
+            #   1. sheet 名本身是 plant code (如 PSW1, CEW1) → 用 sheet 名
+            #   2. 否則用檔名比對的 filename_plant
+            sheet_plant = filename_plant
+            if not plant_col and plant_codes:
+                sn_upper = sheet_name.strip().upper()
+                for pc in plant_codes:
+                    if pc.upper() == sn_upper:
+                        sheet_plant = pc
+                        break
+
             date_start = find_first_date_col(headers, header_values)
             date_col_map = collect_date_cols(date_start, header_values)
             if not date_col_map:
@@ -424,7 +438,7 @@ def backfill_one_file(original_path, forecast_result_path, output_path,
             if marker_col is None:
                 # Flat 格式: 插入 Supply + Balance 列
                 _backfill_flat_sheet(ws, header_row, found, date_col_map,
-                                    col_to_canonical, lookup, filename_plant, result)
+                                    col_to_canonical, lookup, sheet_plant, result)
                 any_supply_row_found = True
                 continue
 
@@ -435,14 +449,14 @@ def backfill_one_file(original_path, forecast_result_path, output_path,
 
             # 遍歷 data rows
             last_partno = None
-            last_plant = filename_plant
+            last_plant = sheet_plant
             for r in range(header_row + 1, ws.max_row + 1):
                 # 更新 partno
                 pv = ws.cell(r, partno_col).value
                 if pv is not None and str(pv).strip():
                     last_partno = str(pv).strip()
-                    # 新 partno → 重設 plant 為檔名 plant (避免跨 partno 沿用)
-                    last_plant = filename_plant
+                    # 新 partno → 重設 plant 為 sheet plant (避免跨 partno 沿用)
+                    last_plant = sheet_plant
                 # 更新 plant (多 PLANT 格式)
                 if plant_col is not None:
                     plv = ws.cell(r, plant_col).value
