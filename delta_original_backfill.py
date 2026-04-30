@@ -34,6 +34,7 @@ from openpyxl.utils import get_column_letter
 from delta_unified_reader import (
     find_valid_sheets, scan_headers, find_first_date_col, collect_date_cols,
     find_marker_col, classify_marker, _read_header_row,
+    _get_ai_hints, _apply_ai_hints_to_found,
 )
 from delta_forecast_processor import (
     detect_format, FORMAT_LABELS, SINGLE_PLANT_FORMATS,
@@ -346,6 +347,7 @@ def backfill_one_file(original_path, forecast_result_path, output_path,
         'message': '', 'skip_reason': None,
     }
     fname = os.path.basename(original_path)
+    _ai_cache = {}  # {filepath: ai_result_dict_or_empty}
 
     # 1. 偵測格式
     fmt = detect_format(original_path)
@@ -356,12 +358,20 @@ def backfill_one_file(original_path, forecast_result_path, output_path,
             fmt = matched_fmt
             is_drift = True
         else:
-            result['skip_reason'] = 'unknown_format'
-            result['message'] = f'{fname}: 無法識別格式 (非 15 格式亦非漂移版)'
-            return result
+            # ── AI fallback: 規則與指紋均無法識別 → 嘗試 AI ──
+            _ai = _get_ai_hints(original_path, file_label or fname)
+            if _ai and _ai.get('identified'):
+                fmt = 'ai_detected'
+                _ai_cache[original_path] = _ai
+                print(f"  [AI] {fname}: AI 識別格式={_ai.get('format_type')}")
+            else:
+                result['skip_reason'] = 'unknown_format'
+                result['message'] = f'{fname}: 無法識別格式 (非 15 格式亦非漂移版)'
+                return result
 
     result['format'] = ('drift:' + fmt) if is_drift else fmt
-    result['format_label'] = FORMAT_LABELS.get(fmt, fmt) + (' (漂移版)' if is_drift else '')
+    _fmt_label = 'AI 辨識' if fmt == 'ai_detected' else FORMAT_LABELS.get(fmt, fmt)
+    result['format_label'] = _fmt_label + (' (漂移版)' if is_drift else '')
 
     # 2. 讀 forecast_result supply lookup
     try:
@@ -384,12 +394,26 @@ def backfill_one_file(original_path, forecast_result_path, output_path,
     # 4. load workbook (保留樣式)
     try:
         wb = openpyxl.load_workbook(original_path)
+        # 確保 Excel 開啟時自動重算 Balance 等公式 (避免顯示舊快取值)
+        try:
+            wb.calculation.fullCalcOnLoad = True
+        except Exception:
+            pass
     except Exception as e:
         result['message'] = f'載入原檔失敗: {e}'
         return result
 
     try:
         sheet_specs = find_valid_sheets(wb)
+        # ── AI fallback: rule-based 找不到合格 sheet ──
+        if not sheet_specs:
+            _ai = _ai_cache.setdefault(original_path,
+                                       _get_ai_hints(original_path, file_label or fname))
+            ai_sheet = _ai.get('forecast_sheet') if _ai else None
+            if ai_sheet and ai_sheet in wb.sheetnames:
+                ai_hr = int(_ai.get('header_row', 1))
+                sheet_specs = [(ai_sheet, ai_hr)]
+                print(f"  [AI] {fname}: AI 找到 sheet={ai_sheet} header_row={ai_hr}")
         if not sheet_specs:
             result['skip_reason'] = 'no_valid_sheet'
             result['message'] = f'{fname}: 找不到含 PARTNO 與日期欄的 sheet'
@@ -401,6 +425,14 @@ def backfill_one_file(original_path, forecast_result_path, output_path,
             ws = wb[sheet_name]
             header_values = _read_header_row(ws, header_row)
             found, headers = scan_headers(header_values)
+
+            # ── AI fallback: partno 找不到 ──
+            if 'partno' not in found:
+                _ai = _ai_cache.setdefault(original_path,
+                                           _get_ai_hints(original_path, file_label or fname))
+                if _ai:
+                    found = _apply_ai_hints_to_found(found, _ai)
+
             if 'partno' not in found:
                 continue
             partno_col = found['partno']
@@ -419,6 +451,16 @@ def backfill_one_file(original_path, forecast_result_path, output_path,
 
             date_start = find_first_date_col(headers, header_values)
             date_col_map = collect_date_cols(date_start, header_values)
+
+            # ── AI fallback: 日期欄為空 ──
+            if not date_col_map:
+                _ai = _ai_cache.setdefault(original_path,
+                                           _get_ai_hints(original_path, file_label or fname))
+                if _ai:
+                    ai_ds = _ai.get('columns', {}).get('date_start')
+                    if ai_ds:
+                        date_col_map = collect_date_cols(int(ai_ds), header_values)
+
             if not date_col_map:
                 continue
 
@@ -429,6 +471,17 @@ def backfill_one_file(original_path, forecast_result_path, output_path,
                 if len(rows_sample) >= 50:
                     break
             marker_col = find_marker_col(rows_sample)
+
+            # ── AI fallback: rule-based 找不到 marker_col ──
+            if marker_col is None:
+                _ai = _ai_cache.setdefault(original_path,
+                                           _get_ai_hints(original_path, file_label or fname))
+                if _ai:
+                    ai_fmt = _ai.get('format_type', 'flat')
+                    ai_mc = _ai.get('columns', {}).get('marker')
+                    if ai_fmt != 'flat' and ai_mc:
+                        marker_col = int(ai_mc)
+                        print(f"    [AI] {fname}: AI marker_col=C{marker_col}")
 
             # 建 col → canonical key mapping (flat 與 multirow 都需要)
             col_to_canonical = _build_canonical_map(date_col_map, fr_date_keys)

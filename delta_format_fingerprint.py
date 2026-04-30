@@ -204,6 +204,29 @@ def match_known_format_fingerprint(filepath, threshold=70):
 
     if best_score >= threshold:
         return best_fmt, best_score
+
+    # ── AI fallback: 指紋分數不足 → 用 AI 確認 layout 類型後重新比對 ──
+    try:
+        from delta_ai_helper import ai_analyze_file
+        ai = ai_analyze_file(filepath)
+        if ai and ai.get('identified'):
+            ai_layout = ai.get('format_type', 'unknown')
+            # 在與 AI layout 一致的格式中找最高分, 門檻降低 25 分
+            constrained_best_fmt, constrained_best_score = None, 0
+            for fmt, ref_fp in FINGERPRINTS.items():
+                if ref_fp.get('layout') != ai_layout:
+                    continue
+                s = _score(new_fp, ref_fp)
+                if s > constrained_best_score:
+                    constrained_best_fmt, constrained_best_score = fmt, s
+            ai_threshold = max(45, threshold - 25)
+            if constrained_best_score >= ai_threshold:
+                print(f"  [AI+FP] {os.path.basename(filepath)}: "
+                      f"指紋={constrained_best_score} AI={ai_layout} → {constrained_best_fmt}")
+                return constrained_best_fmt, constrained_best_score
+    except Exception:
+        pass
+
     return None, best_score
 
 

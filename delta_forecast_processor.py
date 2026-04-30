@@ -336,6 +336,21 @@ def _normalize_date_header(val):
         return 'PASSDUE'
     if s.isdigit() and len(s) == 8:
         return s
+    # 4-digit MMDD (EIBG/Lydia 格式: '0427', '0504' → '20260427')
+    if s.isdigit() and len(s) == 4:
+        try:
+            mm, dd = int(s[:2]), int(s[2:])
+            if 1 <= mm <= 12 and 1 <= dd <= 31:
+                yr = datetime.today().year
+                try:
+                    cand = datetime(yr, mm, dd)
+                    if (datetime.today() - cand).days > 180:  # 超過半年前 → 下一年
+                        yr += 1
+                except ValueError:
+                    pass
+                return f'{yr:04d}{mm:02d}{dd:02d}'
+        except ValueError:
+            pass
     # MM/DD/YY 或 MM/DD/YYYY (e.g. '03/30/26' → '20260330')
     if '/' in s and ' ' not in s:
         parts = s.split('/')

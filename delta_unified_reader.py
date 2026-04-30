@@ -68,6 +68,8 @@ DATE_PAT_8DIGIT = re.compile(r'^\s*(\d{8})\s*$')
 DATE_PAT_HYPHEN = re.compile(r'^\s*(\d{4})[-/](\d{1,2})[-/](\d{1,2})\s*$')
 DATE_PAT_MDY = re.compile(r'^\s*(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\s*$')  # MM/DD/YY 或 MM/DD/YYYY
 DATE_PAT_YEAR_MONTH = re.compile(r'^\s*(\d{4})[-/](JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*$')
+# 4-digit MMDD (EIBG/Lydia 格式: '0427', '0504' ...)
+DATE_PAT_MMDD = re.compile(r'^\s*(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\s*$')
 MONTH_NAMES = {'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'}
 
 
@@ -88,6 +90,8 @@ def is_date_header(value):
     if DATE_PAT_YEAR_MONTH.match(s):
         return True
     if s in MONTH_NAMES:
+        return True
+    if DATE_PAT_MMDD.match(s):
         return True
     if 'PASSDUE' in s or 'PAST DUE' in s or 'PAST_DUE' in s or 'PASTDUE' in s:
         return True
@@ -201,6 +205,17 @@ def collect_date_cols(start_col, header_values):
             result[c] = DATE_PAT_YEAR_MONTH.match(s).group(2)
         elif s in MONTH_NAMES:
             result[c] = s
+        elif DATE_PAT_MMDD.match(s):
+            m_obj = DATE_PAT_MMDD.match(s)
+            mm_d, dd_d = int(m_obj.group(1)), int(m_obj.group(2))
+            yr = datetime.today().year
+            try:
+                cand = datetime(yr, mm_d, dd_d)
+                if (datetime.today() - cand).days > 180:
+                    yr += 1
+            except ValueError:
+                pass
+            result[c] = f'{yr:04d}{mm_d:02d}{dd_d:02d}'
         elif 'PASSDUE' in s or 'PAST DUE' in s or 'PAST_DUE' in s or 'PASTDUE' in s:
             result[c] = 'PASSDUE'
     return result
@@ -346,16 +361,55 @@ def _match_plant_in_filename(filepath, plant_codes):
     return matched[0] if matched else None
 
 
+# ============ AI 補強 (lazy import 避免循環依賴) ============
+
+def _get_ai_hints(filepath, file_label=None):
+    """取得 AI 欄位 hints (lazy import)，失敗時回傳空 dict。"""
+    try:
+        from delta_ai_helper import ai_analyze_file
+        result = ai_analyze_file(filepath, file_label)
+        if result and result.get('identified'):
+            return result
+    except Exception:
+        pass
+    return {}
+
+
+def _apply_ai_hints_to_found(found, ai_result):
+    """用 AI 結果補強 rule-based 找到的欄位，只補缺漏的部份。"""
+    if not ai_result:
+        return found
+    cols = ai_result.get('columns', {})
+    # 欄位名稱對照 (unified_reader field → ai json key)
+    mapping = {
+        'partno': 'partno',
+        'plant': 'plant',
+        'vendor_part': 'vendor',
+        'stock': 'stock',
+        'on_way': 'on_way',
+    }
+    for field, ai_key in mapping.items():
+        if field not in found:
+            v = cols.get(ai_key)
+            if v is not None:
+                found[field] = int(v)
+                print(f"    [AI] 補強欄位 {field}=C{v}")
+    return found
+
+
 # ============ 主入口 ============
-def read_buyer_file(filepath, plant_codes=None, date_cols=None, conversions=None):
+def read_buyer_file(filepath, plant_codes=None, date_cols=None, conversions=None,
+                    file_label=None):
     """
     讀取 Buyer Forecast 檔案，回傳統一格式資料。
+    Rule-based 欄位偵測失敗時自動呼叫 AI fallback。
 
     Args:
         filepath: Buyer Forecast .xlsx 路徑
         plant_codes: mapping 表 PLANT 代碼清單 (用於檔內無 PLANT 欄時 fallback 檔名比對)
         date_cols: 主日期清單 (set/list)，若給定，只保留此清單內 date
         conversions: 日期轉換表 {raw: target 或 None}
+        file_label: 顯示用的原始檔名 (app.py 傳入，用於 AI 分析時辨識)
 
     Returns:
         list of dict, 每個 dict 含 buyer/plant/part_no/vendor_part/stock/on_way/
@@ -366,15 +420,34 @@ def read_buyer_file(filepath, plant_codes=None, date_cols=None, conversions=None
     """
     valid_keys = set(date_cols) if date_cols is not None else None
     fname = os.path.basename(filepath)
+    label = file_label or fname
     wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
 
     sheet_specs = find_valid_sheets(wb)
+
+    # ── AI fallback: rule-based 找不到合格 sheet ──
     if not sheet_specs:
         wb.close()
-        raise ValueError(f'{fname}: 找不到含 PARTNO 與日期欄的 sheet')
+        ai_result = _get_ai_hints(filepath, label)
+        ai_sheet = ai_result.get('forecast_sheet') if ai_result else None
+        if ai_sheet:
+            print(f"  [AI] 使用 AI 偵測的 sheet: {ai_sheet}")
+            try:
+                wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+                if ai_sheet in wb.sheetnames:
+                    ai_hr = int(ai_result.get('header_row', 1))
+                    sheet_specs = [(ai_sheet, ai_hr)]
+                else:
+                    wb.close()
+                    raise ValueError(f'{fname}: AI 指定的 sheet "{ai_sheet}" 不存在')
+            except Exception as e:
+                raise ValueError(f'{fname}: 找不到含 PARTNO 與日期欄的 sheet: {e}')
+        else:
+            raise ValueError(f'{fname}: 找不到含 PARTNO 與日期欄的 sheet')
 
     buyer_label = os.path.splitext(fname)[0]
     all_results = []
+    ai_result_cache = {}  # 避免同一檔案多次呼叫 AI
 
     for sheet_name, header_row_idx in sheet_specs:
         ws = wb[sheet_name]
@@ -383,7 +456,20 @@ def read_buyer_file(filepath, plant_codes=None, date_cols=None, conversions=None
         date_start = find_first_date_col(headers, header_values)
         date_col_map = collect_date_cols(date_start, header_values)
 
-        if not date_col_map:
+        # ── AI fallback: partno 找不到或日期欄為空 ──
+        if 'partno' not in found or not date_col_map:
+            if filepath not in ai_result_cache:
+                ai_result_cache[filepath] = _get_ai_hints(filepath, label)
+            ai_result = ai_result_cache[filepath]
+            if ai_result:
+                found = _apply_ai_hints_to_found(found, ai_result)
+                # 用 AI 的 date_start 重算日期欄
+                if not date_col_map:
+                    ai_ds = ai_result.get('columns', {}).get('date_start')
+                    if ai_ds:
+                        date_col_map = collect_date_cols(int(ai_ds), header_values)
+
+        if 'partno' not in found or not date_col_map:
             continue
 
         data_start_row = header_row_idx + 1
@@ -397,6 +483,18 @@ def read_buyer_file(filepath, plant_codes=None, date_cols=None, conversions=None
             if cnt >= 50:
                 break
         marker_col = find_marker_col(rows_sample)
+
+        # ── AI fallback: rule-based 找不到 marker_col ──
+        if marker_col is None:
+            if filepath not in ai_result_cache:
+                ai_result_cache[filepath] = _get_ai_hints(filepath, label)
+            ai_result = ai_result_cache[filepath]
+            if ai_result:
+                ai_fmt = ai_result.get('format_type', 'flat')
+                ai_mc = ai_result.get('columns', {}).get('marker')
+                if ai_fmt != 'flat' and ai_mc:
+                    marker_col = int(ai_mc)
+                    print(f"    [AI] 使用 AI marker_col=C{marker_col} (format={ai_fmt})")
 
         # 檔名 PLANT fallback (適用於檔內無 PLANT col 的單 PLANT 檔)
         filename_plant = None
